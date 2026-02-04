@@ -1,0 +1,580 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
+
+export default function Dashboard({ onLogout }) {
+  const [sessions, setSessions] = useState([])
+  const [instructors, setInstructors] = useState([])
+  const [selectedSessionId, setSelectedSessionId] = useState(null)
+  const [currentTab, setCurrentTab] = useState('dashboard')
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [aiAnalysis, setAiAnalysis] = useState(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [memos, setMemos] = useState([])
+  const [showMemoModal, setShowMemoModal] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [addType, setAddType] = useState('instructor')
+  const [newMemo, setNewMemo] = useState('')
+  const [youtubeLinks, setYoutubeLinks] = useState([])
+  const [purchaseTimeline, setPurchaseTimeline] = useState([])
+  const [sheetData, setSheetData] = useState(null)
+  const [showYoutubeModal, setShowYoutubeModal] = useState(false)
+  const [newYoutube, setNewYoutube] = useState({ channel_name: '', url: '', views: '', conversions: '' })
+  const [newInstructor, setNewInstructor] = useState('')
+  const [newSession, setNewSession] = useState({
+    instructor_id: '',
+    session_name: '',
+    topic: '',
+    free_class_date: ''
+  })
+
+  useEffect(() => {
+    loadSessions()
+    loadInstructors()
+  }, [])
+
+  useEffect(() => {
+    if (selectedSessionId) {
+      loadMemos()
+      loadYoutubeLinks()
+      loadPurchaseTimeline()
+      const session = sessions.find(s => s.id === selectedSessionId)
+      if (session) {
+        loadSheetData(session.instructors?.name, session.session_name).then(data => {
+          if (data) setSheetData(data)
+          else setSheetData(null)
+        })
+      }
+    }
+  }, [selectedSessionId, sessions])
+
+  const loadInstructors = async () => {
+    const { data } = await supabase.from('instructors').select('*').order('name')
+    if (data) setInstructors(data)
+  }
+
+  const loadSessions = async () => {
+    const { data } = await supabase
+      .from('sessions')
+      .select('*, instructors (name)')
+      .order('free_class_date', { ascending: false })
+    if (data && data.length > 0) {
+      setSessions(data)
+      setSelectedSessionId(data[0].id)
+    }
+    setLoading(false)
+  }
+
+  const loadSheetData = async (instructorName, sessionName) => {
+    const name = `${instructorName} ${sessionName}`
+    try {
+      const response = await fetch(`/api/sheets?name=${encodeURIComponent(name)}`)
+      const data = await response.json()
+      if (!data.error) return data
+    } catch (error) {
+      console.error('시트 데이터 로드 실패:', error)
+    }
+    return null
+  }
+
+  const loadMemos = async () => {
+    const { data } = await supabase.from('memos').select('*').eq('session_id', selectedSessionId).order('created_at', { ascending: false })
+    if (data) setMemos(data)
+  }
+
+  const loadYoutubeLinks = async () => {
+    const { data } = await supabase.from('youtube_links').select('*').eq('session_id', selectedSessionId)
+    if (data) setYoutubeLinks(data)
+  }
+
+  const loadPurchaseTimeline = async () => {
+    const { data } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
+    if (data) setPurchaseTimeline(data)
+  }
+
+  const addInstructor = async () => {
+    if (!newInstructor.trim()) return
+    const { error } = await supabase.from('instructors').insert({ name: newInstructor })
+    if (!error) {
+      setNewInstructor('')
+      setShowAddModal(false)
+      loadInstructors()
+    }
+  }
+
+  const addSession = async () => {
+    if (!newSession.instructor_id || !newSession.session_name) return
+    const { error } = await supabase.from('sessions').insert({
+      instructor_id: newSession.instructor_id,
+      session_name: newSession.session_name,
+      topic: newSession.topic,
+      free_class_date: newSession.free_class_date || null
+    })
+    if (!error) {
+      setNewSession({ instructor_id: '', session_name: '', topic: '', free_class_date: '' })
+      setShowAddModal(false)
+      loadSessions()
+    }
+  }
+
+  const deleteInstructor = async (id) => {
+    if (!confirm('이 강사를 삭제하시겠습니까? 관련 기수도 모두 삭제됩니다.')) return
+    await supabase.from('sessions').delete().eq('instructor_id', id)
+    await supabase.from('instructors').delete().eq('id', id)
+    loadInstructors()
+    loadSessions()
+  }
+
+  const deleteSession = async (id) => {
+    if (!confirm('이 기수를 삭제하시겠습니까?')) return
+    await supabase.from('sessions').delete().eq('id', id)
+    loadSessions()
+  }
+
+  const deleteYoutube = async (id) => {
+    if (!confirm('이 유튜브 링크를 삭제하시겠습니까?')) return
+    await supabase.from('youtube_links').delete().eq('id', id)
+    loadYoutubeLinks()
+  }
+
+  const saveYoutube = async () => {
+    if (!newYoutube.channel_name) return
+    const { error } = await supabase.from('youtube_links').insert({
+      session_id: selectedSessionId,
+      channel_name: newYoutube.channel_name,
+      url: newYoutube.url,
+      views: parseInt(newYoutube.views) || 0,
+      conversions: parseInt(newYoutube.conversions) || 0
+    })
+    if (!error) {
+      setNewYoutube({ channel_name: '', url: '', views: '', conversions: '' })
+      setShowYoutubeModal(false)
+      loadYoutubeLinks()
+    }
+  }
+
+  const saveMemo = async () => {
+    if (!newMemo.trim()) return
+    const { error } = await supabase.from('memos').insert({
+      session_id: selectedSessionId,
+      content: newMemo,
+      memo_type: 'text',
+      memo_date: new Date().toISOString().split('T')[0]
+    })
+    if (!error) {
+      setNewMemo('')
+      setShowMemoModal(false)
+      loadMemos()
+    }
+  }
+
+  const runAiAnalysis = async () => {
+    setAnalyzing(true)
+    const session = currentSession
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionData: {
+            instructorName: session.instructors?.name,
+            sessionName: session.session_name,
+            topic: session.topic,
+            revenue: session.revenue,
+            operatingProfit: session.operating_profit,
+            profitMargin: session.profit_margin,
+            adSpend: session.ad_spend,
+            kakaoRoomDB: session.kakao_room_db,
+            conversionCost: session.conversion_cost,
+            liveViewers: session.live_viewers,
+            totalPurchases: session.total_purchases
+          },
+          memos: memos
+        })
+      })
+      const data = await response.json()
+      if (data.error) alert('AI 분석 실패: ' + data.error)
+      else setAiAnalysis(data)
+    } catch (error) {
+      console.error('AI 분석 오류:', error)
+      alert('AI 분석 중 오류가 발생했습니다.')
+    }
+    setAnalyzing(false)
+  }
+
+  const currentSession = sessions.find(s => s.id === selectedSessionId) || {}
+  const purchaseConversionRate = currentSession.live_viewers > 0
+    ? ((currentSession.total_purchases / currentSession.live_viewers) * 100).toFixed(2)
+    : 0
+
+  const formatNumber = (num) => {
+    if (!num) return '0'
+    return num.toLocaleString()
+  }
+
+  const formatMoney = (num) => {
+    if (!num) return '0'
+    if (num >= 100000000) return (num / 100000000).toFixed(2) + '억원'
+    return Math.round(num / 10000).toLocaleString() + '만원'
+  }
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p>데이터 로딩 중...</p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex' }}>
+      {/* 사이드바 */}
+      <div style={{ width: '240px', background: 'rgba(0,0,0,0.3)', borderRight: '1px solid rgba(255,255,255,0.1)', padding: '20px 0', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '0 20px', marginBottom: '32px' }}>
+          <h1 style={{ fontSize: '18px', fontWeight: '700' }}>📊 강의 통합 관리</h1>
+        </div>
+        <div style={{ flex: 1 }}>
+          <button onClick={() => setCurrentTab('dashboard')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'dashboard' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            📈 대시보드
+          </button>
+          <button onClick={() => setCurrentTab('detail')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'detail' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            📝 상세 정보
+          </button>
+          <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '16px 20px' }} />
+          <button onClick={() => { setAddType('instructor'); setShowAddModal(true); }} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            ➕ 강사 추가
+          </button>
+          <button onClick={() => { setAddType('session'); setShowAddModal(true); }} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            ➕ 기수 추가
+          </button>
+          <button onClick={() => { setAddType('delete'); setShowAddModal(true); }} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#f87171', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            🗑️ 강사/기수 삭제
+          </button>
+        </div>
+        <div style={{ padding: '0 20px' }}>
+          <button onClick={onLogout} style={{ width: '100%', padding: '12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '13px' }}>
+            로그아웃
+          </button>
+        </div>
+      </div>
+
+      {/* 메인 컨텐츠 */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
+          {/* 드롭다운 */}
+          <div style={{ marginBottom: '24px', position: 'relative' }}>
+            <button onClick={() => setDropdownOpen(!dropdownOpen)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '12px', padding: '14px 20px', color: '#fff', fontSize: '16px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', minWidth: '320px' }}>
+              <span style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', padding: '6px 12px', borderRadius: '6px', fontSize: '14px' }}>
+                {currentSession.instructors?.name} {currentSession.session_name}
+              </span>
+              <span style={{ color: '#94a3b8' }}>{currentSession.topic}</span>
+              <span style={{ color: '#64748b', fontSize: '13px', marginLeft: 'auto' }}>{currentSession.free_class_date}</span>
+              <span style={{ color: '#94a3b8' }}>▼</span>
+            </button>
+            {dropdownOpen && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '8px', background: '#1e1e2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '8px', minWidth: '320px', zIndex: 100, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
+                {sessions.map(session => (
+                  <button key={session.id} onClick={() => { setSelectedSessionId(session.id); setDropdownOpen(false); setAiAnalysis(null); }} style={{ width: '100%', padding: '12px 14px', background: session.id === selectedSessionId ? 'rgba(99,102,241,0.2)' : 'transparent', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'left', marginBottom: '4px' }}>
+                    <span style={{ background: session.id === selectedSessionId ? 'linear-gradient(135deg, #6366f1, #a855f7)' : 'rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: '6px', fontSize: '13px', fontWeight: '600' }}>
+                      {session.instructors?.name} {session.session_name}
+                    </span>
+                    <span style={{ color: '#94a3b8', fontSize: '14px' }}>{session.topic}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 대시보드 탭 */}
+          {currentTab === 'dashboard' && (
+            <>
+              {/* 지표 카드 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>💰 총 매출</div>
+                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
+                    {sheetData?.revenue ? formatMoney(sheetData.revenue) : (currentSession.revenue > 0 ? formatMoney(currentSession.revenue) : '진행중')}
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>🎯 구매전환율</div>
+                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
+                    {sheetData?.purchaseConversionRate ? `${parseFloat(sheetData.purchaseConversionRate).toFixed(2)}%` : `${purchaseConversionRate}%`}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>시청자 {formatNumber(currentSession.live_viewers)}명 → 결제 {currentSession.total_purchases}명</div>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3C6.5 3 2 6.58 2 11C2 13.13 3.05 15.07 4.75 16.5C4.75 17.1 4.33 18.67 2 21C4.37 20.89 6.64 20 8.47 18.5C9.61 18.83 10.81 19 12 19C17.5 19 22 15.42 22 11C22 6.58 17.5 3 12 3Z" fill="#FAE100"/></svg>
+                    카톡방 DB
+                  </div>
+                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
+                    {sheetData?.kakaoRoomDb ? formatNumber(sheetData.kakaoRoomDb) : formatNumber(currentSession.kakao_room_db)}명
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>📈 광고 전환비용</div>
+                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
+                    {sheetData?.conversionCost ? formatNumber(sheetData.conversionCost) : formatNumber(currentSession.conversion_cost)}원
+                  </div>
+                </div>
+              </div>
+
+              {/* 2단 레이아웃 */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
+                  {purchaseTimeline.length > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', height: '200px', padding: '20px 0' }}>
+                      {purchaseTimeline.map((item, i) => {
+                        const maxPurchases = Math.max(...purchaseTimeline.map(p => p.purchases))
+                        const height = maxPurchases > 0 ? (item.purchases / maxPurchases) * 160 : 0
+                        return (
+                          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                            <div style={{ width: '100%', maxWidth: '40px', height: `${height}px`, background: 'linear-gradient(180deg, #6366f1, #8b5cf6)', borderRadius: '4px 4px 0 0' }} />
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px' }}>{item.hour}h</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>데이터 없음</div>
+                  )}
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>💵 영업이익 현황</div>
+                  {currentSession.revenue > 0 ? (
+                    <div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                        <div style={{ background: 'rgba(16,185,129,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: '1px solid rgba(16,185,129,0.2)' }}>
+                          <div style={{ fontSize: '13px', color: '#10b981', marginBottom: '8px' }}>최종 영업이익</div>
+                          <div style={{ fontSize: '24px', fontWeight: '700', color: '#10b981' }}>{formatMoney(currentSession.operating_profit)}</div>
+                        </div>
+                        <div style={{ background: 'rgba(99,102,241,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: '1px solid rgba(99,102,241,0.2)' }}>
+                          <div style={{ fontSize: '13px', color: '#818cf8', marginBottom: '8px' }}>영업이익률</div>
+                          <div style={{ fontSize: '24px', fontWeight: '700', color: '#818cf8' }}>{currentSession.profit_margin}%</div>
+                        </div>
+                      </div>
+                      <div style={{ height: '24px', background: 'rgba(255,255,255,0.1)', borderRadius: '12px', overflow: 'hidden' }}>
+                        <div style={{ width: `${currentSession.profit_margin}%`, height: '100%', background: 'linear-gradient(90deg, #10b981, #059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '600' }}>
+                          이익 {currentSession.profit_margin}%
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>정산 데이터 없음</div>
+                  )}
+                </div>
+              </div>
+
+              {/* 유튜브 성과 */}
+              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <div style={{ fontSize: '15px', fontWeight: '600' }}>📺 유튜브 출연 성과</div>
+                  <button onClick={() => setShowYoutubeModal(true)} style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: '8px', padding: '8px 14px', color: '#fb7185', fontSize: '13px', cursor: 'pointer' }}>+ 추가</button>
+                </div>
+                {youtubeLinks.length > 0 ? (
+                  <div>
+                    {youtubeLinks.map((yt, i) => (
+                      <div key={i} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: yt.url ? 'pointer' : 'default' }} onClick={() => yt.url && window.open(yt.url, '_blank')}>
+                          <div style={{ width: '40px', height: '40px', background: 'rgba(244,63,94,0.1)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f43f5e' }}>▶</div>
+                          <div>
+                            <div style={{ fontWeight: '500', fontSize: '14px' }}>{yt.channel_name}</div>
+                            {yt.url && <div style={{ fontSize: '11px', color: '#6366f1' }}>클릭하여 열기</div>}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '24px', textAlign: 'center', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontSize: '18px', fontWeight: '700' }}>{Math.round(yt.views / 1000)}K</div>
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>조회수</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '18px', fontWeight: '700', color: '#10b981' }}>{yt.conversions}</div>
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>전환</div>
+                          </div>
+                          <button onClick={(e) => { e.stopPropagation(); deleteYoutube(yt.id); }} style={{ background: 'rgba(239,68,68,0.1)', border: 'none', borderRadius: '6px', padding: '6px 10px', color: '#f87171', fontSize: '12px', cursor: 'pointer' }}>삭제</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '32px', color: '#64748b' }}>등록된 유튜브 링크가 없습니다</div>
+                )}
+              </div>
+
+              {/* AI 분석 */}
+              <button onClick={runAiAnalysis} disabled={analyzing} style={{ background: analyzing ? '#4c4c6d' : 'linear-gradient(135deg, #ec4899, #f43f5e)', border: 'none', borderRadius: '12px', padding: '14px 28px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: analyzing ? 'wait' : 'pointer', marginBottom: '24px' }}>
+                {analyzing ? '✨ AI 분석 중...' : '✨ AI 분석 실행'}
+              </button>
+
+              {aiAnalysis && (
+                <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(99,102,241,0.3)' }}>
+                  <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '16px' }}>✨ AI 분석 결과</div>
+                  <p style={{ color: '#cbd5e1', marginBottom: '16px', lineHeight: 1.6 }}>{aiAnalysis.summary}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                    <div style={{ background: 'rgba(16,185,129,0.1)', borderRadius: '12px', padding: '16px' }}>
+                      <div style={{ color: '#10b981', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>💪 강점</div>
+                      {aiAnalysis.strengths.map((s, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {s}</div>))}
+                    </div>
+                    <div style={{ background: 'rgba(245,158,11,0.1)', borderRadius: '12px', padding: '16px' }}>
+                      <div style={{ color: '#f59e0b', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>⚠️ 개선점</div>
+                      {aiAnalysis.weaknesses.map((w, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {w}</div>))}
+                    </div>
+                  </div>
+                  <div style={{ background: 'rgba(99,102,241,0.1)', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ color: '#818cf8', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>📋 추천 액션</div>
+                    {aiAnalysis.recommendations.map((r, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {r}</div>))}
+                  </div>
+                  <div style={{ marginTop: '16px', padding: '12px 16px', background: 'rgba(236,72,153,0.15)', borderRadius: '10px', borderLeft: '3px solid #ec4899' }}>
+                    <span style={{ color: '#f472b6', fontWeight: '600' }}>💡 핵심 인사이트:</span>
+                    <span style={{ color: '#e2e8f0', marginLeft: '8px' }}>{aiAnalysis.keyInsight}</span>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 상세 정보 탭 */}
+          {currentTab === 'detail' && (
+            <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <div style={{ fontSize: '18px', fontWeight: '600' }}>📝 미팅 메모 & 기획안</div>
+                <button onClick={() => setShowMemoModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}>자료 업로드</button>
+              </div>
+              {memos.length > 0 ? (
+                <div>
+                  {memos.map((memo) => (
+                    <div key={memo.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '20px', marginBottom: '12px' }}>
+                      <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>{memo.memo_date}</div>
+                      <div style={{ color: '#e2e8f0', fontSize: '15px', lineHeight: 1.7 }}>{memo.content}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>등록된 메모가 없습니다</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 메모 모달 */}
+      {showMemoModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '32px', width: '500px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>메모 작성</h3>
+              <button onClick={() => setShowMemoModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>×</button>
+            </div>
+            <textarea value={newMemo} onChange={(e) => setNewMemo(e.target.value)} placeholder="미팅 내용을 입력하세요..." style={{ width: '100%', height: '150px', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px', resize: 'none', marginBottom: '16px' }} />
+            <button onClick={saveMemo} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>저장</button>
+          </div>
+        </div>
+      )}
+
+      {/* 강사/기수 모달 */}
+      {showAddModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '32px', width: '500px', border: '1px solid rgba(255,255,255,0.1)', maxHeight: '80vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>{addType === 'instructor' ? '강사 추가' : addType === 'session' ? '기수 추가' : '강사/기수 삭제'}</h3>
+              <button onClick={() => setShowAddModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>×</button>
+            </div>
+
+            {addType === 'instructor' && (
+              <>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>강사명</label>
+                  <input type="text" value={newInstructor} onChange={(e) => setNewInstructor(e.target.value)} placeholder="강사 이름 입력" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+                </div>
+                <button onClick={addInstructor} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>추가</button>
+              </>
+            )}
+
+            {addType === 'session' && (
+              <>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>강사 선택</label>
+                  <select value={newSession.instructor_id} onChange={(e) => setNewSession({...newSession, instructor_id: e.target.value})} style={{ width: '100%', padding: '14px', background: '#1e1e2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }}>
+                    <option value="" style={{ background: '#1e1e2e', color: '#fff' }}>강사 선택</option>
+                    {instructors.map(inst => (<option key={inst.id} value={inst.id} style={{ background: '#1e1e2e', color: '#fff' }}>{inst.name}</option>))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>기수명</label>
+                  <input type="text" value={newSession.session_name} onChange={(e) => setNewSession({...newSession, session_name: e.target.value})} placeholder="예: 1기, 2기" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+                </div>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>주제</label>
+                  <input type="text" value={newSession.topic} onChange={(e) => setNewSession({...newSession, topic: e.target.value})} placeholder="강의 주제" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+                </div>
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>무료특강일</label>
+                  <input type="date" value={newSession.free_class_date} onChange={(e) => setNewSession({...newSession, free_class_date: e.target.value})} style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+                </div>
+                <button onClick={addSession} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>추가</button>
+              </>
+            )}
+
+            {addType === 'delete' && (
+              <>
+                <div style={{ marginBottom: '24px' }}>
+                  <h4 style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '12px' }}>강사 삭제</h4>
+                  {instructors.map(inst => (
+                    <div key={inst.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', marginBottom: '8px' }}>
+                      <span>{inst.name}</span>
+                      <button onClick={() => deleteInstructor(inst.id)} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', padding: '6px 12px', color: '#f87171', fontSize: '12px', cursor: 'pointer' }}>삭제</button>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <h4 style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '12px' }}>기수 삭제</h4>
+                  {sessions.map(sess => (
+                    <div key={sess.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', marginBottom: '8px' }}>
+                      <span>{sess.instructors?.name} {sess.session_name}</span>
+                      <button onClick={() => deleteSession(sess.id)} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px', padding: '6px 12px', color: '#f87171', fontSize: '12px', cursor: 'pointer' }}>삭제</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 유튜브 모달 */}
+      {showYoutubeModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '32px', width: '500px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>유튜브 링크 추가</h3>
+              <button onClick={() => setShowYoutubeModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>×</button>
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>채널명</label>
+              <input type="text" value={newYoutube.channel_name} onChange={(e) => setNewYoutube({...newYoutube, channel_name: e.target.value})} placeholder="채널 이름" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>URL</label>
+              <input type="text" value={newYoutube.url} onChange={(e) => setNewYoutube({...newYoutube, url: e.target.value})} placeholder="https://youtube.com/..." style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>조회수</label>
+                <input type="number" value={newYoutube.views} onChange={(e) => setNewYoutube({...newYoutube, views: e.target.value})} placeholder="0" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>전환수</label>
+                <input type="number" value={newYoutube.conversions} onChange={(e) => setNewYoutube({...newYoutube, conversions: e.target.value})} placeholder="0" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+              </div>
+            </div>
+            <button onClick={saveYoutube} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #f43f5e, #ec4899)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>추가</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
