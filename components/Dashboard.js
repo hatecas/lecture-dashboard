@@ -433,88 +433,62 @@ export default function Dashboard({ onLogout }) {
           {/* 대시보드 탭 */}
           {currentTab === 'dashboard' && (
             <>
-              {/* 지표 카드 */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>💰 총 매출</div>
-                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
-                    {sheetData?.revenue ? formatMoney(sheetData.revenue) : (currentSession.revenue > 0 ? formatMoney(currentSession.revenue) : '진행중')}
-                  </div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>🎯 구매전환율</div>
-                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
-                    {sheetData?.purchaseConversionRate ? `${parseFloat(sheetData.purchaseConversionRate).toFixed(2)}%` : `${purchaseConversionRate}%`}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>시청자 {formatNumber(currentSession.live_viewers)}명 → 결제 {currentSession.total_purchases}명</div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3C6.5 3 2 6.58 2 11C2 13.13 3.05 15.07 4.75 16.5C4.75 17.1 4.33 18.67 2 21C4.37 20.89 6.64 20 8.47 18.5C9.61 18.83 10.81 19 12 19C17.5 19 22 15.42 22 11C22 6.58 17.5 3 12 3Z" fill="#FAE100"/></svg>
-                    카톡방 DB
-                  </div>
-                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
-                    {sheetData?.kakaoRoomDb ? formatNumber(sheetData.kakaoRoomDb) : formatNumber(currentSession.kakao_room_db)}명
-                  </div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>📈 광고 전환비용</div>
-                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
-                    {sheetData?.conversionCost ? formatNumber(sheetData.conversionCost) : formatNumber(currentSession.conversion_cost)}원
-                  </div>
-                </div>
-              </div>
-
-              {/* 2단 레이아웃 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
-                  {purchaseTimeline.length > 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', height: '200px', padding: '20px 0' }}>
-                      {purchaseTimeline.map((item, i) => {
-                        const maxPurchases = Math.max(...purchaseTimeline.map(p => p.purchases))
-                        const height = maxPurchases > 0 ? (item.purchases / maxPurchases) * 160 : 0
-                        return (
-                          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                            <div style={{ width: '100%', maxWidth: '40px', height: `${height}px`, background: 'linear-gradient(180deg, #6366f1, #8b5cf6)', borderRadius: '4px 4px 0 0' }} />
-                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px' }}>{item.hour}h</div>
-                          </div>
-                        )
-                      })}
+              {/* 종합 데이터 */}
+              {sheetData ? (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
+                  <div style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>📊 {currentSession.instructors?.name} {currentSession.session_name} 종합 데이터</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>총 매출</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.revenue)}</div>
                     </div>
-                  ) : (
-                    <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>데이터 없음</div>
-                  )}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>영업이익</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700', color: sheetData.operatingProfit >= 0 ? '#10b981' : '#f87171' }}>{formatMoney(sheetData.operatingProfit)}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>영업이익률</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700', color: '#818cf8' }}>{sheetData.profitMargin}%</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>광고비</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.adSpend)}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>카톡방 DB / 동시접속</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.kakaoRoomDb)}명 / {formatNumber(sheetData.liveViewers)}명</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>결제 건수 / 전환율</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.totalPurchases)}건 / {(sheetData.purchaseConversionRate * 100).toFixed(1)}%</div>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>💵 영업이익 현황</div>
-                  {(sheetData?.revenue || currentSession.revenue > 0) ? (() => {
-                    const profit = sheetData?.operatingProfit || currentSession.operating_profit || 0
-                    const margin = sheetData?.profitMargin ?? currentSession.profit_margin ?? 0
-                    const isPositive = profit >= 0
-                    return (
-                      <div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-                          <div style={{ background: isPositive ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: `1px solid ${isPositive ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}` }}>
-                            <div style={{ fontSize: '13px', color: isPositive ? '#10b981' : '#f87171', marginBottom: '8px' }}>최종 영업이익</div>
-                            <div style={{ fontSize: '24px', fontWeight: '700', color: isPositive ? '#10b981' : '#f87171' }}>{formatMoney(profit)}</div>
-                          </div>
-                          <div style={{ background: 'rgba(99,102,241,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: '1px solid rgba(99,102,241,0.2)' }}>
-                            <div style={{ fontSize: '13px', color: '#818cf8', marginBottom: '8px' }}>영업이익률</div>
-                            <div style={{ fontSize: '24px', fontWeight: '700', color: '#818cf8' }}>{margin}%</div>
-                          </div>
-                        </div>
-                        <div style={{ height: '24px', background: 'rgba(255,255,255,0.1)', borderRadius: '12px', overflow: 'hidden' }}>
-                          <div style={{ width: `${Math.min(Math.max(margin, 0), 100)}%`, height: '100%', background: isPositive ? 'linear-gradient(90deg, #10b981, #059669)' : 'linear-gradient(90deg, #ef4444, #dc2626)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '600' }}>
-                            {margin > 5 ? `이익 ${margin}%` : ''}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })() : (
-                    <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>정산 데이터 없음</div>
-                  )}
+              ) : (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '40px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px', textAlign: 'center', color: '#64748b' }}>
+                  시트 데이터 로딩 중...
                 </div>
+              )}
+
+              {/* 시간별 구매 추이 */}
+              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
+                <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
+                {purchaseTimeline.length > 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', height: '200px', padding: '20px 0' }}>
+                    {purchaseTimeline.map((item, i) => {
+                      const maxPurchases = Math.max(...purchaseTimeline.map(p => p.purchases))
+                      const height = maxPurchases > 0 ? (item.purchases / maxPurchases) * 160 : 0
+                      return (
+                        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <div style={{ width: '100%', maxWidth: '40px', height: `${height}px`, background: 'linear-gradient(180deg, #6366f1, #8b5cf6)', borderRadius: '4px 4px 0 0' }} />
+                          <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px' }}>{item.hour}h</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>데이터 없음</div>
+                )}
               </div>
 
               {/* 유튜브 성과 */}
@@ -588,44 +562,11 @@ export default function Dashboard({ onLogout }) {
           {/* 상세 정보 탭 */}
           {currentTab === 'detail' && (
             <>
-              {/* 핵심 지표 요약 */}
-              {sheetData && (
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>📊 {currentSession.instructors?.name} {currentSession.session_name} 종합 데이터</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>총 매출</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.revenue)}</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>영업이익</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700', color: sheetData.operatingProfit >= 0 ? '#10b981' : '#f87171' }}>{formatMoney(sheetData.operatingProfit)}</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>영업이익률</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700', color: '#818cf8' }}>{sheetData.profitMargin}%</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>광고비</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.adSpend)}</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>카톡방 DB / 동시접속</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.kakaoRoomDb)}명 / {formatNumber(sheetData.liveViewers)}명</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>결제 건수 / 전환율</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.totalPurchases)}건 / {(sheetData.purchaseConversionRate * 100).toFixed(1)}%</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 미팅 메모 */}
+              {/* 강사 메모 */}
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600' }}>📝 미팅 메모 & 기획안</div>
-                  <button onClick={() => setShowMemoModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}>자료 업로드</button>
+                  <div style={{ fontSize: '18px', fontWeight: '600' }}>📝 강사 메모</div>
+                  <button onClick={() => setShowMemoModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}>메모 추가</button>
                 </div>
                 {memos.length > 0 ? (
                   <div>
@@ -637,7 +578,7 @@ export default function Dashboard({ onLogout }) {
                     ))}
                   </div>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>등록된 메모가 없습니다</div>
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>등록된 강사 메모가 없습니다</div>
                 )}
               </div>
 
@@ -680,10 +621,10 @@ export default function Dashboard({ onLogout }) {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '32px', width: '500px', border: '1px solid rgba(255,255,255,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>메모 작성</h3>
+              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>강사 메모 작성</h3>
               <button onClick={() => setShowMemoModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>×</button>
             </div>
-            <textarea value={newMemo} onChange={(e) => setNewMemo(e.target.value)} placeholder="미팅 내용을 입력하세요..." style={{ width: '100%', height: '150px', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px', resize: 'none', marginBottom: '16px' }} />
+            <textarea value={newMemo} onChange={(e) => setNewMemo(e.target.value)} placeholder="강사 관련 메모를 입력하세요 (미팅 내용, 강의 피드백, 특이사항 등)" style={{ width: '100%', height: '150px', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px', resize: 'none', marginBottom: '16px' }} />
             <button onClick={saveMemo} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>저장</button>
           </div>
         </div>
