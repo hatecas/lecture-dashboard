@@ -21,6 +21,7 @@ export default function Dashboard({ onLogout }) {
   const [purchaseTimeline, setPurchaseTimeline] = useState([])
   const [sheetData, setSheetData] = useState(null)
   const [selectedInstructor, setSelectedInstructor] = useState('')
+  const [showYoutubeModal, setShowYoutubeModal] = useState(false)
   const [newYoutube, setNewYoutube] = useState({ channel_name: '', url: '', views: '', conversions: '' })
   const [newInstructor, setNewInstructor] = useState('')
   const [newSession, setNewSession] = useState({
