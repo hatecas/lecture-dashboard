@@ -68,11 +68,18 @@ export default function Dashboard({ onLogout }) {
     const { data } = await supabase
       .from('sessions')
       .select('*, instructors (name)')
-      .order('free_class_date', { ascending: false })
     if (data && data.length > 0) {
       setSessions(data)
-      setSelectedSessionId(data[0].id)
-      setSelectedInstructor(data[0].instructors?.name || '')
+      // 강사를 ㄱㄴㄷ순으로 정렬 후 첫 번째 강사 선택
+      const sortedInstructorNames = [...new Set(data.map(s => s.instructors?.name))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'))
+      const firstInstructor = sortedInstructorNames[0] || ''
+      setSelectedInstructor(firstInstructor)
+      // 해당 강사의 기수를 1기순으로 정렬 후 첫 번째 기수 선택
+      const getNum = (name) => { const m = name?.match(/(\d+)/); return m ? parseInt(m[1]) : 0 }
+      const firstSession = data
+        .filter(s => s.instructors?.name === firstInstructor)
+        .sort((a, b) => getNum(a.session_name) - getNum(b.session_name))[0]
+      if (firstSession) setSelectedSessionId(firstSession.id)
     }
     setLoading(false)
   }
@@ -100,14 +107,16 @@ export default function Dashboard({ onLogout }) {
       const { data: freshSessions } = await supabase.from('sessions').select('*, instructors (name)')
 
       for (const item of data) {
-        const parts = item.name.split(' ')
+        // 이름에서 연속 공백을 하나로 정규화
+        const normalizedName = item.name.replace(/\s+/g, ' ').trim()
+        const parts = normalizedName.split(' ')
         if (parts.length < 2) continue
 
         const instructorName = parts.slice(0, -1).join(' ')
         const sessionName = parts[parts.length - 1]
 
-        // 강사 중복 체크
-        let instructor = freshInstructors.find(i => i.name === instructorName)
+        // 강사 중복 체크 (공백 정규화하여 비교)
+        let instructor = freshInstructors.find(i => i.name.trim() === instructorName)
         if (!instructor) {
           const { data: newInst } = await supabase
             .from('instructors')
@@ -120,9 +129,9 @@ export default function Dashboard({ onLogout }) {
           } else continue
         }
 
-        // 기수 중복 체크
+        // 기수 중복 체크 (공백 정규화하여 비교)
         const exists = freshSessions.find(
-          s => s.instructor_id === instructor.id && s.session_name === sessionName
+          s => s.instructor_id === instructor.id && s.session_name?.trim() === sessionName
         )
         if (!exists) {
           const { data: newSess } = await supabase.from('sessions').insert({
@@ -277,6 +286,11 @@ export default function Dashboard({ onLogout }) {
     setAnalyzing(false)
   }
 
+  const getSessionNumber = (sessionName) => {
+    const match = sessionName?.match(/(\d+)/)
+    return match ? parseInt(match[1]) : 0
+  }
+
   const currentSession = sessions.find(s => s.id === selectedSessionId) || {}
   const purchaseConversionRate = currentSession.live_viewers > 0
     ? ((currentSession.total_purchases / currentSession.live_viewers) * 100).toFixed(2)
@@ -339,6 +353,7 @@ export default function Dashboard({ onLogout }) {
               onChange={(e) => {
                 setSelectedInstructor(e.target.value)
                 const filtered = sessions.filter(s => s.instructors?.name === e.target.value)
+                  .sort((a, b) => getSessionNumber(a.session_name) - getSessionNumber(b.session_name))
                 if (filtered.length > 0) {
                   setSelectedSessionId(filtered[0].id)
                   setAiAnalysis(null)
@@ -360,7 +375,7 @@ export default function Dashboard({ onLogout }) {
                 backgroundPosition: 'right 16px center'
               }}
             >
-              {[...new Set(sessions.map(s => s.instructors?.name))].filter(Boolean).map(name => (
+              {[...new Set(sessions.map(s => s.instructors?.name))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko')).map(name => (
                 <option key={name} value={name} style={{ background: '#1e1e2e', color: '#fff' }}>{name}</option>
               ))}
             </select>
@@ -388,7 +403,9 @@ export default function Dashboard({ onLogout }) {
                 backgroundPosition: 'right 16px center'
               }}
             >
-              {sessions.filter(s => s.instructors?.name === selectedInstructor).map(session => (
+              {sessions.filter(s => s.instructors?.name === selectedInstructor)
+                .sort((a, b) => getSessionNumber(a.session_name) - getSessionNumber(b.session_name))
+                .map(session => (
                 <option key={session.id} value={session.id} style={{ background: '#1e1e2e', color: '#fff' }}>
                   {session.session_name} {session.free_class_date ? `(${session.free_class_date})` : ''}
                 </option>

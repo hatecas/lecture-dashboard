@@ -38,7 +38,7 @@ export async function GET(request) {
       const freeClassDate = row[1]?.f || null
 
       allData.push({
-        name: rowName.trim(),
+        name: rowName.replace(/\s+/g, ' ').trim(),
         revenue,
         conversionCost: Math.round((gdnCost + metaCost) / 2),
         kakaoRoomDb: kakaoDb,
@@ -49,7 +49,8 @@ export async function GET(request) {
 
     // 특정 이름 조회
     if (name) {
-      const found = allData.find(d => d.name === name.trim())
+      const normalizedName = name.replace(/\s+/g, ' ').trim()
+      const found = allData.find(d => d.name === normalizedName)
       if (found) return NextResponse.json(found)
       return NextResponse.json({ error: '데이터를 찾을 수 없습니다' }, { status: 404 })
     }
