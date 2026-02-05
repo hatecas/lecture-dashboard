@@ -267,7 +267,7 @@ export default function Dashboard({ onLogout }) {
     }
   }
 
-  const runAiAnalysis = async () => {
+  const runAiAnalysis = async (tab = 'dashboard') => {
     setAnalyzing(true)
     const session = currentSession
     try {
@@ -279,16 +279,18 @@ export default function Dashboard({ onLogout }) {
             instructorName: session.instructors?.name,
             sessionName: session.session_name,
             topic: session.topic,
-            revenue: session.revenue,
-            operatingProfit: session.operating_profit,
-            profitMargin: session.profit_margin,
-            adSpend: session.ad_spend,
-            kakaoRoomDB: session.kakao_room_db,
-            conversionCost: session.conversion_cost,
-            liveViewers: session.live_viewers,
-            totalPurchases: session.total_purchases
+            revenue: sheetData?.revenue || session.revenue,
+            operatingProfit: sheetData?.operatingProfit || session.operating_profit,
+            profitMargin: sheetData?.profitMargin ?? session.profit_margin,
+            adSpend: sheetData?.adSpend || session.ad_spend,
+            kakaoRoomDB: sheetData?.kakaoRoomDb || session.kakao_room_db,
+            conversionCost: sheetData?.conversionCost || session.conversion_cost,
+            liveViewers: sheetData?.liveViewers || session.live_viewers,
+            totalPurchases: sheetData?.totalPurchases || session.total_purchases,
+            purchaseConversionRate: sheetData?.purchaseConversionRate || null
           },
-          memos: memos
+          memos: memos,
+          analysisType: tab
         })
       })
       const data = await response.json()
@@ -486,25 +488,30 @@ export default function Dashboard({ onLogout }) {
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>💵 영업이익 현황</div>
-                  {currentSession.revenue > 0 ? (
-                    <div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-                        <div style={{ background: 'rgba(16,185,129,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: '1px solid rgba(16,185,129,0.2)' }}>
-                          <div style={{ fontSize: '13px', color: '#10b981', marginBottom: '8px' }}>최종 영업이익</div>
-                          <div style={{ fontSize: '24px', fontWeight: '700', color: '#10b981' }}>{formatMoney(currentSession.operating_profit)}</div>
+                  {(sheetData?.revenue || currentSession.revenue > 0) ? (() => {
+                    const profit = sheetData?.operatingProfit || currentSession.operating_profit || 0
+                    const margin = sheetData?.profitMargin ?? currentSession.profit_margin ?? 0
+                    const isPositive = profit >= 0
+                    return (
+                      <div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                          <div style={{ background: isPositive ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: `1px solid ${isPositive ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}` }}>
+                            <div style={{ fontSize: '13px', color: isPositive ? '#10b981' : '#f87171', marginBottom: '8px' }}>최종 영업이익</div>
+                            <div style={{ fontSize: '24px', fontWeight: '700', color: isPositive ? '#10b981' : '#f87171' }}>{formatMoney(profit)}</div>
+                          </div>
+                          <div style={{ background: 'rgba(99,102,241,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: '1px solid rgba(99,102,241,0.2)' }}>
+                            <div style={{ fontSize: '13px', color: '#818cf8', marginBottom: '8px' }}>영업이익률</div>
+                            <div style={{ fontSize: '24px', fontWeight: '700', color: '#818cf8' }}>{margin}%</div>
+                          </div>
                         </div>
-                        <div style={{ background: 'rgba(99,102,241,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: '1px solid rgba(99,102,241,0.2)' }}>
-                          <div style={{ fontSize: '13px', color: '#818cf8', marginBottom: '8px' }}>영업이익률</div>
-                          <div style={{ fontSize: '24px', fontWeight: '700', color: '#818cf8' }}>{currentSession.profit_margin}%</div>
+                        <div style={{ height: '24px', background: 'rgba(255,255,255,0.1)', borderRadius: '12px', overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(Math.max(margin, 0), 100)}%`, height: '100%', background: isPositive ? 'linear-gradient(90deg, #10b981, #059669)' : 'linear-gradient(90deg, #ef4444, #dc2626)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '600' }}>
+                            {margin > 5 ? `이익 ${margin}%` : ''}
+                          </div>
                         </div>
                       </div>
-                      <div style={{ height: '24px', background: 'rgba(255,255,255,0.1)', borderRadius: '12px', overflow: 'hidden' }}>
-                        <div style={{ width: `${currentSession.profit_margin}%`, height: '100%', background: 'linear-gradient(90deg, #10b981, #059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '600' }}>
-                          이익 {currentSession.profit_margin}%
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
+                    )
+                  })() : (
                     <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>정산 데이터 없음</div>
                   )}
                 </div>
@@ -580,24 +587,90 @@ export default function Dashboard({ onLogout }) {
 
           {/* 상세 정보 탭 */}
           {currentTab === 'detail' && (
-            <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <div style={{ fontSize: '18px', fontWeight: '600' }}>📝 미팅 메모 & 기획안</div>
-                <button onClick={() => setShowMemoModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}>자료 업로드</button>
-              </div>
-              {memos.length > 0 ? (
-                <div>
-                  {memos.map((memo) => (
-                    <div key={memo.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '20px', marginBottom: '12px' }}>
-                      <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>{memo.memo_date}</div>
-                      <div style={{ color: '#e2e8f0', fontSize: '15px', lineHeight: 1.7 }}>{memo.content}</div>
+            <>
+              {/* 핵심 지표 요약 */}
+              {sheetData && (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
+                  <div style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>📊 {currentSession.instructors?.name} {currentSession.session_name} 종합 데이터</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>총 매출</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.revenue)}</div>
                     </div>
-                  ))}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>영업이익</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700', color: sheetData.operatingProfit >= 0 ? '#10b981' : '#f87171' }}>{formatMoney(sheetData.operatingProfit)}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>영업이익률</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700', color: '#818cf8' }}>{sheetData.profitMargin}%</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>광고비</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.adSpend)}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>카톡방 DB / 동시접속</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.kakaoRoomDb)}명 / {formatNumber(sheetData.liveViewers)}명</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>결제 건수 / 전환율</div>
+                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.totalPurchases)}건 / {(sheetData.purchaseConversionRate * 100).toFixed(1)}%</div>
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>등록된 메모가 없습니다</div>
               )}
-            </div>
+
+              {/* 미팅 메모 */}
+              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <div style={{ fontSize: '18px', fontWeight: '600' }}>📝 미팅 메모 & 기획안</div>
+                  <button onClick={() => setShowMemoModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}>자료 업로드</button>
+                </div>
+                {memos.length > 0 ? (
+                  <div>
+                    {memos.map((memo) => (
+                      <div key={memo.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '20px', marginBottom: '12px' }}>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>{memo.memo_date}</div>
+                        <div style={{ color: '#e2e8f0', fontSize: '15px', lineHeight: 1.7 }}>{memo.content}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>등록된 메모가 없습니다</div>
+                )}
+              </div>
+
+              {/* AI 분석 */}
+              <button onClick={() => runAiAnalysis('detail')} disabled={analyzing} style={{ background: analyzing ? '#4c4c6d' : 'linear-gradient(135deg, #ec4899, #f43f5e)', border: 'none', borderRadius: '12px', padding: '14px 28px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: analyzing ? 'wait' : 'pointer', marginBottom: '24px' }}>
+                {analyzing ? '✨ AI 분석 중...' : '✨ AI 종합 분석 실행'}
+              </button>
+
+              {aiAnalysis && (
+                <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(99,102,241,0.3)' }}>
+                  <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '16px' }}>✨ AI 종합 분석 결과</div>
+                  <p style={{ color: '#cbd5e1', marginBottom: '16px', lineHeight: 1.6 }}>{aiAnalysis.summary}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                    <div style={{ background: 'rgba(16,185,129,0.1)', borderRadius: '12px', padding: '16px' }}>
+                      <div style={{ color: '#10b981', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>💪 강점</div>
+                      {aiAnalysis.strengths?.map((s, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {s}</div>))}
+                    </div>
+                    <div style={{ background: 'rgba(245,158,11,0.1)', borderRadius: '12px', padding: '16px' }}>
+                      <div style={{ color: '#f59e0b', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>⚠️ 개선점</div>
+                      {aiAnalysis.weaknesses?.map((w, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {w}</div>))}
+                    </div>
+                  </div>
+                  <div style={{ background: 'rgba(99,102,241,0.1)', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ color: '#818cf8', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>📋 추천 액션</div>
+                    {aiAnalysis.recommendations?.map((r, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {r}</div>))}
+                  </div>
+                  <div style={{ marginTop: '16px', padding: '12px 16px', background: 'rgba(236,72,153,0.15)', borderRadius: '10px', borderLeft: '3px solid #ec4899' }}>
+                    <span style={{ color: '#f472b6', fontWeight: '600' }}>💡 핵심 인사이트:</span>
+                    <span style={{ color: '#e2e8f0', marginLeft: '8px' }}>{aiAnalysis.keyInsight}</span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

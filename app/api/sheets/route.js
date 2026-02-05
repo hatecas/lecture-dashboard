@@ -31,17 +31,27 @@ export async function GET(request) {
       if (!rowName) continue
 
       const revenue = row[6]?.v || 0
-      const gdnCost = row[16]?.v || 0
-      const metaCost = row[17]?.v || 0
+      const operatingProfit = row[8]?.v || 0
+      const profitMargin = row[9]?.v || 0
+      const adSpend = row[15]?.v || 0
+      const gdnConvCost = row[16]?.v || 0
+      const metaConvCost = row[17]?.v || 0
       const kakaoDb = row[26]?.v || 0
+      const liveViewers = row[27]?.v || 0
+      const totalPurchases = row[32]?.v || 0
       const conversionRate = row[41]?.v || 0
       const freeClassDate = row[1]?.f || null
 
       allData.push({
         name: rowName.replace(/\s+/g, ' ').trim(),
         revenue,
-        conversionCost: Math.round((gdnCost + metaCost) / 2),
+        operatingProfit,
+        profitMargin: Math.round(profitMargin * 10000) / 100,
+        adSpend,
+        conversionCost: Math.round((gdnConvCost + metaConvCost) / 2),
         kakaoRoomDb: kakaoDb,
+        liveViewers,
+        totalPurchases,
         purchaseConversionRate: conversionRate,
         freeClassDate
       })
