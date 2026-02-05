@@ -22,6 +22,9 @@ export default function Dashboard({ onLogout }) {
   const [sheetData, setSheetData] = useState(null)
   const [selectedInstructor, setSelectedInstructor] = useState('')
   const [showYoutubeModal, setShowYoutubeModal] = useState(false)
+  const [showSalesModal, setShowSalesModal] = useState(false)
+  const [salesTabName, setSalesTabName] = useState('')
+  const [salesAnalyzing, setSalesAnalyzing] = useState(false)
   const [newYoutube, setNewYoutube] = useState({ channel_name: '', url: '', views: '', conversions: '' })
   const [newInstructor, setNewInstructor] = useState('')
   const [newSession, setNewSession] = useState({
@@ -303,6 +306,40 @@ export default function Dashboard({ onLogout }) {
     setAnalyzing(false)
   }
 
+  const runSalesAnalysis = async () => {
+    if (!salesTabName.trim()) return alert('매출표 탭 이름을 입력하세요')
+    setSalesAnalyzing(true)
+    try {
+      const session = currentSession
+      const response = await fetch('/api/sales-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tabName: salesTabName.trim(),
+          freeClassDate: session.free_class_date,
+          sessionId: selectedSessionId
+        })
+      })
+      const data = await response.json()
+      if (data.error) {
+        alert('분석 실패: ' + data.error)
+      } else {
+        alert(`분석 완료! ${data.totalInRange}건 (범위 내) / 전체 ${data.totalAll}건`)
+        setShowSalesModal(false)
+        setSalesTabName('')
+        loadPurchaseTimeline()
+      }
+    } catch (error) {
+      alert('매출 분석 중 오류: ' + error.message)
+    }
+    setSalesAnalyzing(false)
+  }
+
+  const getIntervalLabel = (minuteValue) => {
+    const labels = { 0: '0~30', 30: '30~60', 60: '60~90', 90: '90~120', 120: '120~180', 180: '180~' }
+    return labels[minuteValue] || minuteValue + '분'
+  }
+
   const getSessionNumber = (sessionName) => {
     const match = sessionName?.match(/(\d+)/)
     return match ? parseInt(match[1]) : 0
@@ -468,22 +505,33 @@ export default function Dashboard({ onLogout }) {
               {/* 2단 레이아웃 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <div style={{ fontSize: '15px', fontWeight: '600' }}>⏰ 무료특강 후 시간별 구매 추이</div>
+                    <button onClick={() => { setSalesTabName(currentSession.instructors?.name + ' ' + currentSession.session_name); setShowSalesModal(true) }} style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', padding: '6px 12px', color: '#a5b4fc', fontSize: '12px', cursor: 'pointer' }}>매출표 분석</button>
+                  </div>
                   {purchaseTimeline.length > 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', height: '200px', padding: '20px 0' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '6px', height: '200px', padding: '20px 0' }}>
                       {purchaseTimeline.map((item, i) => {
                         const maxPurchases = Math.max(...purchaseTimeline.map(p => p.purchases))
                         const height = maxPurchases > 0 ? (item.purchases / maxPurchases) * 160 : 0
+                        const total = purchaseTimeline.reduce((sum, p) => sum + p.purchases, 0)
+                        const pct = total > 0 ? ((item.purchases / total) * 100).toFixed(1) : 0
                         return (
                           <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                            <div style={{ width: '100%', maxWidth: '40px', height: `${height}px`, background: 'linear-gradient(180deg, #6366f1, #8b5cf6)', borderRadius: '4px 4px 0 0' }} />
-                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px' }}>{item.hour}h</div>
+                            <div style={{ fontSize: '10px', color: '#a5b4fc', marginBottom: '4px', fontWeight: '600' }}>{item.purchases}건</div>
+                            <div style={{ width: '100%', maxWidth: '50px', height: `${height}px`, background: 'linear-gradient(180deg, #6366f1, #8b5cf6)', borderRadius: '4px 4px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {height > 20 && <span style={{ fontSize: '9px', color: '#fff', fontWeight: '600' }}>{pct}%</span>}
+                            </div>
+                            <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '6px', textAlign: 'center', lineHeight: '1.2' }}>{getIntervalLabel(item.hour)}<br/>분</div>
                           </div>
                         )
                       })}
                     </div>
                   ) : (
-                    <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>데이터 없음</div>
+                    <div style={{ height: '200px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748b', gap: '12px' }}>
+                      <div>매출 데이터 없음</div>
+                      <button onClick={() => { setSalesTabName(currentSession.instructors?.name + ' ' + currentSession.session_name); setShowSalesModal(true) }} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '8px', padding: '8px 16px', color: '#fff', fontSize: '13px', cursor: 'pointer' }}>매출표 분석하기</button>
+                    </div>
                   )}
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -782,6 +830,30 @@ export default function Dashboard({ onLogout }) {
               </div>
             </div>
             <button onClick={saveYoutube} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #f43f5e, #ec4899)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>추가</button>
+          </div>
+        </div>
+      )}
+
+      {/* 매출표 분석 모달 */}
+      {showSalesModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '32px', width: '500px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>매출표 분석</h3>
+              <button onClick={() => setShowSalesModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>×</button>
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>매출표 시트 탭 이름</label>
+              <input type="text" value={salesTabName} onChange={(e) => setSalesTabName(e.target.value)} placeholder="예: 션 2기" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
+              <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>매출표 시트에서 해당 강사의 탭 이름을 입력하세요</p>
+            </div>
+            <div style={{ marginBottom: '16px', padding: '14px', background: 'rgba(99,102,241,0.1)', borderRadius: '10px', fontSize: '13px', color: '#a5b4fc' }}>
+              <div>무료강의 날짜: <strong>{currentSession.free_class_date || '미설정'}</strong></div>
+              <div style={{ marginTop: '4px' }}>분석 범위: 무료강의일 19:30 이후 첫 결제 ~ 다음날 12:30</div>
+            </div>
+            <button onClick={runSalesAnalysis} disabled={salesAnalyzing} style={{ width: '100%', padding: '14px', background: salesAnalyzing ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: salesAnalyzing ? 'wait' : 'pointer' }}>
+              {salesAnalyzing ? '분석 중...' : '분석 실행'}
+            </button>
           </div>
         </div>
       )}
