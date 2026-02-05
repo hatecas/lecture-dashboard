@@ -631,38 +631,46 @@ export default function Dashboard({ onLogout }) {
                 </div>
               </div>
 
-              {/* 종합 데이터 */}
-              {sheetData ? (
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>📊 {currentSession.instructors?.name} {currentSession.session_name} 종합 데이터</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>총 매출</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.revenue)}</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>영업이익</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700', color: sheetData.operatingProfit >= 0 ? '#10b981' : '#f87171' }}>{formatMoney(sheetData.operatingProfit)}</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>영업이익률</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700', color: '#818cf8' }}>{sheetData.profitMargin}%</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>광고비</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.adSpend)}</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>카톡방 DB / 동시접속</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.kakaoRoomDb)}명 / {formatNumber(sheetData.liveViewers)}명</div>
-                    </div>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                      <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>결제 건수 / 전환율</div>
-                      <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.totalPurchases)}건 / {(sheetData.purchaseConversionRate * 100).toFixed(1)}%</div>
+              {/* 광고 성과 */}
+              {sheetData ? (() => {
+                const roas = sheetData.adSpend > 0 ? (sheetData.revenue / sheetData.adSpend).toFixed(1) : '-'
+                const revenuePerPurchase = sheetData.totalPurchases > 0 ? Math.round(sheetData.revenue / sheetData.totalPurchases) : 0
+                return (
+                  <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
+                    <div style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>📈 광고 성과</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>ROAS (광고수익률)</div>
+                        <div style={{ fontSize: '20px', fontWeight: '700', color: '#f59e0b' }}>{roas}배</div>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>매출 ÷ 광고비</div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>GDN 전환단가</div>
+                        <div style={{ fontSize: '20px', fontWeight: '700', color: '#38bdf8' }}>{sheetData.gdnConvCost ? formatNumber(Math.round(sheetData.gdnConvCost)) + '원' : '-'}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>구글 광고</div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>메타 전환단가</div>
+                        <div style={{ fontSize: '20px', fontWeight: '700', color: '#818cf8' }}>{sheetData.metaConvCost ? formatNumber(Math.round(sheetData.metaConvCost)) + '원' : '-'}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>페이스북 / 인스타</div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>총 광고비</div>
+                        <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.adSpend)}</div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>동시접속 / 결제건수</div>
+                        <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.liveViewers)}명 / {formatNumber(sheetData.totalPurchases)}건</div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>인당 매출 (객단가)</div>
+                        <div style={{ fontSize: '20px', fontWeight: '700', color: '#10b981' }}>{formatMoney(revenuePerPurchase)}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>매출 ÷ 결제건수</div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : null}
+                )
+              })() : null}
 
               {/* 유튜브 성과 */}
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>

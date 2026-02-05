@@ -49,6 +49,8 @@ export async function GET(request) {
         profitMargin: Math.round(profitMargin * 10000) / 100,
         adSpend,
         conversionCost: Math.round((gdnConvCost + metaConvCost) / 2),
+        gdnConvCost,
+        metaConvCost,
         kakaoRoomDb: kakaoDb,
         liveViewers,
         totalPurchases,
