@@ -145,6 +145,20 @@ export default function Dashboard({ onLogout }) {
         }
       }
 
+      // 중복 기수 제거
+      const { data: allSessions } = await supabase.from('sessions').select('*')
+      if (allSessions) {
+        const seen = new Map()
+        for (const s of allSessions) {
+          const key = `${s.instructor_id}_${s.session_name?.trim()}`
+          if (seen.has(key)) {
+            await supabase.from('sessions').delete().eq('id', s.id)
+          } else {
+            seen.set(key, s.id)
+          }
+        }
+      }
+
       await loadInstructors()
       await loadSessions()
     } catch (error) {
