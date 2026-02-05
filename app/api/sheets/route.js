@@ -14,18 +14,18 @@ export async function GET(request) {
     const json = JSON.parse(text.substring(47, text.length - 2))
     const rows = json.table.rows
 
-    // 헤더 행 찾기
-    let headerIndex = 0
+    // 헤더 행 찾기 (gviz API가 이미 헤더를 분리한 경우 rows에는 데이터만 있음)
+    let startIndex = 0
     for (let i = 0; i < rows.length; i++) {
       if (rows[i].c[0]?.v === '강사명') {
-        headerIndex = i
+        startIndex = i + 1
         break
       }
     }
 
     // 전체 데이터 파싱
     const allData = []
-    for (let i = headerIndex + 1; i < rows.length; i++) {
+    for (let i = startIndex; i < rows.length; i++) {
       const row = rows[i].c
       const rowName = row[0]?.v
       if (!rowName) continue
