@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 
 export default function Dashboard({ onLogout }) {
@@ -25,6 +26,7 @@ export default function Dashboard({ onLogout }) {
   const [showSalesModal, setShowSalesModal] = useState(false)
   const [salesTabName, setSalesTabName] = useState('')
   const [salesAnalyzing, setSalesAnalyzing] = useState(false)
+  const autoAnalyzedRef = useRef(new Set())
   const [newYoutube, setNewYoutube] = useState({ channel_name: '', url: '', views: '', conversions: '' })
   const [newInstructor, setNewInstructor] = useState('')
   const [newSession, setNewSession] = useState({
@@ -181,7 +183,38 @@ export default function Dashboard({ onLogout }) {
 
   const loadPurchaseTimeline = async () => {
     const { data } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
-    if (data) setPurchaseTimeline(data)
+    if (data && data.length > 0) {
+      setPurchaseTimeline(data)
+      return
+    }
+    setPurchaseTimeline([])
+
+    // 데이터 없으면 자동으로 매출표에서 분석 시도
+    if (autoAnalyzedRef.current.has(selectedSessionId)) return
+    autoAnalyzedRef.current.add(selectedSessionId)
+
+    const session = sessions.find(s => s.id === selectedSessionId)
+    if (!session || !session.free_class_date) return
+
+    const tabName = `${session.instructors?.name} ${session.session_name}`
+    try {
+      const response = await fetch('/api/sales-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tabName,
+          freeClassDate: session.free_class_date,
+          sessionId: selectedSessionId
+        })
+      })
+      const result = await response.json()
+      if (result.success) {
+        const { data: newData } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
+        if (newData) setPurchaseTimeline(newData)
+      }
+    } catch (e) {
+      // 탭이 없거나 데이터 없으면 무시
+    }
   }
 
   const addInstructor = async () => {
@@ -506,31 +539,38 @@ export default function Dashboard({ onLogout }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <div style={{ fontSize: '15px', fontWeight: '600' }}>⏰ 무료특강 후 시간별 구매 추이</div>
+                    <div style={{ fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
                     <button onClick={() => { setSalesTabName(currentSession.instructors?.name + ' ' + currentSession.session_name); setShowSalesModal(true) }} style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', padding: '6px 12px', color: '#a5b4fc', fontSize: '12px', cursor: 'pointer' }}>매출표 분석</button>
                   </div>
                   {purchaseTimeline.length > 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '6px', height: '200px', padding: '20px 0' }}>
-                      {purchaseTimeline.map((item, i) => {
-                        const maxPurchases = Math.max(...purchaseTimeline.map(p => p.purchases))
-                        const height = maxPurchases > 0 ? (item.purchases / maxPurchases) * 160 : 0
+                    <ResponsiveContainer width="100%" height={220}>
+                      <AreaChart data={purchaseTimeline.map(item => {
                         const total = purchaseTimeline.reduce((sum, p) => sum + p.purchases, 0)
-                        const pct = total > 0 ? ((item.purchases / total) * 100).toFixed(1) : 0
-                        return (
-                          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                            <div style={{ fontSize: '10px', color: '#a5b4fc', marginBottom: '4px', fontWeight: '600' }}>{item.purchases}건</div>
-                            <div style={{ width: '100%', maxWidth: '50px', height: `${height}px`, background: 'linear-gradient(180deg, #6366f1, #8b5cf6)', borderRadius: '4px 4px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {height > 20 && <span style={{ fontSize: '9px', color: '#fff', fontWeight: '600' }}>{pct}%</span>}
-                            </div>
-                            <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '6px', textAlign: 'center', lineHeight: '1.2' }}>{getIntervalLabel(item.hour)}<br/>분</div>
-                          </div>
-                        )
-                      })}
-                    </div>
+                        return {
+                          name: getIntervalLabel(item.hour) + '분',
+                          purchases: item.purchases,
+                          pct: total > 0 ? ((item.purchases / total) * 100).toFixed(1) : 0
+                        }
+                      })}>
+                        <defs>
+                          <linearGradient id="purchaseGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
+                            <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                        <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                        <Tooltip
+                          contentStyle={{ background: '#1e1e2e', border: '1px solid #4c4c6d', borderRadius: '8px', color: '#e2e8f0' }}
+                          formatter={(value, name, props) => [`${value}건 (${props.payload.pct}%)`, '구매건수']}
+                          labelFormatter={(label) => label}
+                        />
+                        <Area type="monotone" dataKey="purchases" stroke="#6366f1" fill="url(#purchaseGradient)" strokeWidth={2} />
+                      </AreaChart>
+                    </ResponsiveContainer>
                   ) : (
-                    <div style={{ height: '200px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748b', gap: '12px' }}>
-                      <div>매출 데이터 없음</div>
-                      <button onClick={() => { setSalesTabName(currentSession.instructors?.name + ' ' + currentSession.session_name); setShowSalesModal(true) }} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '8px', padding: '8px 16px', color: '#fff', fontSize: '13px', cursor: 'pointer' }}>매출표 분석하기</button>
+                    <div style={{ height: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
+                      아직 판매 데이터가 없습니다
                     </div>
                   )}
                 </div>
