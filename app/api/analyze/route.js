@@ -2,25 +2,30 @@ import { NextResponse } from 'next/server'
 
 export async function POST(request) {
   try {
-    const { sessionData, memos } = await request.json()
+    const { sessionData, memos, analysisType } = await request.json()
 
-    const prompt = `당신은 온라인 강의 마케팅 전문가입니다. 다음 데이터를 분석해주세요:
-
-강사: ${sessionData.instructorName} ${sessionData.sessionName}
-주제: ${sessionData.topic}
+    const dataSection = `강사: ${sessionData.instructorName} ${sessionData.sessionName}
+주제: ${sessionData.topic || '미입력'}
 매출: ${sessionData.revenue?.toLocaleString()}원
 영업이익: ${sessionData.operatingProfit?.toLocaleString()}원
 영업이익률: ${sessionData.profitMargin}%
 광고비: ${sessionData.adSpend?.toLocaleString()}원
 카톡방 DB: ${sessionData.kakaoRoomDB}명
 전환비용: ${sessionData.conversionCost?.toLocaleString()}원
-무료강의 실시간 시청자: ${sessionData.liveViewers}명
+최고 동시접속자: ${sessionData.liveViewers}명
 전체 결제자: ${sessionData.totalPurchases}명
+구매전환율: ${sessionData.purchaseConversionRate ? (sessionData.purchaseConversionRate * 100).toFixed(2) + '%' : '미집계'}`
 
-${memos && memos.length > 0 ? `
-미팅 메모:
-${memos.map(m => m.content).join('\n')}
-` : ''}
+    const memoSection = memos && memos.length > 0 ? `\n미팅 메모:\n${memos.map(m => m.content).join('\n')}` : ''
+
+    const isDetail = analysisType === 'detail'
+
+    const prompt = `당신은 온라인 강의 마케팅 전문가입니다. 다음 데이터를 ${isDetail ? '종합적으로 깊이있게' : ''} 분석해주세요:
+
+${dataSection}
+${memoSection}
+
+${isDetail ? '미팅 메모 내용도 반영하여 현재 상황과 향후 전략을 종합적으로 분석해주세요. 데이터 기반의 구체적인 수치를 인용하여 분석하세요.' : ''}
 
 다음 형식으로 JSON만 응답하세요 (다른 텍스트 없이 JSON만):
 {

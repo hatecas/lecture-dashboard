@@ -14,34 +14,44 @@ export async function GET(request) {
     const json = JSON.parse(text.substring(47, text.length - 2))
     const rows = json.table.rows
 
-    // 헤더 행 찾기
-    let headerIndex = 0
+    // 헤더 행 찾기 (gviz API가 이미 헤더를 분리한 경우 rows에는 데이터만 있음)
+    let startIndex = 0
     for (let i = 0; i < rows.length; i++) {
       if (rows[i].c[0]?.v === '강사명') {
-        headerIndex = i
+        startIndex = i + 1
         break
       }
     }
 
     // 전체 데이터 파싱
     const allData = []
-    for (let i = headerIndex + 1; i < rows.length; i++) {
+    for (let i = startIndex; i < rows.length; i++) {
       const row = rows[i].c
       const rowName = row[0]?.v
       if (!rowName) continue
 
       const revenue = row[6]?.v || 0
-      const gdnCost = row[16]?.v || 0
-      const metaCost = row[17]?.v || 0
+      const operatingProfit = row[8]?.v || 0
+      const profitMargin = row[9]?.v || 0
+      const adSpend = row[15]?.v || 0
+      const gdnConvCost = row[16]?.v || 0
+      const metaConvCost = row[17]?.v || 0
       const kakaoDb = row[26]?.v || 0
+      const liveViewers = row[27]?.v || 0
+      const totalPurchases = row[32]?.v || 0
       const conversionRate = row[41]?.v || 0
       const freeClassDate = row[1]?.f || null
 
       allData.push({
-        name: rowName.trim(),
+        name: rowName.replace(/\s+/g, ' ').trim(),
         revenue,
-        conversionCost: Math.round((gdnCost + metaCost) / 2),
+        operatingProfit,
+        profitMargin: Math.round(profitMargin * 10000) / 100,
+        adSpend,
+        conversionCost: Math.round((gdnConvCost + metaConvCost) / 2),
         kakaoRoomDb: kakaoDb,
+        liveViewers,
+        totalPurchases,
         purchaseConversionRate: conversionRate,
         freeClassDate
       })
@@ -49,7 +59,8 @@ export async function GET(request) {
 
     // 특정 이름 조회
     if (name) {
-      const found = allData.find(d => d.name === name.trim())
+      const normalizedName = name.replace(/\s+/g, ' ').trim()
+      const found = allData.find(d => d.name === normalizedName)
       if (found) return NextResponse.json(found)
       return NextResponse.json({ error: '데이터를 찾을 수 없습니다' }, { status: 404 })
     }
