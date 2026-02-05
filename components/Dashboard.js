@@ -20,7 +20,7 @@ export default function Dashboard({ onLogout }) {
   const [youtubeLinks, setYoutubeLinks] = useState([])
   const [purchaseTimeline, setPurchaseTimeline] = useState([])
   const [sheetData, setSheetData] = useState(null)
-  const [showYoutubeModal, setShowYoutubeModal] = useState(false)
+  const [selectedInstructor, setSelectedInstructor] = useState('')
   const [newYoutube, setNewYoutube] = useState({ channel_name: '', url: '', views: '', conversions: '' })
   const [newInstructor, setNewInstructor] = useState('')
   const [newSession, setNewSession] = useState({
@@ -30,10 +30,19 @@ export default function Dashboard({ onLogout }) {
     free_class_date: ''
   })
 
+  const [synced, setSynced] = useState(false)
+
   useEffect(() => {
     loadSessions()
     loadInstructors()
   }, [])
+
+  useEffect(() => {
+    if (instructors.length >= 0 && sessions.length >= 0 && !synced) {
+      setSynced(true)
+      syncFromSheet()
+    }
+  }, [instructors, sessions])
 
   useEffect(() => {
     if (selectedSessionId) {
@@ -63,6 +72,7 @@ export default function Dashboard({ onLogout }) {
     if (data && data.length > 0) {
       setSessions(data)
       setSelectedSessionId(data[0].id)
+      setSelectedInstructor(data[0].instructors?.name || '')
     }
     setLoading(false)
   }
@@ -77,6 +87,59 @@ export default function Dashboard({ onLogout }) {
       console.error('시트 데이터 로드 실패:', error)
     }
     return null
+  }
+
+  const syncFromSheet = async () => {
+    try {
+      const response = await fetch('/api/sheets')
+      const { data } = await response.json()
+      if (!data) return
+
+      // 최신 데이터 가져오기
+      const { data: freshInstructors } = await supabase.from('instructors').select('*')
+      const { data: freshSessions } = await supabase.from('sessions').select('*, instructors (name)')
+
+      for (const item of data) {
+        const parts = item.name.split(' ')
+        if (parts.length < 2) continue
+
+        const instructorName = parts.slice(0, -1).join(' ')
+        const sessionName = parts[parts.length - 1]
+
+        // 강사 중복 체크
+        let instructor = freshInstructors.find(i => i.name === instructorName)
+        if (!instructor) {
+          const { data: newInst } = await supabase
+            .from('instructors')
+            .insert({ name: instructorName })
+            .select()
+            .single()
+          if (newInst) {
+            instructor = newInst
+            freshInstructors.push(newInst)
+          } else continue
+        }
+
+        // 기수 중복 체크
+        const exists = freshSessions.find(
+          s => s.instructor_id === instructor.id && s.session_name === sessionName
+        )
+        if (!exists) {
+          const { data: newSess } = await supabase.from('sessions').insert({
+            instructor_id: instructor.id,
+            session_name: sessionName,
+            topic: '',
+            free_class_date: item.freeClassDate || null
+          }).select('*, instructors (name)').single()
+          if (newSess) freshSessions.push(newSess)
+        }
+      }
+
+      await loadInstructors()
+      await loadSessions()
+    } catch (error) {
+      console.error('시트 동기화 실패:', error)
+    }
   }
 
   const loadMemos = async () => {
@@ -106,14 +169,24 @@ export default function Dashboard({ onLogout }) {
 
   const addSession = async () => {
     if (!newSession.instructor_id || !newSession.session_name) return
+
+    // 시트에서 데이터 확인
+    const instructor = instructors.find(i => i.id === newSession.instructor_id)
+    const sheetCheck = await loadSheetData(instructor?.name, newSession.session_name)
+    
+    if (!sheetCheck) {
+      alert('데이터베이스 시트에 "' + instructor?.name + ' ' + newSession.session_name + '" 데이터가 없습니다.\n시트에 먼저 등록해주세요.')
+      return
+    }
+
     const { error } = await supabase.from('sessions').insert({
       instructor_id: newSession.instructor_id,
       session_name: newSession.session_name,
       topic: newSession.topic,
-      free_class_date: newSession.free_class_date || null
+      free_class_date: sheetCheck.freeClassDate || null
     })
     if (!error) {
-      setNewSession({ instructor_id: '', session_name: '', topic: '', free_class_date: '' })
+      setNewSession({ instructor_id: '', session_name: '', topic: '' })
       setShowAddModal(false)
       loadSessions()
     }
@@ -243,14 +316,8 @@ export default function Dashboard({ onLogout }) {
             📝 상세 정보
           </button>
           <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '16px 20px' }} />
-          <button onClick={() => { setAddType('instructor'); setShowAddModal(true); }} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            ➕ 강사 추가
-          </button>
-          <button onClick={() => { setAddType('session'); setShowAddModal(true); }} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            ➕ 기수 추가
-          </button>
-          <button onClick={() => { setAddType('delete'); setShowAddModal(true); }} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#f87171', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            🗑️ 강사/기수 삭제
+          <button onClick={syncFromSheet} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            🔄 시트 동기화
           </button>
         </div>
         <div style={{ padding: '0 20px' }}>
@@ -264,27 +331,69 @@ export default function Dashboard({ onLogout }) {
       <div style={{ flex: 1, overflow: 'auto' }}>
         <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
           {/* 드롭다운 */}
-          <div style={{ marginBottom: '24px', position: 'relative' }}>
-            <button onClick={() => setDropdownOpen(!dropdownOpen)} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '12px', padding: '14px 20px', color: '#fff', fontSize: '16px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', minWidth: '320px' }}>
-              <span style={{ background: 'linear-gradient(135deg, #6366f1, #a855f7)', padding: '6px 12px', borderRadius: '6px', fontSize: '14px' }}>
-                {currentSession.instructors?.name} {currentSession.session_name}
-              </span>
-              <span style={{ color: '#94a3b8' }}>{currentSession.topic}</span>
-              <span style={{ color: '#64748b', fontSize: '13px', marginLeft: 'auto' }}>{currentSession.free_class_date}</span>
-              <span style={{ color: '#94a3b8' }}>▼</span>
-            </button>
-            {dropdownOpen && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '8px', background: '#1e1e2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '8px', minWidth: '320px', zIndex: 100, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
-                {sessions.map(session => (
-                  <button key={session.id} onClick={() => { setSelectedSessionId(session.id); setDropdownOpen(false); setAiAnalysis(null); }} style={{ width: '100%', padding: '12px 14px', background: session.id === selectedSessionId ? 'rgba(99,102,241,0.2)' : 'transparent', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'left', marginBottom: '4px' }}>
-                    <span style={{ background: session.id === selectedSessionId ? 'linear-gradient(135deg, #6366f1, #a855f7)' : 'rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: '6px', fontSize: '13px', fontWeight: '600' }}>
-                      {session.instructors?.name} {session.session_name}
-                    </span>
-                    <span style={{ color: '#94a3b8', fontSize: '14px' }}>{session.topic}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+          {/* 강사/기수 드롭다운 */}
+          <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+            {/* 강사 선택 */}
+            <select
+              value={selectedInstructor}
+              onChange={(e) => {
+                setSelectedInstructor(e.target.value)
+                const filtered = sessions.filter(s => s.instructors?.name === e.target.value)
+                if (filtered.length > 0) {
+                  setSelectedSessionId(filtered[0].id)
+                  setAiAnalysis(null)
+                }
+              }}
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '12px',
+                padding: '14px 20px',
+                color: '#fff',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                minWidth: '200px',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M6 8L1 3h10z%27/%3E%3C/svg%3E")',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 16px center'
+              }}
+            >
+              {[...new Set(sessions.map(s => s.instructors?.name))].filter(Boolean).map(name => (
+                <option key={name} value={name} style={{ background: '#1e1e2e', color: '#fff' }}>{name}</option>
+              ))}
+            </select>
+
+            {/* 기수 선택 */}
+            <select
+              value={selectedSessionId || ''}
+              onChange={(e) => {
+                setSelectedSessionId(e.target.value)
+                setAiAnalysis(null)
+              }}
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '12px',
+                padding: '14px 20px',
+                color: '#fff',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                minWidth: '200px',
+                appearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M6 8L1 3h10z%27/%3E%3C/svg%3E")',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 16px center'
+              }}
+            >
+              {sessions.filter(s => s.instructors?.name === selectedInstructor).map(session => (
+                <option key={session.id} value={session.id} style={{ background: '#1e1e2e', color: '#fff' }}>
+                  {session.session_name} {session.free_class_date ? `(${session.free_class_date})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* 대시보드 탭 */}
@@ -510,10 +619,6 @@ export default function Dashboard({ onLogout }) {
                 <div style={{ marginBottom: '16px' }}>
                   <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>주제</label>
                   <input type="text" value={newSession.topic} onChange={(e) => setNewSession({...newSession, topic: e.target.value})} placeholder="강의 주제" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
-                </div>
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>무료특강일</label>
-                  <input type="date" value={newSession.free_class_date} onChange={(e) => setNewSession({...newSession, free_class_date: e.target.value})} style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
                 </div>
                 <button onClick={addSession} style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: 'pointer' }}>추가</button>
               </>
