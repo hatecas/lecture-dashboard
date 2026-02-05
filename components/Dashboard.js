@@ -21,12 +21,17 @@ export default function Dashboard({ onLogout }) {
   const [youtubeLinks, setYoutubeLinks] = useState([])
   const [purchaseTimeline, setPurchaseTimeline] = useState([])
   const [sheetData, setSheetData] = useState(null)
+  const [allSheetData, setAllSheetData] = useState([])
   const [selectedInstructor, setSelectedInstructor] = useState('')
   const [showYoutubeModal, setShowYoutubeModal] = useState(false)
   const [showSalesModal, setShowSalesModal] = useState(false)
   const [salesTabName, setSalesTabName] = useState('')
   const [salesAnalyzing, setSalesAnalyzing] = useState(false)
   const autoAnalyzedRef = useRef(new Set())
+  const [rankingMetric, setRankingMetric] = useState('revenue')
+  const [rankingOrder, setRankingOrder] = useState('desc')
+  const [compareLeftId, setCompareLeftId] = useState(null)
+  const [compareRightId, setCompareRightId] = useState(null)
   const [newYoutube, setNewYoutube] = useState({ channel_name: '', url: '', views: '', conversions: '' })
   const [youtubeFetching, setYoutubeFetching] = useState(false)
   const [newInstructor, setNewInstructor] = useState('')
@@ -65,6 +70,23 @@ export default function Dashboard({ onLogout }) {
       }
     }
   }, [selectedSessionId, sessions])
+
+  // 전체 시트 데이터 로드 (랭킹/대조용)
+  useEffect(() => {
+    if (sessions.length > 0) {
+      loadAllSheetData()
+    }
+  }, [sessions])
+
+  const loadAllSheetData = async () => {
+    try {
+      const response = await fetch('/api/sheets')
+      const result = await response.json()
+      if (result.data) setAllSheetData(result.data)
+    } catch (e) {
+      console.error('전체 시트 데이터 로드 실패:', e)
+    }
+  }
 
   const loadInstructors = async () => {
     const { data } = await supabase.from('instructors').select('*').order('name')
@@ -442,6 +464,12 @@ export default function Dashboard({ onLogout }) {
           <button onClick={() => setCurrentTab('detail')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'detail' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
             📝 상세 정보
           </button>
+          <button onClick={() => setCurrentTab('ranking')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'ranking' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            🏆 랭킹
+          </button>
+          <button onClick={() => setCurrentTab('compare')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'compare' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            ⚖️ 대조
+          </button>
           <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '16px 20px' }} />
           <button onClick={syncFromSheet} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
             🔄 시트 동기화
@@ -457,9 +485,8 @@ export default function Dashboard({ onLogout }) {
       {/* 메인 컨텐츠 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
-          {/* 드롭다운 */}
-          {/* 강사/기수 드롭다운 */}
-          <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+          {/* 드롭다운 - 대시보드/상세 탭에서만 표시 */}
+          {(currentTab === 'dashboard' || currentTab === 'detail') && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
             {/* 강사 선택 */}
             <select
               value={selectedInstructor}
@@ -524,7 +551,7 @@ export default function Dashboard({ onLogout }) {
                 </option>
               ))}
             </select>
-          </div>
+          </div>}
 
           {/* 대시보드 탭 */}
           {currentTab === 'dashboard' && (
@@ -794,6 +821,157 @@ export default function Dashboard({ onLogout }) {
               )}
             </>
           )}
+
+          {/* 랭킹 탭 */}
+          {currentTab === 'ranking' && (() => {
+            const METRICS = [
+              { key: 'revenue', label: '총 매출', format: v => formatMoney(v), color: '#10b981' },
+              { key: 'operatingProfit', label: '영업이익', format: v => formatMoney(v), color: '#10b981' },
+              { key: 'profitMargin', label: '영업이익률', format: v => v + '%', color: '#818cf8' },
+              { key: 'adSpend', label: '광고비', format: v => formatMoney(v), color: '#f59e0b' },
+              { key: 'roas', label: 'ROAS', format: v => v + '배', color: '#f59e0b' },
+              { key: 'kakaoRoomDb', label: '카톡방 DB', format: v => formatNumber(v) + '명', color: '#38bdf8' },
+              { key: 'liveViewers', label: '동시접속', format: v => formatNumber(v) + '명', color: '#38bdf8' },
+              { key: 'totalPurchases', label: '결제건수', format: v => formatNumber(v) + '건', color: '#ec4899' },
+              { key: 'conversionRate', label: '구매전환율', format: v => v + '%', color: '#ec4899' },
+              { key: 'conversionCost', label: '전환비용', format: v => formatNumber(v) + '원', color: '#f87171' },
+              { key: 'gdnConvCost', label: 'GDN 전환단가', format: v => formatNumber(Math.round(v)) + '원', color: '#38bdf8' },
+              { key: 'metaConvCost', label: '메타 전환단가', format: v => formatNumber(Math.round(v)) + '원', color: '#818cf8' },
+            ]
+            const currentMetric = METRICS.find(m => m.key === rankingMetric) || METRICS[0]
+            const ranked = allSheetData
+              .map(d => ({
+                ...d,
+                roas: d.adSpend > 0 ? parseFloat((d.revenue / d.adSpend).toFixed(1)) : 0,
+                conversionRate: d.purchaseConversionRate ? parseFloat((d.purchaseConversionRate * 100).toFixed(2)) : 0
+              }))
+              .filter(d => {
+                const val = d[rankingMetric]
+                return val !== undefined && val !== null && val !== 0
+              })
+              .sort((a, b) => rankingOrder === 'desc' ? b[rankingMetric] - a[rankingMetric] : a[rankingMetric] - b[rankingMetric])
+            const maxVal = ranked.length > 0 ? Math.max(...ranked.map(d => Math.abs(d[rankingMetric]))) : 1
+
+            return (
+              <>
+                <div style={{ marginBottom: '24px' }}>
+                  <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>🏆 랭킹</h2>
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                    {METRICS.map(m => (
+                      <button key={m.key} onClick={() => setRankingMetric(m.key)} style={{ padding: '8px 16px', background: rankingMetric === m.key ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)', border: rankingMetric === m.key ? 'none' : '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer', fontWeight: rankingMetric === m.key ? '600' : '400' }}>{m.label}</button>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={() => setRankingOrder('desc')} style={{ padding: '8px 16px', background: rankingOrder === 'desc' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)', border: '1px solid ' + (rankingOrder === 'desc' ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.1)'), borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer' }}>내림차순 ↓</button>
+                    <button onClick={() => setRankingOrder('asc')} style={{ padding: '8px 16px', background: rankingOrder === 'asc' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)', border: '1px solid ' + (rankingOrder === 'asc' ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.1)'), borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer' }}>오름차순 ↑</button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {ranked.map((item, i) => {
+                    const barWidth = maxVal > 0 ? (Math.abs(item[rankingMetric]) / maxVal) * 100 : 0
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : ''
+                    return (
+                      <div key={item.name} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px 20px', border: i < 3 ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.05)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ fontSize: '16px', fontWeight: '700', color: i < 3 ? '#fff' : '#94a3b8', minWidth: '30px' }}>{medal || `${i + 1}`}</span>
+                            <span style={{ fontSize: '15px', fontWeight: '600' }}>{item.name}</span>
+                          </div>
+                          <span style={{ fontSize: '18px', fontWeight: '700', color: currentMetric.color }}>{currentMetric.format(item[rankingMetric])}</span>
+                        </div>
+                        <div style={{ height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${barWidth}%`, background: `linear-gradient(90deg, ${currentMetric.color}, ${currentMetric.color}88)`, borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {ranked.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>데이터가 없습니다. 시트 동기화를 먼저 진행해주세요.</div>
+                  )}
+                </div>
+              </>
+            )
+          })()}
+
+          {/* 대조 탭 */}
+          {currentTab === 'compare' && (() => {
+            const leftData = allSheetData.find(d => d.name === compareLeftId)
+            const rightData = allSheetData.find(d => d.name === compareRightId)
+
+            const COMPARE_ITEMS = [
+              { label: '총 매출', key: 'revenue', format: v => formatMoney(v), higherBetter: true },
+              { label: '영업이익', key: 'operatingProfit', format: v => formatMoney(v), higherBetter: true },
+              { label: '영업이익률', key: 'profitMargin', format: v => v + '%', higherBetter: true },
+              { label: '광고비', key: 'adSpend', format: v => formatMoney(v), higherBetter: false },
+              { label: 'ROAS', key: 'roas', format: v => v + '배', higherBetter: true, calc: d => d.adSpend > 0 ? (d.revenue / d.adSpend).toFixed(1) : '-' },
+              { label: '카톡방 DB', key: 'kakaoRoomDb', format: v => formatNumber(v) + '명', higherBetter: true },
+              { label: '동시접속', key: 'liveViewers', format: v => formatNumber(v) + '명', higherBetter: true },
+              { label: '결제건수', key: 'totalPurchases', format: v => formatNumber(v) + '건', higherBetter: true },
+              { label: '구매전환율', key: 'conversionRate', format: v => (v * 100).toFixed(2) + '%', higherBetter: true, calc: d => d.purchaseConversionRate },
+              { label: '전환비용', key: 'conversionCost', format: v => formatNumber(v) + '원', higherBetter: false },
+              { label: 'GDN 전환단가', key: 'gdnConvCost', format: v => formatNumber(Math.round(v)) + '원', higherBetter: false },
+              { label: '메타 전환단가', key: 'metaConvCost', format: v => formatNumber(Math.round(v)) + '원', higherBetter: false },
+              { label: '인당 매출', key: 'revenuePerPurchase', format: v => formatMoney(v), higherBetter: true, calc: d => d.totalPurchases > 0 ? Math.round(d.revenue / d.totalPurchases) : 0 },
+            ]
+
+            const selectStyle = { padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', color: '#fff', fontSize: '14px', cursor: 'pointer', flex: 1 }
+
+            return (
+              <>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>⚖️ 대조</h2>
+                <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center' }}>
+                  <select value={compareLeftId || ''} onChange={(e) => setCompareLeftId(e.target.value)} style={selectStyle}>
+                    <option value="" style={{ background: '#1e1e2e' }}>좌측 선택</option>
+                    {allSheetData.map(d => <option key={d.name} value={d.name} style={{ background: '#1e1e2e' }}>{d.name}</option>)}
+                  </select>
+                  <span style={{ fontSize: '20px', fontWeight: '700', color: '#6366f1' }}>VS</span>
+                  <select value={compareRightId || ''} onChange={(e) => setCompareRightId(e.target.value)} style={selectStyle}>
+                    <option value="" style={{ background: '#1e1e2e' }}>우측 선택</option>
+                    {allSheetData.map(d => <option key={d.name} value={d.name} style={{ background: '#1e1e2e' }}>{d.name}</option>)}
+                  </select>
+                </div>
+
+                {leftData && rightData ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {/* 헤더 */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: '12px', padding: '12px 20px', marginBottom: '4px' }}>
+                      <div style={{ textAlign: 'center', fontSize: '16px', fontWeight: '700', color: '#6366f1' }}>{leftData.name}</div>
+                      <div style={{ textAlign: 'center', fontSize: '13px', color: '#64748b' }}>항목</div>
+                      <div style={{ textAlign: 'center', fontSize: '16px', fontWeight: '700', color: '#ec4899' }}>{rightData.name}</div>
+                    </div>
+                    {COMPARE_ITEMS.map(item => {
+                      const lv = item.calc ? item.calc(leftData) : leftData[item.key]
+                      const rv = item.calc ? item.calc(rightData) : rightData[item.key]
+                      const lNum = parseFloat(lv) || 0
+                      const rNum = parseFloat(rv) || 0
+                      let leftWin = item.higherBetter ? lNum > rNum : lNum < rNum
+                      let rightWin = item.higherBetter ? rNum > lNum : rNum < lNum
+                      if (lNum === rNum) { leftWin = false; rightWin = false }
+                      return (
+                        <div key={item.key} style={{ display: 'grid', gridTemplateColumns: '1fr 140px 1fr', gap: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', padding: '14px 20px', alignItems: 'center' }}>
+                          <div style={{ textAlign: 'center', fontSize: '17px', fontWeight: '700', color: leftWin ? '#10b981' : '#94a3b8' }}>
+                            {leftWin && <span style={{ fontSize: '12px', marginRight: '4px' }}>▲</span>}
+                            {item.format(lv)}
+                          </div>
+                          <div style={{ textAlign: 'center', fontSize: '12px', color: '#64748b', fontWeight: '500' }}>{item.label}</div>
+                          <div style={{ textAlign: 'center', fontSize: '17px', fontWeight: '700', color: rightWin ? '#10b981' : '#94a3b8' }}>
+                            {rightWin && <span style={{ fontSize: '12px', marginRight: '4px' }}>▲</span>}
+                            {item.format(rv)}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '80px 20px', color: '#64748b' }}>
+                    <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚖️</div>
+                    <p style={{ fontSize: '15px' }}>양쪽 강사/기수를 선택하면 비교 데이터가 표시됩니다</p>
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       </div>
 
