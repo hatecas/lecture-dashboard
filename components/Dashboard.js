@@ -361,7 +361,7 @@ export default function Dashboard({ onLogout }) {
                 backgroundPosition: 'right 16px center'
               }}
             >
-              {[...new Set(sessions.map(s => s.instructors?.name))].filter(Boolean).map(name => (
+              {[...new Set(sessions.map(s => s.instructors?.name))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko')).map(name => (
                 <option key={name} value={name} style={{ background: '#1e1e2e', color: '#fff' }}>{name}</option>
               ))}
             </select>
@@ -389,7 +389,11 @@ export default function Dashboard({ onLogout }) {
                 backgroundPosition: 'right 16px center'
               }}
             >
-              {sessions.filter(s => s.instructors?.name === selectedInstructor).map(session => (
+              {sessions.filter(s => s.instructors?.name === selectedInstructor).sort((a, b) => {
+                const numA = parseInt(a.session_name) || 0
+                const numB = parseInt(b.session_name) || 0
+                return numA - numB
+              }).map(session => (
                 <option key={session.id} value={session.id} style={{ background: '#1e1e2e', color: '#fff' }}>
                   {session.session_name} {session.free_class_date ? `(${session.free_class_date})` : ''}
                 </option>
