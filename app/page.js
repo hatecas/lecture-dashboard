@@ -108,6 +108,8 @@ export default function Home() {
         if (valid) {
           setIsLoggedIn(true)
           setUserName(storedName || user?.name || '')
+          // 알림 권한 요청 (새로고침 시에도)
+          requestNotificationPermission()
           // 세션이 유효하면 타이머 시작 (첫 로드 시에만)
           if (!sessionStartRef.current) {
             sessionStartRef.current = Date.now()
