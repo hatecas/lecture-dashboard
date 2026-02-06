@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
+import { verifyApiAuth } from '@/lib/apiAuth'
 
 export async function POST(request) {
+  // API 인증 검증
+  const auth = await verifyApiAuth(request)
+  if (!auth.authenticated) {
+    return NextResponse.json({ error: auth.error }, { status: 401 })
+  }
+
   try {
     const { sessionData, memos, analysisType } = await request.json()
 

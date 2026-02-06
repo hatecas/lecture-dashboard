@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { checkLoginAttempts, recordLoginAttempt, createSession } from '@/lib/auth'
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -15,6 +16,14 @@ export default function Login({ onLogin }) {
     setLoading(true)
 
     try {
+      // 로그인 시도 횟수 확인 (5회 제한)
+      const attemptCheck = await checkLoginAttempts(username)
+      if (!attemptCheck.allowed) {
+        setError('로그인 시도 횟수를 초과했습니다. 5분 후 다시 시도해주세요.')
+        setLoading(false)
+        return
+      }
+
       // DB에서 관리자 확인
       const { data, error } = await supabase
         .from('admins')
@@ -24,9 +33,29 @@ export default function Login({ onLogin }) {
         .single()
 
       if (error || !data) {
-        setError('아이디 또는 비밀번호가 틀렸습니다.')
+        // 실패 기록
+        await recordLoginAttempt(username, false)
+        const remaining = attemptCheck.remainingAttempts - 1
+        if (remaining > 0) {
+          setError(`아이디 또는 비밀번호가 틀렸습니다. (남은 시도: ${remaining}회)`)
+        } else {
+          setError('로그인 시도 횟수를 초과했습니다. 5분 후 다시 시도해주세요.')
+        }
       } else {
-        onLogin()
+        // 성공 기록
+        await recordLoginAttempt(username, true)
+
+        // 세션 토큰 생성
+        const token = await createSession(data.id)
+        if (token) {
+          localStorage.setItem('authToken', token)
+        }
+
+        // 로그인 로그 기록
+        await supabase.from('login_logs').insert({
+          name: data.name || data.username
+        })
+        onLogin(data.name || data.username)
       }
     } catch (err) {
       setError('로그인 중 오류가 발생했습니다.')

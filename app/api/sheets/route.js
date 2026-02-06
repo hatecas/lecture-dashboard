@@ -1,12 +1,19 @@
 import { NextResponse } from 'next/server'
+import { verifyApiAuth } from '@/lib/apiAuth'
 
 export async function GET(request) {
+  // API 인증 검증
+  const auth = await verifyApiAuth(request)
+  if (!auth.authenticated) {
+    return NextResponse.json({ error: auth.error }, { status: 401 })
+  }
+
   const { searchParams } = new URL(request.url)
   const name = searchParams.get('name')
 
   try {
     const sheetId = '1cG6wewwrBrNZYI9y_PCAA943Y4qqWAJiWzI1zleDXiw'
-    const range = 'A:AP'
+    const range = 'A:AR'
     const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&range=${range}`
 
     const response = await fetch(url)
@@ -30,17 +37,18 @@ export async function GET(request) {
       const rowName = row[0]?.v
       if (!rowName) continue
 
-      const revenue = row[6]?.v || 0
-      const operatingProfit = row[8]?.v || 0
-      const profitMargin = row[9]?.v || 0
-      const adSpend = row[15]?.v || 0
-      const gdnConvCost = row[16]?.v || 0
-      const metaConvCost = row[17]?.v || 0
-      const kakaoDb = row[26]?.v || 0
-      const liveViewers = row[27]?.v || 0
-      const totalPurchases = row[32]?.v || 0
-      const conversionRate = row[41]?.v || 0
-      const freeClassDate = row[1]?.f || null
+      // 카드매출/계좌매출 2열 추가로 기존 인덱스 +2
+      const revenue = row[8]?.v || 0          // 최종매출액 (I열, 기존 G+2)
+      const operatingProfit = row[10]?.v || 0 // 영업이익 (K열, 기존 I+2)
+      const profitMargin = row[11]?.v || 0    // 영업이익률 (L열, 기존 J+2)
+      const adSpend = row[17]?.v || 0         // 광고비 (R열, 기존 P+2)
+      const gdnConvCost = row[18]?.v || 0     // GDN전환단가 (S열, 기존 Q+2)
+      const metaConvCost = row[19]?.v || 0    // 메타전환단가 (T열, 기존 R+2)
+      const kakaoDb = row[28]?.v || 0         // 카톡방 (AC열, 기존 AA+2)
+      const liveViewers = row[29]?.v || 0     // 동시접속 (AD열, 기존 AB+2)
+      const totalPurchases = row[34]?.v || 0  // 결제건수 (AI열, 기존 AG+2)
+      const conversionRate = row[43]?.v || 0  // 전환율 (AR열, 기존 AP+2)
+      const freeClassDate = row[1]?.f || null // 무료강의날짜 (B열, 변경 없음)
 
       allData.push({
         name: rowName.replace(/\s+/g, ' ').trim(),

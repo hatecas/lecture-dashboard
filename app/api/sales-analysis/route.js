@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { verifyApiAuth } from '@/lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -28,6 +29,12 @@ function parseKoreanDate(dateStr) {
 }
 
 export async function POST(request) {
+  // API 인증 검증
+  const auth = await verifyApiAuth(request)
+  if (!auth.authenticated) {
+    return Response.json({ error: auth.error }, { status: 401 })
+  }
+
   try {
     const { tabName, freeClassDate, sessionId } = await request.json()
 

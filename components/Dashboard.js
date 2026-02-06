@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ onLogout, userName }) {
   const [sessions, setSessions] = useState([])
   const [instructors, setInstructors] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
@@ -44,6 +44,15 @@ export default function Dashboard({ onLogout }) {
 
   const [synced, setSynced] = useState(false)
 
+  // API 호출용 인증 헤더 생성
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('authToken')
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : ''
+    }
+  }
+
   useEffect(() => {
     loadSessions()
     loadInstructors()
@@ -80,7 +89,9 @@ export default function Dashboard({ onLogout }) {
 
   const loadAllSheetData = async () => {
     try {
-      const response = await fetch('/api/sheets')
+      const response = await fetch('/api/sheets', {
+        headers: getAuthHeaders()
+      })
       const result = await response.json()
       if (result.data) setAllSheetData(result.data)
     } catch (e) {
@@ -116,7 +127,9 @@ export default function Dashboard({ onLogout }) {
   const loadSheetData = async (instructorName, sessionName) => {
     const name = `${instructorName} ${sessionName}`
     try {
-      const response = await fetch(`/api/sheets?name=${encodeURIComponent(name)}`)
+      const response = await fetch(`/api/sheets?name=${encodeURIComponent(name)}`, {
+        headers: getAuthHeaders()
+      })
       const data = await response.json()
       if (!data.error) return data
     } catch (error) {
@@ -127,7 +140,9 @@ export default function Dashboard({ onLogout }) {
 
   const syncFromSheet = async () => {
     try {
-      const response = await fetch('/api/sheets')
+      const response = await fetch('/api/sheets', {
+        headers: getAuthHeaders()
+      })
       const { data } = await response.json()
       if (!data) return
 
@@ -223,7 +238,7 @@ export default function Dashboard({ onLogout }) {
     try {
       const response = await fetch('/api/sales-analysis', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           tabName,
           freeClassDate: session.free_class_date,
@@ -303,7 +318,7 @@ export default function Dashboard({ onLogout }) {
     try {
       const res = await fetch('/api/youtube-info', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ url })
       })
       const data = await res.json()
@@ -357,7 +372,7 @@ export default function Dashboard({ onLogout }) {
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           sessionData: {
             instructorName: session.instructors?.name,
@@ -394,7 +409,7 @@ export default function Dashboard({ onLogout }) {
       const session = currentSession
       const response = await fetch('/api/sales-analysis', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           tabName: salesTabName.trim(),
           freeClassDate: session.free_class_date,
@@ -484,6 +499,14 @@ export default function Dashboard({ onLogout }) {
 
       {/* 메인 컨텐츠 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
+        {/* 우측 상단 환영 메시지 */}
+        {userName && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '16px 32px 0', maxWidth: '1200px', margin: '0 auto' }}>
+            <div style={{ padding: '8px 16px', background: 'rgba(99,102,241,0.1)', borderRadius: '8px' }}>
+              <span style={{ color: '#a5b4fc', fontSize: '14px' }}><strong>{userName}</strong>님 반갑습니다 👋</span>
+            </div>
+          </div>
+        )}
         <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
           {/* 드롭다운 - 대시보드/상세 탭에서만 표시 */}
           {(currentTab === 'dashboard' || currentTab === 'detail') && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
