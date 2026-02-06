@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { verifyApiAuth } from '@/lib/apiAuth'
 
-// 파일 목록 조회
+// 파일 목록 조회 (강사별)
 export async function GET(request) {
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
@@ -10,16 +10,16 @@ export async function GET(request) {
   }
 
   const { searchParams } = new URL(request.url)
-  const sessionId = searchParams.get('session_id')
+  const instructorId = searchParams.get('instructor_id')
 
-  if (!sessionId) {
-    return NextResponse.json({ error: 'session_id 필요' }, { status: 400 })
+  if (!instructorId) {
+    return NextResponse.json({ error: 'instructor_id 필요' }, { status: 400 })
   }
 
   const { data, error } = await supabase
-    .from('session_attachments')
+    .from('instructor_attachments')
     .select('*')
-    .eq('session_id', sessionId)
+    .eq('instructor_id', instructorId)
     .order('created_at', { ascending: false })
 
   if (error) {
@@ -29,7 +29,7 @@ export async function GET(request) {
   return NextResponse.json({ files: data })
 }
 
-// 파일 업로드
+// 파일 업로드 (강사별)
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
@@ -39,22 +39,22 @@ export async function POST(request) {
   try {
     const formData = await request.formData()
     const file = formData.get('file')
-    const sessionId = formData.get('session_id')
+    const instructorId = formData.get('instructor_id')
     const fileType = formData.get('file_type') // file, link, text
     const linkUrl = formData.get('link_url')
     const linkTitle = formData.get('link_title')
     const description = formData.get('description')
 
-    if (!sessionId) {
-      return NextResponse.json({ error: 'session_id 필요' }, { status: 400 })
+    if (!instructorId) {
+      return NextResponse.json({ error: 'instructor_id 필요' }, { status: 400 })
     }
 
     // 링크 저장
     if (fileType === 'link') {
       const { data, error } = await supabase
-        .from('session_attachments')
+        .from('instructor_attachments')
         .insert({
-          session_id: sessionId,
+          instructor_id: instructorId,
           file_type: 'link',
           file_name: linkTitle || linkUrl,
           file_url: linkUrl,
@@ -103,7 +103,7 @@ export async function POST(request) {
     }
 
     // Supabase Storage에 업로드
-    const storagePath = `session_${sessionId}/${Date.now()}_${fileName}`
+    const storagePath = `instructor_${instructorId}/${Date.now()}_${fileName}`
 
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('attachments')
@@ -124,9 +124,9 @@ export async function POST(request) {
 
     // DB에 메타데이터 저장
     const { data: dbData, error: dbError } = await supabase
-      .from('session_attachments')
+      .from('instructor_attachments')
       .insert({
-        session_id: sessionId,
+        instructor_id: instructorId,
         file_type: category,
         file_name: fileName,
         file_url: urlData.publicUrl,
@@ -166,7 +166,7 @@ export async function DELETE(request) {
 
   // 파일 정보 조회
   const { data: fileData } = await supabase
-    .from('session_attachments')
+    .from('instructor_attachments')
     .select('storage_path, file_type')
     .eq('id', fileId)
     .single()
@@ -180,7 +180,7 @@ export async function DELETE(request) {
 
   // DB에서 삭제
   const { error } = await supabase
-    .from('session_attachments')
+    .from('instructor_attachments')
     .delete()
     .eq('id', fileId)
 
