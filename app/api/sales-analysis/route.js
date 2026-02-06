@@ -92,12 +92,10 @@ export async function POST(request) {
     // 시간순 정렬
     purchases.sort((a, b) => a.datetime - b.datetime)
 
-    // 무료강의 날짜 기준 설정 (19:30 ~ 다음날 00:30)
+    // 무료강의 날짜 기준 설정 (19:30 ~ 22:30, 3시간)
     const freeDate = new Date(freeClassDate)
     const cutoffStart = new Date(freeDate.getFullYear(), freeDate.getMonth(), freeDate.getDate(), 19, 30, 0)
-    const nextDay = new Date(freeDate)
-    nextDay.setDate(nextDay.getDate() + 1)
-    const cutoffEnd = new Date(nextDay.getFullYear(), nextDay.getMonth(), nextDay.getDate(), 0, 30, 0)
+    const cutoffEnd = new Date(freeDate.getFullYear(), freeDate.getMonth(), freeDate.getDate(), 22, 30, 0)
 
     // 범위 내 결제 필터
     const valid = purchases.filter(p => p.datetime >= cutoffStart && p.datetime <= cutoffEnd)
@@ -108,11 +106,11 @@ export async function POST(request) {
 
     const firstPurchase = valid[0].datetime
 
-    // 20분 단위 구간 분석 (총 15개 구간: 19:30 ~ 00:30 = 300분)
+    // 15분 단위 구간 분석 (총 12개 구간: 19:30 ~ 22:30 = 180분)
     const intervals = []
-    for (let i = 0; i < 15; i++) {
-      const startMin = i * 20
-      const endMin = (i + 1) * 20
+    for (let i = 0; i < 12; i++) {
+      const startMin = i * 15
+      const endMin = (i + 1) * 15
       intervals.push({
         label: `${startMin}~${endMin}분`,
         startMin,
