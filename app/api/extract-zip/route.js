@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
-import JSZip from 'jszip'
 
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
@@ -14,6 +13,9 @@ export async function POST(request) {
     if (!fileUrl) {
       return NextResponse.json({ error: 'fileUrl 필요' }, { status: 400 })
     }
+
+    // 동적 import로 jszip 로드
+    const JSZip = (await import('jszip')).default
 
     // ZIP 파일 다운로드
     const response = await fetch(fileUrl)
