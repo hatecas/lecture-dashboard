@@ -617,6 +617,39 @@ export default function Dashboard({ onLogout, userName }) {
     setAnalyzing(true)
     const session = currentSession
     try {
+      // 상세 분석일 때 첨부파일 내용 가져오기
+      let fileContents = []
+      if (tab === 'detail' && attachments.length > 0) {
+        for (const file of attachments) {
+          if (['text', 'document'].includes(file.file_type) ||
+              file.file_name?.match(/\.(txt|md|json|xml|yaml|yml|log)$/i)) {
+            try {
+              const textResponse = await fetch(file.file_url)
+              const text = await textResponse.text()
+              fileContents.push({
+                name: file.file_name,
+                type: file.file_type,
+                content: text.slice(0, 5000) // 최대 5000자
+              })
+            } catch (e) {
+              fileContents.push({
+                name: file.file_name,
+                type: file.file_type,
+                content: '[파일 내용을 읽을 수 없음]'
+              })
+            }
+          } else {
+            fileContents.push({
+              name: file.file_name,
+              type: file.file_type,
+              size: file.file_size,
+              url: file.file_url,
+              content: null
+            })
+          }
+        }
+      }
+
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -636,6 +669,7 @@ export default function Dashboard({ onLogout, userName }) {
             purchaseConversionRate: sheetData?.purchaseConversionRate || null
           },
           memos: memos,
+          attachments: fileContents,
           analysisType: tab
         })
       })
