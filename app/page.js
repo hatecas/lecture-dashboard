@@ -116,7 +116,7 @@ export default function Home() {
           return prev - 1
         })
       }, 1000)
-    }, 1 * 60 * 1000) // 테스트용 1분 (원래 29분)
+    }, 29 * 60 * 1000) // 29분
   }, [sendBrowserNotification, startTitleBlink, stopTitleBlink])
 
   useEffect(() => {
