@@ -82,20 +82,24 @@ export async function POST(request) {
     const ext = fileName.split('.').pop().toLowerCase()
 
     let category = 'other'
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) {
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) {
       category = 'image'
     } else if (['pdf'].includes(ext)) {
       category = 'pdf'
     } else if (['xlsx', 'xls', 'csv'].includes(ext)) {
       category = 'spreadsheet'
-    } else if (['mp4', 'avi', 'mov', 'webm'].includes(ext)) {
+    } else if (['mp4', 'avi', 'mov', 'webm', 'mkv', 'flv'].includes(ext)) {
       category = 'video'
-    } else if (['mp3', 'wav', 'ogg'].includes(ext)) {
+    } else if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) {
       category = 'audio'
-    } else if (['txt', 'md', 'json'].includes(ext)) {
+    } else if (['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'log'].includes(ext)) {
       category = 'text'
-    } else if (['doc', 'docx'].includes(ext)) {
+    } else if (['doc', 'docx', 'hwp', 'hwpx'].includes(ext)) {
       category = 'document'
+    } else if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+      category = 'archive'
+    } else if (['ppt', 'pptx'].includes(ext)) {
+      category = 'presentation'
     }
 
     // Supabase Storage에 업로드

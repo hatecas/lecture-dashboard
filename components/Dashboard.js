@@ -48,7 +48,9 @@ export default function Dashboard({ onLogout, userName }) {
   const [showFileModal, setShowFileModal] = useState(false)
   const [fileUploading, setFileUploading] = useState(false)
   const [newLink, setNewLink] = useState({ url: '', title: '', description: '' })
+  const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef(null)
+  const folderInputRef = useRef(null)
 
   // API 호출용 인증 헤더 생성
   const getAuthHeaders = () => {
@@ -312,8 +314,7 @@ export default function Dashboard({ onLogout, userName }) {
     }
   }
 
-  const handleFileUpload = async (e) => {
-    const files = e.target.files
+  const uploadFiles = async (files) => {
     if (!files || files.length === 0) return
 
     setFileUploading(true)
@@ -339,7 +340,84 @@ export default function Dashboard({ onLogout, userName }) {
     }
     setFileUploading(false)
     loadAttachments()
+  }
+
+  const handleFileUpload = async (e) => {
+    await uploadFiles(e.target.files)
     if (fileInputRef.current) fileInputRef.current.value = ''
+    if (folderInputRef.current) folderInputRef.current.value = ''
+  }
+
+  // 드래그 앤 드롭 핸들러
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }
+
+  const handleDrop = async (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+
+    const items = e.dataTransfer.items
+    const files = []
+
+    // 폴더/파일 모두 처리
+    for (const item of items) {
+      if (item.kind === 'file') {
+        const entry = item.webkitGetAsEntry?.()
+        if (entry) {
+          if (entry.isDirectory) {
+            // 폴더인 경우 내부 파일들 가져오기
+            const folderFiles = await readDirectory(entry)
+            files.push(...folderFiles)
+          } else {
+            files.push(item.getAsFile())
+          }
+        } else {
+          files.push(item.getAsFile())
+        }
+      }
+    }
+
+    if (files.length > 0) {
+      await uploadFiles(files)
+    }
+  }
+
+  // 폴더 내 파일 재귀적으로 읽기
+  const readDirectory = (directory) => {
+    return new Promise((resolve) => {
+      const reader = directory.createReader()
+      const files = []
+
+      const readEntries = () => {
+        reader.readEntries(async (entries) => {
+          if (entries.length === 0) {
+            resolve(files)
+          } else {
+            for (const entry of entries) {
+              if (entry.isFile) {
+                const file = await new Promise((res) => entry.file(res))
+                files.push(file)
+              } else if (entry.isDirectory) {
+                const subFiles = await readDirectory(entry)
+                files.push(...subFiles)
+              }
+            }
+            readEntries()
+          }
+        })
+      }
+      readEntries()
+    })
   }
 
   const handleLinkSave = async () => {
@@ -396,6 +474,8 @@ export default function Dashboard({ onLogout, userName }) {
       case 'text': return '📝'
       case 'document': return '📃'
       case 'link': return '🔗'
+      case 'archive': return '🗜️'
+      case 'presentation': return '📽️'
       default: return '📁'
     }
   }
@@ -1102,7 +1182,19 @@ export default function Dashboard({ onLogout, userName }) {
               </div>
 
               {/* 첨부파일 섹션 */}
-              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
+              <div
+                style={{
+                  background: isDragging ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
+                  borderRadius: '16px',
+                  padding: '24px',
+                  border: isDragging ? '2px dashed #6366f1' : '1px solid rgba(255,255,255,0.1)',
+                  marginBottom: '24px',
+                  transition: 'all 0.2s ease'
+                }}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                   <div style={{ fontSize: '18px', fontWeight: '600' }}>📎 첨부파일 & 링크</div>
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -1110,6 +1202,15 @@ export default function Dashboard({ onLogout, userName }) {
                       type="file"
                       ref={fileInputRef}
                       onChange={handleFileUpload}
+                      multiple
+                      style={{ display: 'none' }}
+                    />
+                    <input
+                      type="file"
+                      ref={folderInputRef}
+                      onChange={handleFileUpload}
+                      webkitdirectory=""
+                      directory=""
                       multiple
                       style={{ display: 'none' }}
                     />
@@ -1121,6 +1222,13 @@ export default function Dashboard({ onLogout, userName }) {
                       {fileUploading ? '업로드 중...' : '파일 업로드'}
                     </button>
                     <button
+                      onClick={() => folderInputRef.current?.click()}
+                      disabled={fileUploading}
+                      style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: '10px', padding: '10px 18px', color: '#a5b4fc', fontSize: '14px', cursor: fileUploading ? 'wait' : 'pointer' }}
+                    >
+                      📁 폴더 업로드
+                    </button>
+                    <button
                       onClick={() => setShowFileModal(true)}
                       style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}
                     >
@@ -1129,7 +1237,16 @@ export default function Dashboard({ onLogout, userName }) {
                   </div>
                 </div>
 
-                {attachments.length > 0 ? (
+                {/* 드래그 앤 드롭 안내 */}
+                {isDragging && (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#a5b4fc', background: 'rgba(99,102,241,0.1)', borderRadius: '12px', marginBottom: '16px' }}>
+                    <div style={{ fontSize: '48px', marginBottom: '12px' }}>📥</div>
+                    <p style={{ fontSize: '16px', fontWeight: '600' }}>여기에 파일을 놓으세요</p>
+                    <p style={{ fontSize: '13px', marginTop: '4px' }}>파일 또는 폴더를 드롭하면 업로드됩니다</p>
+                  </div>
+                )}
+
+                {!isDragging && attachments.length > 0 ? (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
                     {attachments.map((file) => (
                       <div key={file.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1159,11 +1276,11 @@ export default function Dashboard({ onLogout, userName }) {
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                ) : !isDragging && (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', border: '2px dashed rgba(255,255,255,0.1)', borderRadius: '12px' }}>
                     <div style={{ fontSize: '32px', marginBottom: '12px' }}>📁</div>
-                    <p>등록된 파일이 없습니다</p>
-                    <p style={{ fontSize: '13px', marginTop: '8px' }}>이미지, PDF, 문서, 동영상 등 모든 파일을 업로드할 수 있습니다</p>
+                    <p>파일을 드래그하여 업로드하세요</p>
+                    <p style={{ fontSize: '13px', marginTop: '8px' }}>이미지, PDF, 문서, 동영상, ZIP 등 모든 파일 지원</p>
                   </div>
                 )}
               </div>
