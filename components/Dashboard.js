@@ -43,6 +43,7 @@ export default function Dashboard({ onLogout, userName }) {
   })
 
   const [synced, setSynced] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   // API 호출용 인증 헤더 생성
   const getAuthHeaders = () => {
@@ -495,22 +496,27 @@ export default function Dashboard({ onLogout, userName }) {
     <div style={{ minHeight: '100vh', display: 'flex', background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)' }}>
       {/* 사이드바 - 글래스모피즘 */}
       <div style={{
-        width: '240px',
+        width: sidebarCollapsed ? '70px' : '240px',
         background: 'rgba(255,255,255,0.03)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         borderRight: '1px solid rgba(255,255,255,0.08)',
         padding: '20px 0',
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        transition: 'width 0.3s ease'
       }}>
-        <div style={{ padding: '0 20px', marginBottom: '32px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: '700', background: 'linear-gradient(135deg, #60a5fa, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>📊 강의 통합 관리</h1>
+        <div style={{ padding: sidebarCollapsed ? '0 10px' : '0 20px', marginBottom: '32px', display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}>
+          {sidebarCollapsed ? (
+            <span style={{ fontSize: '24px' }}>📊</span>
+          ) : (
+            <h1 style={{ fontSize: '18px', fontWeight: '700', background: 'linear-gradient(135deg, #60a5fa, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>📊 강의 통합 관리</h1>
+          )}
         </div>
         <div style={{ flex: 1 }}>
           <button onClick={() => setCurrentTab('dashboard')} style={{
             width: '100%',
-            padding: '14px 20px',
+            padding: sidebarCollapsed ? '14px 0' : '14px 20px',
             background: currentTab === 'dashboard' ? 'rgba(99,102,241,0.2)' : 'transparent',
             backdropFilter: currentTab === 'dashboard' ? 'blur(10px)' : 'none',
             border: 'none',
@@ -519,17 +525,19 @@ export default function Dashboard({ onLogout, userName }) {
             fontSize: '14px',
             fontWeight: '500',
             cursor: 'pointer',
-            textAlign: 'left',
+            textAlign: sidebarCollapsed ? 'center' : 'left',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
             gap: '10px',
             transition: 'all 0.3s ease'
-          }}>
-            📈 대시보드
+          }} title="대시보드">
+            <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>📈</span>
+            {!sidebarCollapsed && '대시보드'}
           </button>
           <button onClick={() => setCurrentTab('detail')} style={{
             width: '100%',
-            padding: '14px 20px',
+            padding: sidebarCollapsed ? '14px 0' : '14px 20px',
             background: currentTab === 'detail' ? 'rgba(99,102,241,0.2)' : 'transparent',
             backdropFilter: currentTab === 'detail' ? 'blur(10px)' : 'none',
             border: 'none',
@@ -538,17 +546,19 @@ export default function Dashboard({ onLogout, userName }) {
             fontSize: '14px',
             fontWeight: '500',
             cursor: 'pointer',
-            textAlign: 'left',
+            textAlign: sidebarCollapsed ? 'center' : 'left',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
             gap: '10px',
             transition: 'all 0.3s ease'
-          }}>
-            📝 상세 정보
+          }} title="상세 정보">
+            <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>📝</span>
+            {!sidebarCollapsed && '상세 정보'}
           </button>
           <button onClick={() => setCurrentTab('ranking')} style={{
             width: '100%',
-            padding: '14px 20px',
+            padding: sidebarCollapsed ? '14px 0' : '14px 20px',
             background: currentTab === 'ranking' ? 'rgba(99,102,241,0.2)' : 'transparent',
             backdropFilter: currentTab === 'ranking' ? 'blur(10px)' : 'none',
             border: 'none',
@@ -557,17 +567,19 @@ export default function Dashboard({ onLogout, userName }) {
             fontSize: '14px',
             fontWeight: '500',
             cursor: 'pointer',
-            textAlign: 'left',
+            textAlign: sidebarCollapsed ? 'center' : 'left',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
             gap: '10px',
             transition: 'all 0.3s ease'
-          }}>
-            🏆 랭킹
+          }} title="랭킹">
+            <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>🏆</span>
+            {!sidebarCollapsed && '랭킹'}
           </button>
           <button onClick={() => setCurrentTab('compare')} style={{
             width: '100%',
-            padding: '14px 20px',
+            padding: sidebarCollapsed ? '14px 0' : '14px 20px',
             background: currentTab === 'compare' ? 'rgba(99,102,241,0.2)' : 'transparent',
             backdropFilter: currentTab === 'compare' ? 'blur(10px)' : 'none',
             border: 'none',
@@ -576,15 +588,40 @@ export default function Dashboard({ onLogout, userName }) {
             fontSize: '14px',
             fontWeight: '500',
             cursor: 'pointer',
-            textAlign: 'left',
+            textAlign: sidebarCollapsed ? 'center' : 'left',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
             gap: '10px',
             transition: 'all 0.3s ease'
-          }}>
-            ⚖️ 대조
+          }} title="대조">
+            <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>⚖️</span>
+            {!sidebarCollapsed && '대조'}
           </button>
         </div>
+        {/* 사이드바 토글 버튼 */}
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          style={{
+            margin: sidebarCollapsed ? '0 10px' : '0 20px',
+            padding: '12px',
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: '10px',
+            color: 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            transition: 'all 0.3s ease'
+          }}
+          title={sidebarCollapsed ? '사이드바 열기' : '사이드바 닫기'}
+        >
+          <span style={{ transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s ease' }}>◀</span>
+          {!sidebarCollapsed && '접기'}
+        </button>
       </div>
 
       {/* 메인 컨텐츠 */}

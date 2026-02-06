@@ -15,6 +15,38 @@ export default function Home() {
   const expiryTimerRef = useRef(null)
   const countdownRef = useRef(null)
   const sessionStartRef = useRef(null)
+  const notificationRef = useRef(null)
+
+  // 브라우저 알림 권한 요청
+  const requestNotificationPermission = useCallback(async () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission()
+    }
+  }, [])
+
+  // 브라우저 알림 보내기
+  const sendBrowserNotification = useCallback(() => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      // 기존 알림 닫기
+      if (notificationRef.current) {
+        notificationRef.current.close()
+      }
+
+      notificationRef.current = new Notification('세션 만료 알림', {
+        body: '1분 후 자동 로그아웃됩니다. 클릭하여 연장하세요.',
+        icon: '/favicon.ico',
+        tag: 'session-expiry',
+        requireInteraction: true
+      })
+
+      // 알림 클릭 시 페이지로 포커스 + 연장
+      notificationRef.current.onclick = () => {
+        window.focus()
+        handleExtendSession()
+        notificationRef.current.close()
+      }
+    }
+  }, [])
 
   // 세션 연장 처리
   const handleExtendSession = useCallback(async () => {
@@ -22,6 +54,8 @@ export default function Home() {
     if (token) {
       const result = await extendSession(token)
       if (result.success) {
+        // 알림 닫기
+        if (notificationRef.current) notificationRef.current.close()
         setShowExpiryModal(false)
         setCountdown(60)
         // 새로운 29분 타이머 시작
@@ -39,6 +73,8 @@ export default function Home() {
 
     // 29분 후 모달 표시
     expiryTimerRef.current = setTimeout(() => {
+      // 브라우저 알림 전송 (다른 탭에 있어도 알림)
+      sendBrowserNotification()
       setShowExpiryModal(true)
       setCountdown(60)
 
@@ -47,6 +83,8 @@ export default function Home() {
         setCountdown(prev => {
           if (prev <= 1) {
             clearInterval(countdownRef.current)
+            // 알림 닫기
+            if (notificationRef.current) notificationRef.current.close()
             // 자동 로그아웃
             handleLogout()
             return 0
@@ -55,7 +93,7 @@ export default function Home() {
         })
       }, 1000)
     }, 29 * 60 * 1000) // 29분
-  }, [])
+  }, [sendBrowserNotification])
 
   useEffect(() => {
     // 세션 토큰 검증
@@ -106,6 +144,8 @@ export default function Home() {
     // 로그인 시 타이머 시작
     sessionStartRef.current = Date.now()
     startExpiryTimer()
+    // 브라우저 알림 권한 요청
+    requestNotificationPermission()
   }
 
   const handleLogout = async () => {
