@@ -1266,6 +1266,17 @@ export default function Dashboard({ onLogout, userName }) {
             )
           })()}
         </div>
+
+        {/* 푸터 */}
+        <div style={{
+          padding: '20px 32px',
+          textAlign: 'center',
+          color: 'rgba(255,255,255,0.3)',
+          fontSize: '12px',
+          borderTop: '1px solid rgba(255,255,255,0.05)'
+        }}>
+          개발자 이진우
+        </div>
       </div>
 
       {/* 메모 모달 */}
