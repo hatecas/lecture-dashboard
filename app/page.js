@@ -16,6 +16,26 @@ export default function Home() {
   const countdownRef = useRef(null)
   const sessionStartRef = useRef(null)
   const notificationRef = useRef(null)
+  const titleIntervalRef = useRef(null)
+  const originalTitle = useRef('강의 통합 관리')
+
+  // 탭 제목 깜빡이기 (권한 필요 없음)
+  const startTitleBlink = useCallback(() => {
+    if (titleIntervalRef.current) return
+    let isAlert = false
+    titleIntervalRef.current = setInterval(() => {
+      document.title = isAlert ? '⚠️ 세션 만료 경고!' : '🔴 1분 후 로그아웃!'
+      isAlert = !isAlert
+    }, 500)
+  }, [])
+
+  const stopTitleBlink = useCallback(() => {
+    if (titleIntervalRef.current) {
+      clearInterval(titleIntervalRef.current)
+      titleIntervalRef.current = null
+    }
+    document.title = originalTitle.current
+  }, [])
 
   // 브라우저 알림 권한 요청
   const requestNotificationPermission = useCallback(async () => {
@@ -56,6 +76,7 @@ export default function Home() {
       if (result.success) {
         // 알림 닫기
         if (notificationRef.current) notificationRef.current.close()
+        stopTitleBlink()
         setShowExpiryModal(false)
         setCountdown(60)
         // 새로운 29분 타이머 시작
@@ -63,7 +84,7 @@ export default function Home() {
         startExpiryTimer()
       }
     }
-  }, [])
+  }, [stopTitleBlink])
 
   // 29분 후 모달 표시 타이머 시작
   const startExpiryTimer = useCallback(() => {
@@ -73,6 +94,8 @@ export default function Home() {
 
     // 29분 후 모달 표시
     expiryTimerRef.current = setTimeout(() => {
+      // 탭 제목 깜빡이기 시작 (다른 탭에서도 보임)
+      startTitleBlink()
       // 브라우저 알림 전송 (다른 탭에 있어도 알림)
       sendBrowserNotification()
       setShowExpiryModal(true)
@@ -85,6 +108,7 @@ export default function Home() {
             clearInterval(countdownRef.current)
             // 알림 닫기
             if (notificationRef.current) notificationRef.current.close()
+            stopTitleBlink()
             // 자동 로그아웃
             handleLogout()
             return 0
@@ -92,8 +116,8 @@ export default function Home() {
           return prev - 1
         })
       }, 1000)
-    }, 29 * 60 * 1000) // 29분
-  }, [sendBrowserNotification])
+    }, 1 * 60 * 1000) // 테스트용 1분 (원래 29분)
+  }, [sendBrowserNotification, startTitleBlink, stopTitleBlink])
 
   useEffect(() => {
     // 세션 토큰 검증
@@ -154,6 +178,7 @@ export default function Home() {
     // 타이머 클리어
     if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current)
     if (countdownRef.current) clearInterval(countdownRef.current)
+    stopTitleBlink()
     setShowExpiryModal(false)
     sessionStartRef.current = null
 
