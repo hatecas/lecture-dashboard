@@ -44,6 +44,11 @@ export default function Dashboard({ onLogout, userName }) {
 
   const [synced, setSynced] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [attachments, setAttachments] = useState([])
+  const [showFileModal, setShowFileModal] = useState(false)
+  const [fileUploading, setFileUploading] = useState(false)
+  const [newLink, setNewLink] = useState({ url: '', title: '', description: '' })
+  const fileInputRef = useRef(null)
 
   // API 호출용 인증 헤더 생성
   const getAuthHeaders = () => {
@@ -71,6 +76,7 @@ export default function Dashboard({ onLogout, userName }) {
       loadMemos()
       loadYoutubeLinks()
       loadPurchaseTimeline()
+      loadAttachments()
       const session = sessions.find(s => s.id === selectedSessionId)
       if (session) {
         loadSheetData(session.instructors?.name, session.session_name).then(data => {
@@ -290,6 +296,115 @@ export default function Dashboard({ onLogout, userName }) {
       setShowAddModal(false)
       loadInstructors()
     }
+  }
+
+  // 첨부파일 관련 함수들
+  const loadAttachments = async () => {
+    if (!selectedSessionId) return
+    try {
+      const response = await fetch(`/api/files?session_id=${selectedSessionId}`, {
+        headers: getAuthHeaders()
+      })
+      const result = await response.json()
+      if (result.files) setAttachments(result.files)
+    } catch (e) {
+      console.error('첨부파일 로드 실패:', e)
+    }
+  }
+
+  const handleFileUpload = async (e) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    setFileUploading(true)
+    for (const file of files) {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('session_id', selectedSessionId)
+      formData.append('file_type', 'file')
+
+      try {
+        const response = await fetch('/api/files', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+          body: formData
+        })
+        const result = await response.json()
+        if (!result.success) {
+          alert(`${file.name} 업로드 실패: ${result.error}`)
+        }
+      } catch (e) {
+        alert(`${file.name} 업로드 실패`)
+      }
+    }
+    setFileUploading(false)
+    loadAttachments()
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const handleLinkSave = async () => {
+    if (!newLink.url) return
+    setFileUploading(true)
+
+    const formData = new FormData()
+    formData.append('session_id', selectedSessionId)
+    formData.append('file_type', 'link')
+    formData.append('link_url', newLink.url)
+    formData.append('link_title', newLink.title)
+    formData.append('description', newLink.description)
+
+    try {
+      const response = await fetch('/api/files', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+        body: formData
+      })
+      const result = await response.json()
+      if (result.success) {
+        setNewLink({ url: '', title: '', description: '' })
+        setShowFileModal(false)
+        loadAttachments()
+      } else {
+        alert('링크 저장 실패: ' + result.error)
+      }
+    } catch (e) {
+      alert('링크 저장 실패')
+    }
+    setFileUploading(false)
+  }
+
+  const deleteAttachment = async (id) => {
+    if (!confirm('정말 삭제하시겠습니까?')) return
+    try {
+      const response = await fetch(`/api/files?id=${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      })
+      if (response.ok) loadAttachments()
+    } catch (e) {
+      alert('삭제 실패')
+    }
+  }
+
+  const getFileIcon = (type) => {
+    switch(type) {
+      case 'image': return '🖼️'
+      case 'pdf': return '📄'
+      case 'spreadsheet': return '📊'
+      case 'video': return '🎬'
+      case 'audio': return '🎵'
+      case 'text': return '📝'
+      case 'document': return '📃'
+      case 'link': return '🔗'
+      default: return '📁'
+    }
+  }
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return ''
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
   const addSession = async () => {
@@ -986,6 +1101,73 @@ export default function Dashboard({ onLogout, userName }) {
                 )}
               </div>
 
+              {/* 첨부파일 섹션 */}
+              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <div style={{ fontSize: '18px', fontWeight: '600' }}>📎 첨부파일 & 링크</div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileUpload}
+                      multiple
+                      style={{ display: 'none' }}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={fileUploading}
+                      style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: fileUploading ? 'wait' : 'pointer' }}
+                    >
+                      {fileUploading ? '업로드 중...' : '파일 업로드'}
+                    </button>
+                    <button
+                      onClick={() => setShowFileModal(true)}
+                      style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}
+                    >
+                      🔗 링크 추가
+                    </button>
+                  </div>
+                </div>
+
+                {attachments.length > 0 ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+                    {attachments.map((file) => (
+                      <div key={file.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ fontSize: '28px' }}>{getFileIcon(file.file_type)}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {file.file_type === 'link' ? (
+                            <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ color: '#a5b4fc', fontSize: '14px', fontWeight: '500', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {file.file_name}
+                            </a>
+                          ) : (
+                            <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ color: '#e2e8f0', fontSize: '14px', fontWeight: '500', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {file.file_name}
+                            </a>
+                          )}
+                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                            {file.file_type === 'link' ? '링크' : formatFileSize(file.file_size)}
+                            {file.description && ` • ${file.description}`}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => deleteAttachment(file.id)}
+                          style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '18px', cursor: 'pointer', padding: '4px' }}
+                          title="삭제"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                    <div style={{ fontSize: '32px', marginBottom: '12px' }}>📁</div>
+                    <p>등록된 파일이 없습니다</p>
+                    <p style={{ fontSize: '13px', marginTop: '8px' }}>이미지, PDF, 문서, 동영상 등 모든 파일을 업로드할 수 있습니다</p>
+                  </div>
+                )}
+              </div>
+
               {/* AI 분석 */}
               <button onClick={() => runAiAnalysis('detail')} disabled={analyzing} style={{ background: analyzing ? '#4c4c6d' : 'linear-gradient(135deg, #ec4899, #f43f5e)', border: 'none', borderRadius: '12px', padding: '14px 28px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: analyzing ? 'wait' : 'pointer', marginBottom: '24px' }}>
                 {analyzing ? '✨ AI 분석 중...' : '✨ AI 종합 분석 실행'}
@@ -1390,6 +1572,55 @@ export default function Dashboard({ onLogout, userName }) {
               <input type="number" value={newYoutube.conversions} onChange={(e) => setNewYoutube({...newYoutube, conversions: e.target.value})} placeholder="전환 인원 수" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
             </div>
             <button onClick={saveYoutube} disabled={youtubeFetching} style={{ width: '100%', padding: '14px', background: youtubeFetching ? '#4c4c6d' : 'linear-gradient(135deg, #f43f5e, #ec4899)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: youtubeFetching ? 'wait' : 'pointer' }}>추가</button>
+          </div>
+        </div>
+      )}
+
+      {/* 링크 추가 모달 */}
+      {showFileModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '32px', width: '500px', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>🔗 링크 추가</h3>
+              <button onClick={() => setShowFileModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>×</button>
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>URL *</label>
+              <input
+                type="url"
+                value={newLink.url}
+                onChange={(e) => setNewLink({...newLink, url: e.target.value})}
+                placeholder="https://..."
+                style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }}
+              />
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>제목 (선택)</label>
+              <input
+                type="text"
+                value={newLink.title}
+                onChange={(e) => setNewLink({...newLink, title: e.target.value})}
+                placeholder="링크 제목"
+                style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }}
+              />
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>설명 (선택)</label>
+              <input
+                type="text"
+                value={newLink.description}
+                onChange={(e) => setNewLink({...newLink, description: e.target.value})}
+                placeholder="링크에 대한 간단한 설명"
+                style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }}
+              />
+            </div>
+            <button
+              onClick={handleLinkSave}
+              disabled={fileUploading || !newLink.url}
+              style={{ width: '100%', padding: '14px', background: fileUploading || !newLink.url ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: fileUploading || !newLink.url ? 'not-allowed' : 'pointer' }}
+            >
+              {fileUploading ? '저장 중...' : '링크 저장'}
+            </button>
           </div>
         </div>
       )}
