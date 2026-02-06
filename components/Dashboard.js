@@ -24,9 +24,6 @@ export default function Dashboard({ onLogout, userName }) {
   const [allSheetData, setAllSheetData] = useState([])
   const [selectedInstructor, setSelectedInstructor] = useState('')
   const [showYoutubeModal, setShowYoutubeModal] = useState(false)
-  const [showSalesModal, setShowSalesModal] = useState(false)
-  const [salesTabName, setSalesTabName] = useState('')
-  const [salesAnalyzing, setSalesAnalyzing] = useState(false)
   const autoAnalyzedRef = useRef(new Set())
   const [rankingMetric, setRankingMetric] = useState('revenue')
   const [rankingOrder, setRankingOrder] = useState('desc')
@@ -228,23 +225,30 @@ export default function Dashboard({ onLogout, userName }) {
     // 기존 데이터가 구버전인지 확인 - 두번째 항목이 15가 아니면 구버전
     const isOldFormat = data && data.length > 1 && data[1]?.hour !== 15
 
+    // 새 형식 데이터가 있으면 그대로 사용
     if (data && data.length > 0 && !isOldFormat) {
       setPurchaseTimeline(data)
       return
     }
 
-    if (!isOldFormat) setPurchaseTimeline([])
+    // 데이터 없으면 빈 배열로 초기화
+    if (!data || data.length === 0) {
+      setPurchaseTimeline([])
+    }
 
-    // 데이터 없거나 구버전이면 자동으로 매출표에서 분석 시도
-    if (autoAnalyzedRef.current.has(selectedSessionId)) {
-      // 이미 분석 시도한 경우, 구버전 데이터라도 일단 표시
-      if (data && data.length > 0) setPurchaseTimeline(data)
+    // 구버전 데이터는 무시하고 항상 새로 분석 (autoAnalyzedRef는 데이터 없는 경우에만 체크)
+    const needsAnalysis = isOldFormat || !data || data.length === 0
+    if (!needsAnalysis) return
+
+    // 데이터 없는 경우에만 중복 분석 방지
+    if (!isOldFormat && autoAnalyzedRef.current.has(selectedSessionId)) {
       return
     }
     autoAnalyzedRef.current.add(selectedSessionId)
 
     const session = sessions.find(s => s.id === selectedSessionId)
     if (!session || !session.free_class_date) {
+      // 무료강의 날짜 없으면 구버전 데이터라도 표시
       if (data && data.length > 0) setPurchaseTimeline(data)
       return
     }
@@ -419,37 +423,6 @@ export default function Dashboard({ onLogout, userName }) {
       alert('AI 분석 중 오류가 발생했습니다.')
     }
     setAnalyzing(false)
-  }
-
-  const runSalesAnalysis = async () => {
-    if (!salesTabName.trim()) return alert('매출표 탭 이름을 입력하세요')
-    setSalesAnalyzing(true)
-    try {
-      const session = currentSession
-      const response = await fetch('/api/sales-analysis', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          tabName: salesTabName.trim(),
-          freeClassDate: session.free_class_date,
-          sessionId: selectedSessionId
-        })
-      })
-      const data = await response.json()
-      if (data.error) {
-        alert('분석 실패: ' + data.error)
-      } else {
-        console.log('매출 분석 결과:', data)
-        const firstTime = new Date(data.firstPurchase).toLocaleString('ko-KR')
-        alert(`분석 완료!\n첫 결제: ${firstTime}\n범위 내: ${data.totalInRange}건 / 전체: ${data.totalAll}건`)
-        setShowSalesModal(false)
-        setSalesTabName('')
-        loadPurchaseTimeline()
-      }
-    } catch (error) {
-      alert('매출 분석 중 오류: ' + error.message)
-    }
-    setSalesAnalyzing(false)
   }
 
   const getIntervalLabel = (minuteValue) => {
@@ -712,10 +685,7 @@ export default function Dashboard({ onLogout, userName }) {
               {/* 2단 레이아웃 - 글래스모피즘 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
                 <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <div style={{ fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
-                    <button onClick={() => { setSalesTabName(currentSession.instructors?.name + ' ' + currentSession.session_name); setShowSalesModal(true) }} style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', padding: '6px 12px', color: '#a5b4fc', fontSize: '12px', cursor: 'pointer' }}>매출표 분석</button>
-                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
                   {purchaseTimeline.length > 0 ? (
                     <ResponsiveContainer width="100%" height={250}>
                       <AreaChart data={purchaseTimeline.map(item => {
@@ -1217,29 +1187,6 @@ export default function Dashboard({ onLogout, userName }) {
         </div>
       )}
 
-      {/* 매출표 분석 모달 */}
-      {showSalesModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '32px', width: '500px', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>매출표 분석</h3>
-              <button onClick={() => setShowSalesModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>×</button>
-            </div>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>매출표 시트 탭 이름</label>
-              <input type="text" value={salesTabName} onChange={(e) => setSalesTabName(e.target.value)} placeholder="예: 션 2기" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
-              <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>매출표 시트에서 해당 강사의 탭 이름을 입력하세요</p>
-            </div>
-            <div style={{ marginBottom: '16px', padding: '14px', background: 'rgba(99,102,241,0.1)', borderRadius: '10px', fontSize: '13px', color: '#a5b4fc' }}>
-              <div>무료강의 날짜: <strong>{currentSession.free_class_date || '미설정'}</strong></div>
-              <div style={{ marginTop: '4px' }}>분석 범위: 무료강의일 19:30 이후 첫 결제 ~ 다음날 12:30</div>
-            </div>
-            <button onClick={runSalesAnalysis} disabled={salesAnalyzing} style={{ width: '100%', padding: '14px', background: salesAnalyzing ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: salesAnalyzing ? 'wait' : 'pointer' }}>
-              {salesAnalyzing ? '분석 중...' : '분석 실행'}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
