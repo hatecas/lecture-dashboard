@@ -506,12 +506,33 @@ export default function Dashboard({ onLogout, userName }) {
         flexDirection: 'column',
         transition: 'width 0.3s ease'
       }}>
-        <div style={{ padding: sidebarCollapsed ? '0 10px' : '0 20px', marginBottom: '32px', display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}>
+        <div style={{ padding: sidebarCollapsed ? '0 10px' : '0 20px', marginBottom: '32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           {sidebarCollapsed ? (
             <span style={{ fontSize: '24px' }}>📊</span>
           ) : (
             <h1 style={{ fontSize: '18px', fontWeight: '700', background: 'linear-gradient(135deg, #60a5fa, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>📊 강의 통합 관리</h1>
           )}
+          {/* 사이드바 토글 버튼 */}
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            style={{
+              padding: '6px',
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '6px',
+              color: 'rgba(255,255,255,0.5)',
+              fontSize: '12px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.3s ease',
+              transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)'
+            }}
+            title={sidebarCollapsed ? '사이드바 열기' : '사이드바 닫기'}
+          >
+            ◀
+          </button>
         </div>
         <div style={{ flex: 1 }}>
           <button onClick={() => setCurrentTab('dashboard')} style={{
@@ -599,29 +620,6 @@ export default function Dashboard({ onLogout, userName }) {
             {!sidebarCollapsed && '대조'}
           </button>
         </div>
-        {/* 사이드바 토글 버튼 */}
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          style={{
-            margin: sidebarCollapsed ? '0 10px' : '0 20px',
-            padding: '12px',
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '10px',
-            color: 'rgba(255,255,255,0.6)',
-            fontSize: '14px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            transition: 'all 0.3s ease'
-          }}
-          title={sidebarCollapsed ? '사이드바 열기' : '사이드바 닫기'}
-        >
-          <span style={{ transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s ease' }}>◀</span>
-          {!sidebarCollapsed && '접기'}
-        </button>
       </div>
 
       {/* 메인 컨텐츠 */}
