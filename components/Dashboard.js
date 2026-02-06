@@ -224,18 +224,30 @@ export default function Dashboard({ onLogout, userName }) {
 
   const loadPurchaseTimeline = async () => {
     const { data } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
-    if (data && data.length > 0) {
+
+    // 기존 데이터가 30분 단위(구버전)인지 확인 - 두번째 항목이 30이면 구버전
+    const isOldFormat = data && data.length > 1 && data[1]?.hour === 30
+
+    if (data && data.length > 0 && !isOldFormat) {
       setPurchaseTimeline(data)
       return
     }
-    setPurchaseTimeline([])
 
-    // 데이터 없으면 자동으로 매출표에서 분석 시도
-    if (autoAnalyzedRef.current.has(selectedSessionId)) return
+    if (!isOldFormat) setPurchaseTimeline([])
+
+    // 데이터 없거나 구버전이면 자동으로 매출표에서 분석 시도
+    if (autoAnalyzedRef.current.has(selectedSessionId)) {
+      // 이미 분석 시도한 경우, 구버전 데이터라도 일단 표시
+      if (data && data.length > 0) setPurchaseTimeline(data)
+      return
+    }
     autoAnalyzedRef.current.add(selectedSessionId)
 
     const session = sessions.find(s => s.id === selectedSessionId)
-    if (!session || !session.free_class_date) return
+    if (!session || !session.free_class_date) {
+      if (data && data.length > 0) setPurchaseTimeline(data)
+      return
+    }
 
     const tabName = `${session.instructors?.name} ${session.session_name}`
     try {
@@ -252,9 +264,13 @@ export default function Dashboard({ onLogout, userName }) {
       if (result.success) {
         const { data: newData } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
         if (newData) setPurchaseTimeline(newData)
+      } else if (data && data.length > 0) {
+        // 분석 실패시 기존 데이터 표시
+        setPurchaseTimeline(data)
       }
     } catch (e) {
-      // 탭이 없거나 데이터 없으면 무시
+      // 탭이 없거나 데이터 없으면 기존 데이터라도 표시
+      if (data && data.length > 0) setPurchaseTimeline(data)
     }
   }
 
