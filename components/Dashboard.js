@@ -305,13 +305,15 @@ export default function Dashboard({ onLogout, userName }) {
   const loadAttachments = async () => {
     if (!selectedSessionId) return
     try {
-      const response = await fetch(`/api/files?session_id=${selectedSessionId}`, {
-        headers: getAuthHeaders()
+      const response = await fetch(`/api/files?session_id=${selectedSessionId}&t=${Date.now()}`, {
+        headers: getAuthHeaders(),
+        cache: 'no-store'
       })
       const result = await response.json()
-      if (result.files) setAttachments(result.files)
+      setAttachments(result.files || [])
     } catch (e) {
       console.error('첨부파일 로드 실패:', e)
+      setAttachments([])
     }
   }
 
