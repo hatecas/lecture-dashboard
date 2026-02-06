@@ -439,7 +439,9 @@ export default function Dashboard({ onLogout, userName }) {
       if (data.error) {
         alert('분석 실패: ' + data.error)
       } else {
-        alert(`분석 완료! ${data.totalInRange}건 (범위 내) / 전체 ${data.totalAll}건`)
+        console.log('매출 분석 결과:', data)
+        const firstTime = new Date(data.firstPurchase).toLocaleString('ko-KR')
+        alert(`분석 완료!\n첫 결제: ${firstTime}\n범위 내: ${data.totalInRange}건 / 전체: ${data.totalAll}건`)
         setShowSalesModal(false)
         setSalesTabName('')
         loadPurchaseTimeline()
