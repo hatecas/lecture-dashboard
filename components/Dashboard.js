@@ -476,11 +476,6 @@ export default function Dashboard({ onLogout, userName }) {
           </button>
         </div>
         <div style={{ padding: '0 20px' }}>
-          {userName && (
-            <div style={{ marginBottom: '12px', padding: '12px', background: 'rgba(99,102,241,0.1)', borderRadius: '8px', textAlign: 'center' }}>
-              <span style={{ color: '#a5b4fc', fontSize: '13px' }}><strong>{userName}</strong>님 반갑습니다</span>
-            </div>
-          )}
           <button onClick={onLogout} style={{ width: '100%', padding: '12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '13px' }}>
             로그아웃
           </button>
@@ -489,6 +484,14 @@ export default function Dashboard({ onLogout, userName }) {
 
       {/* 메인 컨텐츠 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
+        {/* 우측 상단 환영 메시지 */}
+        {userName && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '16px 32px 0', maxWidth: '1200px', margin: '0 auto' }}>
+            <div style={{ padding: '8px 16px', background: 'rgba(99,102,241,0.1)', borderRadius: '8px' }}>
+              <span style={{ color: '#a5b4fc', fontSize: '14px' }}><strong>{userName}</strong>님 반갑습니다 👋</span>
+            </div>
+          </div>
+        )}
         <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
           {/* 드롭다운 - 대시보드/상세 탭에서만 표시 */}
           {(currentTab === 'dashboard' || currentTab === 'detail') && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
