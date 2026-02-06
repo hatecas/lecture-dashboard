@@ -30,6 +30,8 @@ export default function Dashboard({ onLogout, userName }) {
   const [rankingOrder, setRankingOrder] = useState('desc')
   const [compareLeftId, setCompareLeftId] = useState(null)
   const [compareRightId, setCompareRightId] = useState(null)
+  const [compareLeftInstructor, setCompareLeftInstructor] = useState('')
+  const [compareRightInstructor, setCompareRightInstructor] = useState('')
   const [newYoutube, setNewYoutube] = useState({ channel_name: '', url: '', views: '', conversions: '' })
   const [youtubeFetching, setYoutubeFetching] = useState(false)
   const [newInstructor, setNewInstructor] = useState('')
@@ -1058,6 +1060,34 @@ export default function Dashboard({ onLogout, userName }) {
             const leftData = allSheetData.find(d => d.name === compareLeftId)
             const rightData = allSheetData.find(d => d.name === compareRightId)
 
+            // allSheetData에서 강사명 추출 (name은 "강사명 기수명" 형식)
+            const getInstructorFromName = (name) => {
+              const parts = name.split(' ')
+              return parts.slice(0, -1).join(' ')
+            }
+            const getSessionFromName = (name) => {
+              const parts = name.split(' ')
+              return parts[parts.length - 1]
+            }
+
+            // 강사 목록 (ㄱㄴㄷ순 정렬)
+            const compareInstructors = [...new Set(allSheetData.map(d => getInstructorFromName(d.name)))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'))
+
+            // 선택된 강사의 기수 목록
+            const getSessionsForInstructor = (instructor) => {
+              return allSheetData
+                .filter(d => getInstructorFromName(d.name) === instructor)
+                .map(d => ({ name: d.name, session: getSessionFromName(d.name) }))
+                .sort((a, b) => {
+                  const numA = parseInt(a.session.match(/\d+/)?.[0]) || 0
+                  const numB = parseInt(b.session.match(/\d+/)?.[0]) || 0
+                  return numA - numB
+                })
+            }
+
+            const leftSessions = getSessionsForInstructor(compareLeftInstructor)
+            const rightSessions = getSessionsForInstructor(compareRightInstructor)
+
             const COMPARE_ITEMS = [
               { label: '총 매출', key: 'revenue', format: v => formatMoney(v), higherBetter: true },
               { label: '영업이익', key: 'operatingProfit', format: v => formatMoney(v), higherBetter: true },
@@ -1074,21 +1104,90 @@ export default function Dashboard({ onLogout, userName }) {
               { label: '인당 매출', key: 'revenuePerPurchase', format: v => formatMoney(v), higherBetter: true, calc: d => d.totalPurchases > 0 ? Math.round(d.revenue / d.totalPurchases) : 0 },
             ]
 
-            const selectStyle = { padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', color: '#fff', fontSize: '14px', cursor: 'pointer', flex: 1 }
+            const selectStyle = {
+              padding: '12px 16px',
+              background: 'rgba(255,255,255,0.08)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '12px',
+              color: '#fff',
+              fontSize: '14px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              flex: 1,
+              appearance: 'none',
+              backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M6 8L1 3h10z%27/%3E%3C/svg%3E")',
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 12px center'
+            }
 
             return (
               <>
                 <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>⚖️ 대조</h2>
                 <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center' }}>
-                  <select value={compareLeftId || ''} onChange={(e) => setCompareLeftId(e.target.value)} style={selectStyle}>
-                    <option value="" style={{ background: '#1e1e2e' }}>좌측 선택</option>
-                    {allSheetData.map(d => <option key={d.name} value={d.name} style={{ background: '#1e1e2e' }}>{d.name}</option>)}
-                  </select>
+                  {/* 좌측 선택 */}
+                  <div style={{ flex: 1, display: 'flex', gap: '8px' }}>
+                    <select
+                      value={compareLeftInstructor}
+                      onChange={(e) => {
+                        setCompareLeftInstructor(e.target.value)
+                        setCompareLeftId(null)
+                        // 첫 번째 기수 자동 선택
+                        const sessions = getSessionsForInstructor(e.target.value)
+                        if (sessions.length > 0) setCompareLeftId(sessions[0].name)
+                      }}
+                      style={selectStyle}
+                    >
+                      <option value="" style={{ background: '#1e1e2e' }}>강사 선택</option>
+                      {compareInstructors.map(name => (
+                        <option key={name} value={name} style={{ background: '#1e1e2e' }}>{name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={compareLeftId || ''}
+                      onChange={(e) => setCompareLeftId(e.target.value)}
+                      style={selectStyle}
+                      disabled={!compareLeftInstructor}
+                    >
+                      <option value="" style={{ background: '#1e1e2e' }}>기수 선택</option>
+                      {leftSessions.map(s => (
+                        <option key={s.name} value={s.name} style={{ background: '#1e1e2e' }}>{s.session}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <span style={{ fontSize: '20px', fontWeight: '700', color: '#6366f1' }}>VS</span>
-                  <select value={compareRightId || ''} onChange={(e) => setCompareRightId(e.target.value)} style={selectStyle}>
-                    <option value="" style={{ background: '#1e1e2e' }}>우측 선택</option>
-                    {allSheetData.map(d => <option key={d.name} value={d.name} style={{ background: '#1e1e2e' }}>{d.name}</option>)}
-                  </select>
+
+                  {/* 우측 선택 */}
+                  <div style={{ flex: 1, display: 'flex', gap: '8px' }}>
+                    <select
+                      value={compareRightInstructor}
+                      onChange={(e) => {
+                        setCompareRightInstructor(e.target.value)
+                        setCompareRightId(null)
+                        // 첫 번째 기수 자동 선택
+                        const sessions = getSessionsForInstructor(e.target.value)
+                        if (sessions.length > 0) setCompareRightId(sessions[0].name)
+                      }}
+                      style={selectStyle}
+                    >
+                      <option value="" style={{ background: '#1e1e2e' }}>강사 선택</option>
+                      {compareInstructors.map(name => (
+                        <option key={name} value={name} style={{ background: '#1e1e2e' }}>{name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={compareRightId || ''}
+                      onChange={(e) => setCompareRightId(e.target.value)}
+                      style={selectStyle}
+                      disabled={!compareRightInstructor}
+                    >
+                      <option value="" style={{ background: '#1e1e2e' }}>기수 선택</option>
+                      {rightSessions.map(s => (
+                        <option key={s.name} value={s.name} style={{ background: '#1e1e2e' }}>{s.session}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 {leftData && rightData ? (
