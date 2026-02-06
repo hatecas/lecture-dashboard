@@ -110,16 +110,19 @@ export default function Dashboard({ onLogout, userName }) {
       .select('*, instructors (name)')
     if (data && data.length > 0) {
       setSessions(data)
-      // 강사를 ㄱㄴㄷ순으로 정렬 후 첫 번째 강사 선택
+      // 강사를 ㄱㄴㄷ순으로 정렬 후 첫 번째 강사 선택 (최초 로드 시에만)
       const sortedInstructorNames = [...new Set(data.map(s => s.instructors?.name))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'))
       const firstInstructor = sortedInstructorNames[0] || ''
-      setSelectedInstructor(firstInstructor)
-      // 해당 강사의 기수를 1기순으로 정렬 후 첫 번째 기수 선택
       const getNum = (name) => { const m = name?.match(/(\d+)/); return m ? parseInt(m[1]) : 0 }
-      const firstSession = data
-        .filter(s => s.instructors?.name === firstInstructor)
-        .sort((a, b) => getNum(a.session_name) - getNum(b.session_name))[0]
-      if (firstSession) setSelectedSessionId(firstSession.id)
+      // 기존 선택이 없을 때만 기본값 설정
+      setSelectedInstructor(prev => {
+        if (prev) return prev // 이미 선택된 경우 유지
+        const firstSession = data
+          .filter(s => s.instructors?.name === firstInstructor)
+          .sort((a, b) => getNum(a.session_name) - getNum(b.session_name))[0]
+        if (firstSession) setSelectedSessionId(firstSession.id)
+        return firstInstructor
+      })
     }
     setLoading(false)
   }
