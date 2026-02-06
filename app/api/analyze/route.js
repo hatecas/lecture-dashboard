@@ -72,8 +72,19 @@ ${memoSection}
         const text = data.content[0].text
         const jsonMatch = text.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
-          const analysis = JSON.parse(jsonMatch[0])
-          return NextResponse.json(analysis)
+          try {
+            const analysis = JSON.parse(jsonMatch[0])
+            return NextResponse.json(analysis)
+          } catch (parseError) {
+            // JSON 파싱 실패 시 텍스트 응답으로 대체
+            return NextResponse.json({
+              summary: text.substring(0, 500),
+              strengths: ["AI 응답을 구조화하지 못했습니다"],
+              weaknesses: ["원본 응답을 확인하세요"],
+              recommendations: ["다시 분석을 시도해보세요"],
+              keyInsight: "파싱 오류 - 원본: " + text.substring(0, 100)
+            })
+          }
         }
       }
 
@@ -131,8 +142,18 @@ ${memoSection}
       const text = data.content[0].text
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
-        const analysis = JSON.parse(jsonMatch[0])
-        return NextResponse.json(analysis)
+        try {
+          const analysis = JSON.parse(jsonMatch[0])
+          return NextResponse.json(analysis)
+        } catch (parseError) {
+          return NextResponse.json({
+            summary: text.substring(0, 500),
+            strengths: ["AI 응답을 구조화하지 못했습니다"],
+            weaknesses: ["원본 응답을 확인하세요"],
+            recommendations: ["다시 분석을 시도해보세요"],
+            keyInsight: "파싱 오류 - 원본: " + text.substring(0, 100)
+          })
+        }
       }
     }
 
