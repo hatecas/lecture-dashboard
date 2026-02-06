@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
+import { verifyApiAuth } from '@/lib/apiAuth'
 
 export async function GET(request) {
+  // API 인증 검증
+  const auth = await verifyApiAuth(request)
+  if (!auth.authenticated) {
+    return NextResponse.json({ error: auth.error }, { status: 401 })
+  }
+
   const { searchParams } = new URL(request.url)
   const name = searchParams.get('name')
 
