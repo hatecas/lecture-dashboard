@@ -51,6 +51,11 @@ export default function Login({ onLogin }) {
           localStorage.setItem('authToken', token)
         }
 
+        // 브라우저 알림 권한 요청 (로그인 버튼 클릭 직후라 허용됨)
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission()
+        }
+
         // 로그인 로그 기록
         await supabase.from('login_logs').insert({
           name: data.name || data.username
