@@ -49,6 +49,7 @@ export default function Dashboard({ onLogout, userName }) {
   const [fileUploading, setFileUploading] = useState(false)
   const [newLink, setNewLink] = useState({ url: '', title: '', description: '' })
   const [isDragging, setIsDragging] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState({ show: false, current: 0, total: 0, fileName: '' })
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
 
@@ -317,11 +318,17 @@ export default function Dashboard({ onLogout, userName }) {
   const uploadFiles = async (files) => {
     if (!files || files.length === 0) return
 
+    const fileArray = Array.from(files)
     setFileUploading(true)
+    setUploadProgress({ show: true, current: 0, total: fileArray.length, fileName: '' })
+
     let successCount = 0
     let failCount = 0
 
-    for (const file of files) {
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i]
+      setUploadProgress({ show: true, current: i + 1, total: fileArray.length, fileName: file.name })
+
       const formData = new FormData()
       formData.append('file', file)
       formData.append('session_id', selectedSessionId)
@@ -343,7 +350,9 @@ export default function Dashboard({ onLogout, userName }) {
         failCount++
       }
     }
+
     setFileUploading(false)
+    setUploadProgress({ show: false, current: 0, total: 0, fileName: '' })
     loadAttachments()
 
     // 결과 알림
@@ -1261,35 +1270,45 @@ export default function Dashboard({ onLogout, userName }) {
                 )}
 
                 {!isDragging && attachments.length > 0 ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
-                    {attachments.map((file) => (
-                      <div key={file.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ fontSize: '28px' }}>{getFileIcon(file.file_type)}</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          {file.file_type === 'link' ? (
-                            <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ color: '#a5b4fc', fontSize: '14px', fontWeight: '500', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {file.file_name}
-                            </a>
-                          ) : (
-                            <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ color: '#e2e8f0', fontSize: '14px', fontWeight: '500', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {file.file_name}
-                            </a>
-                          )}
-                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                            {file.file_type === 'link' ? '링크' : formatFileSize(file.file_size)}
-                            {file.description && ` • ${file.description}`}
+                  <>
+                    <div style={{ marginBottom: '12px', fontSize: '13px', color: '#64748b' }}>
+                      총 {attachments.length}개 파일
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+                      {attachments.map((file) => (
+                        <div key={file.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px', position: 'relative' }}>
+                          <div style={{ fontSize: '28px' }}>{getFileIcon(file.file_type)}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {file.file_type === 'link' ? (
+                              <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ color: '#a5b4fc', fontSize: '14px', fontWeight: '500', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {file.file_name}
+                              </a>
+                            ) : (
+                              <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ color: '#e2e8f0', fontSize: '14px', fontWeight: '500', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {file.file_name}
+                              </a>
+                            )}
+                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                              {file.file_type === 'link' ? '🔗 링크' : formatFileSize(file.file_size)}
+                              {file.created_at && ` • ${new Date(file.created_at).toLocaleDateString('ko-KR')}`}
+                            </div>
+                            {file.description && (
+                              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                {file.description}
+                              </div>
+                            )}
                           </div>
+                          <button
+                            onClick={() => deleteAttachment(file.id)}
+                            style={{ background: 'rgba(239,68,68,0.1)', border: 'none', color: '#f87171', fontSize: '16px', cursor: 'pointer', padding: '6px 10px', borderRadius: '8px', transition: 'all 0.2s' }}
+                            title="삭제"
+                          >
+                            🗑️
+                          </button>
                         </div>
-                        <button
-                          onClick={() => deleteAttachment(file.id)}
-                          style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '18px', cursor: 'pointer', padding: '4px' }}
-                          title="삭제"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  </>
                 ) : !isDragging && (
                   <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', border: '2px dashed rgba(255,255,255,0.1)', borderRadius: '12px' }}>
                     <div style={{ fontSize: '32px', marginBottom: '12px' }}>📁</div>
@@ -1752,6 +1771,44 @@ export default function Dashboard({ onLogout, userName }) {
             >
               {fileUploading ? '저장 중...' : '링크 저장'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 파일 업로드 진행 모달 */}
+      {uploadProgress.show && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+          <div style={{ background: 'linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%)', borderRadius: '24px', padding: '40px', width: '420px', border: '1px solid rgba(255,255,255,0.15)', textAlign: 'center', boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5)' }}>
+            <div style={{ width: '80px', height: '80px', background: 'rgba(99,102,241,0.15)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: '36px' }}>
+              📤
+            </div>
+            <h2 style={{ fontSize: '22px', fontWeight: '700', color: '#fff', marginBottom: '12px' }}>
+              파일 업로드 중
+            </h2>
+            <p style={{ fontSize: '15px', color: '#94a3b8', marginBottom: '24px', lineHeight: 1.6 }}>
+              잠시만 기다려주세요...
+            </p>
+
+            {/* 진행률 바 */}
+            <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: '10px', height: '12px', marginBottom: '16px', overflow: 'hidden' }}>
+              <div style={{
+                width: `${(uploadProgress.current / uploadProgress.total) * 100}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #6366f1, #8b5cf6)',
+                borderRadius: '10px',
+                transition: 'width 0.3s ease'
+              }} />
+            </div>
+
+            {/* 진행 상태 텍스트 */}
+            <div style={{ fontSize: '14px', color: '#a5b4fc', fontWeight: '600', marginBottom: '8px' }}>
+              {uploadProgress.current} / {uploadProgress.total} 파일
+            </div>
+
+            {/* 현재 파일명 */}
+            <div style={{ fontSize: '13px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 20px' }}>
+              {uploadProgress.fileName}
+            </div>
           </div>
         </div>
       )}
