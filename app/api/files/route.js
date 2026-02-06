@@ -103,7 +103,11 @@ export async function POST(request) {
     }
 
     // Supabase Storage에 업로드
-    const storagePath = `instructor_${instructorId}/${Date.now()}_${fileName}`
+    // 파일명 정규화 (특수문자, 공백, 한글 제거)
+    const safeFileName = fileName
+      .replace(/[^\w.-]/g, '_')  // 영문, 숫자, 점, 하이픈 외 모두 _로 변환
+      .replace(/_+/g, '_')        // 연속된 _ 제거
+    const storagePath = `instructor_${instructorId}/${Date.now()}_${safeFileName}`
 
     // MIME type 결정 (브라우저가 제대로 감지 못하는 경우 대비)
     let contentType = file.type
