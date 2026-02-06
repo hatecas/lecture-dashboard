@@ -318,6 +318,9 @@ export default function Dashboard({ onLogout, userName }) {
     if (!files || files.length === 0) return
 
     setFileUploading(true)
+    let successCount = 0
+    let failCount = 0
+
     for (const file of files) {
       const formData = new FormData()
       formData.append('file', file)
@@ -331,15 +334,26 @@ export default function Dashboard({ onLogout, userName }) {
           body: formData
         })
         const result = await response.json()
-        if (!result.success) {
-          alert(`${file.name} 업로드 실패: ${result.error}`)
+        if (result.success) {
+          successCount++
+        } else {
+          failCount++
         }
       } catch (e) {
-        alert(`${file.name} 업로드 실패`)
+        failCount++
       }
     }
     setFileUploading(false)
     loadAttachments()
+
+    // 결과 알림
+    if (failCount === 0) {
+      alert(`✅ ${successCount}개 파일 업로드 완료!`)
+    } else if (successCount === 0) {
+      alert(`❌ 업로드 실패 (${failCount}개)`)
+    } else {
+      alert(`⚠️ ${successCount}개 성공, ${failCount}개 실패`)
+    }
   }
 
   const handleFileUpload = async (e) => {
