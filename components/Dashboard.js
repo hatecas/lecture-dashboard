@@ -466,23 +466,96 @@ export default function Dashboard({ onLogout, userName }) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex' }}>
-      {/* 사이드바 */}
-      <div style={{ width: '240px', background: 'rgba(0,0,0,0.3)', borderRight: '1px solid rgba(255,255,255,0.1)', padding: '20px 0', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)' }}>
+      {/* 사이드바 - 글래스모피즘 */}
+      <div style={{
+        width: '240px',
+        background: 'rgba(255,255,255,0.03)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderRight: '1px solid rgba(255,255,255,0.08)',
+        padding: '20px 0',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
         <div style={{ padding: '0 20px', marginBottom: '32px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: '700' }}>📊 강의 통합 관리</h1>
+          <h1 style={{ fontSize: '18px', fontWeight: '700', background: 'linear-gradient(135deg, #60a5fa, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>📊 강의 통합 관리</h1>
         </div>
         <div style={{ flex: 1 }}>
-          <button onClick={() => setCurrentTab('dashboard')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'dashboard' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button onClick={() => setCurrentTab('dashboard')} style={{
+            width: '100%',
+            padding: '14px 20px',
+            background: currentTab === 'dashboard' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'dashboard' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'dashboard' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'dashboard' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            transition: 'all 0.3s ease'
+          }}>
             📈 대시보드
           </button>
-          <button onClick={() => setCurrentTab('detail')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'detail' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button onClick={() => setCurrentTab('detail')} style={{
+            width: '100%',
+            padding: '14px 20px',
+            background: currentTab === 'detail' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'detail' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'detail' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'detail' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            transition: 'all 0.3s ease'
+          }}>
             📝 상세 정보
           </button>
-          <button onClick={() => setCurrentTab('ranking')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'ranking' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button onClick={() => setCurrentTab('ranking')} style={{
+            width: '100%',
+            padding: '14px 20px',
+            background: currentTab === 'ranking' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'ranking' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'ranking' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'ranking' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            transition: 'all 0.3s ease'
+          }}>
             🏆 랭킹
           </button>
-          <button onClick={() => setCurrentTab('compare')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'compare' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button onClick={() => setCurrentTab('compare')} style={{
+            width: '100%',
+            padding: '14px 20px',
+            background: currentTab === 'compare' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'compare' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'compare' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'compare' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            transition: 'all 0.3s ease'
+          }}>
             ⚖️ 대조
           </button>
         </div>
@@ -490,14 +563,14 @@ export default function Dashboard({ onLogout, userName }) {
 
       {/* 메인 컨텐츠 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {/* 우측 상단 환영 메시지 + 로그아웃 */}
+        {/* 우측 상단 환영 메시지 + 로그아웃 - 글래스모피즘 */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 32px 0', maxWidth: '1200px', margin: '0 auto' }}>
           {userName && (
-            <div style={{ padding: '8px 16px', background: 'rgba(99,102,241,0.1)', borderRadius: '8px' }}>
+            <div style={{ padding: '10px 18px', background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.15)' }}>
               <span style={{ color: '#a5b4fc', fontSize: '14px' }}><strong>{userName}</strong>님 반갑습니다 👋</span>
             </div>
           )}
-          <button onClick={onLogout} style={{ padding: '8px 16px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '13px' }}>
+          <button onClick={onLogout} style={{ padding: '10px 18px', background: 'rgba(239,68,68,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', color: '#f87171', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'all 0.3s ease' }}>
             로그아웃
           </button>
         </div>
@@ -517,9 +590,11 @@ export default function Dashboard({ onLogout, userName }) {
                 }
               }}
               style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '12px',
+                background: 'rgba(255,255,255,0.08)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '14px',
                 padding: '14px 20px',
                 color: '#fff',
                 fontSize: '15px',
@@ -545,9 +620,11 @@ export default function Dashboard({ onLogout, userName }) {
                 setAiAnalysis(null)
               }}
               style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '12px',
+                background: 'rgba(255,255,255,0.08)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '14px',
                 padding: '14px 20px',
                 color: '#fff',
                 fontSize: '15px',
@@ -573,23 +650,23 @@ export default function Dashboard({ onLogout, userName }) {
           {/* 대시보드 탭 */}
           {currentTab === 'dashboard' && (
             <>
-              {/* 지표 카드 */}
+              {/* 지표 카드 - 글래스모피즘 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>💰 총 매출</div>
+                <div style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '20px', padding: '24px', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', transition: 'all 0.3s ease', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 40px rgba(96,165,250,0.15)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.2)' }}>
+                  <div style={{ color: '#60a5fa', fontSize: '13px', marginBottom: '12px', fontWeight: '600' }}>💰 총 매출</div>
                   <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
                     {sheetData?.revenue ? formatMoney(sheetData.revenue) : (currentSession.revenue > 0 ? formatMoney(currentSession.revenue) : '진행중')}
                   </div>
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>🎯 구매전환율</div>
+                <div style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '20px', padding: '24px', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', transition: 'all 0.3s ease', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 40px rgba(52,211,153,0.15)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.2)' }}>
+                  <div style={{ color: '#34d399', fontSize: '13px', marginBottom: '12px', fontWeight: '600' }}>🎯 구매전환율</div>
                   <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
                     {sheetData?.purchaseConversionRate ? `${(sheetData.purchaseConversionRate * 100).toFixed(2)}%` : `${purchaseConversionRate}%`}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>시청자 {sheetData?.liveViewers ? formatNumber(sheetData.liveViewers) : formatNumber(currentSession.live_viewers)}명 → 결제 {sheetData?.totalPurchases ? formatNumber(sheetData.totalPurchases) : currentSession.total_purchases}명</div>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginTop: '8px' }}>시청자 {sheetData?.liveViewers ? formatNumber(sheetData.liveViewers) : formatNumber(currentSession.live_viewers)}명 → 결제 {sheetData?.totalPurchases ? formatNumber(sheetData.totalPurchases) : currentSession.total_purchases}명</div>
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '20px', padding: '24px', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', transition: 'all 0.3s ease', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 40px rgba(251,191,36,0.15)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.2)' }}>
+                  <div style={{ color: '#fbbf24', fontSize: '13px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3C6.5 3 2 6.58 2 11C2 13.13 3.05 15.07 4.75 16.5C4.75 17.1 4.33 18.67 2 21C4.37 20.89 6.64 20 8.47 18.5C9.61 18.83 10.81 19 12 19C17.5 19 22 15.42 22 11C22 6.58 17.5 3 12 3Z" fill="#FAE100"/></svg>
                     카톡방 DB
                   </div>
@@ -597,17 +674,17 @@ export default function Dashboard({ onLogout, userName }) {
                     {sheetData?.kakaoRoomDb ? formatNumber(sheetData.kakaoRoomDb) : formatNumber(currentSession.kakao_room_db)}명
                   </div>
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>📈 광고 전환비용</div>
+                <div style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '20px', padding: '24px', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', transition: 'all 0.3s ease', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 40px rgba(167,139,250,0.15)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.2)' }}>
+                  <div style={{ color: '#a78bfa', fontSize: '13px', marginBottom: '12px', fontWeight: '600' }}>📈 광고 전환비용</div>
                   <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
                     {sheetData?.conversionCost ? formatNumber(sheetData.conversionCost) : formatNumber(currentSession.conversion_cost)}원
                   </div>
                 </div>
               </div>
 
-              {/* 2단 레이아웃 */}
+              {/* 2단 레이아웃 - 글래스모피즘 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div style={{ background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '20px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                     <div style={{ fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
                     <button onClick={() => { setSalesTabName(currentSession.instructors?.name + ' ' + currentSession.session_name); setShowSalesModal(true) }} style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', padding: '6px 12px', color: '#a5b4fc', fontSize: '12px', cursor: 'pointer' }}>매출표 분석</button>
@@ -644,7 +721,7 @@ export default function Dashboard({ onLogout, userName }) {
                     </div>
                   )}
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div style={{ background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '20px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>💵 영업이익 현황</div>
                   {(sheetData?.revenue || currentSession.revenue > 0) ? (() => {
                     const profit = sheetData?.operatingProfit || currentSession.operating_profit || 0
@@ -675,39 +752,39 @@ export default function Dashboard({ onLogout, userName }) {
                 </div>
               </div>
 
-              {/* 광고 성과 */}
+              {/* 광고 성과 - 글래스모피즘 */}
               {sheetData ? (() => {
                 const roas = sheetData.adSpend > 0 ? (sheetData.revenue / sheetData.adSpend).toFixed(1) : '-'
                 const revenuePerPurchase = sheetData.totalPurchases > 0 ? Math.round(sheetData.revenue / sheetData.totalPurchases) : 0
                 return (
-                  <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
-                    <div style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>📈 광고 성과</div>
+                  <div style={{ background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '20px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.15)', marginBottom: '24px' }}>
+                    <div style={{ fontSize: '18px', fontWeight: '600', marginBottom: '20px', background: 'linear-gradient(135deg, #60a5fa, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>📈 광고 성과</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>ROAS (광고수익률)</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#60a5fa', marginBottom: '6px', fontWeight: '500' }}>ROAS (광고수익률)</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#f59e0b' }}>{roas}배</div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>매출 ÷ 광고비</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>GDN 전환단가</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#38bdf8', marginBottom: '6px', fontWeight: '500' }}>GDN 전환단가</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#38bdf8' }}>{sheetData.gdnConvCost ? formatNumber(Math.round(sheetData.gdnConvCost)) + '원' : '-'}</div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>구글 광고</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>메타 전환단가</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#818cf8', marginBottom: '6px', fontWeight: '500' }}>메타 전환단가</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#818cf8' }}>{sheetData.metaConvCost ? formatNumber(Math.round(sheetData.metaConvCost)) + '원' : '-'}</div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>페이스북 / 인스타</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>총 광고비</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#f472b6', marginBottom: '6px', fontWeight: '500' }}>총 광고비</div>
                         <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.adSpend)}</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>동시접속 / 결제건수</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#fbbf24', marginBottom: '6px', fontWeight: '500' }}>동시접속 / 결제건수</div>
                         <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.liveViewers)}명 / {formatNumber(sheetData.totalPurchases)}건</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>인당 매출 (객단가)</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#10b981', marginBottom: '6px', fontWeight: '500' }}>인당 매출 (객단가)</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#10b981' }}>{formatMoney(revenuePerPurchase)}</div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>매출 ÷ 결제건수</div>
                       </div>
