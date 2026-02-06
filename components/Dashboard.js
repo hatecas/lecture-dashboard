@@ -432,8 +432,9 @@ export default function Dashboard({ onLogout, userName }) {
   }
 
   const getIntervalLabel = (minuteValue) => {
-    const labels = { 0: '0~30', 30: '30~60', 60: '60~90', 90: '90~120', 120: '120~180', 180: '180~' }
-    return labels[minuteValue] || minuteValue + '분'
+    // 10분 단위 레이블 생성
+    const endMin = minuteValue + 10
+    return `${minuteValue}~${endMin}`
   }
 
   const getSessionNumber = (sessionName) => {
@@ -695,11 +696,12 @@ export default function Dashboard({ onLogout, userName }) {
                     <button onClick={() => { setSalesTabName(currentSession.instructors?.name + ' ' + currentSession.session_name); setShowSalesModal(true) }} style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', padding: '6px 12px', color: '#a5b4fc', fontSize: '12px', cursor: 'pointer' }}>매출표 분석</button>
                   </div>
                   {purchaseTimeline.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
+                    <ResponsiveContainer width="100%" height={250}>
                       <AreaChart data={purchaseTimeline.map(item => {
                         const total = purchaseTimeline.reduce((sum, p) => sum + p.purchases, 0)
                         return {
                           name: getIntervalLabel(item.hour) + '분',
+                          shortName: item.hour + '',
                           purchases: item.purchases,
                           pct: total > 0 ? ((item.purchases / total) * 100).toFixed(1) : 0
                         }
@@ -710,12 +712,17 @@ export default function Dashboard({ onLogout, userName }) {
                             <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                        <XAxis
+                          dataKey="shortName"
+                          tick={{ fill: '#94a3b8', fontSize: 10 }}
+                          interval={4}
+                          tickFormatter={(value) => value % 60 === 0 ? `${Math.floor(value/60)}시간` : `${value}분`}
+                        />
                         <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
                         <Tooltip
                           contentStyle={{ background: '#1e1e2e', border: '1px solid #4c4c6d', borderRadius: '8px', color: '#e2e8f0' }}
                           formatter={(value, name, props) => [`${value}건 (${props.payload.pct}%)`, '구매건수']}
-                          labelFormatter={(label) => label}
+                          labelFormatter={(label, payload) => payload?.[0]?.payload?.name || label}
                         />
                         <Area type="monotone" dataKey="purchases" stroke="#6366f1" fill="url(#purchaseGradient)" strokeWidth={2} />
                       </AreaChart>
