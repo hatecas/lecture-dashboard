@@ -335,15 +335,27 @@ export default function Dashboard({ onLogout, userName }) {
     if (!instructorId) return
 
     const fileArray = Array.from(files)
+
+    // 압축 파일 필터링 (ZIP, RAR, 7Z 등)
+    const archiveExtensions = ['.zip', '.rar', '.7z', '.tar', '.gz']
+    const archiveFiles = fileArray.filter(f => archiveExtensions.some(ext => f.name.toLowerCase().endsWith(ext)))
+    const validFiles = fileArray.filter(f => !archiveExtensions.some(ext => f.name.toLowerCase().endsWith(ext)))
+
+    if (archiveFiles.length > 0) {
+      alert(`압축 파일(${archiveFiles.map(f => f.name).join(', ')})은 AI 분석을 지원하지 않아 업로드가 불가능합니다.`)
+    }
+
+    if (validFiles.length === 0) return
+
     setFileUploading(true)
-    setUploadProgress({ show: true, current: 0, total: fileArray.length, fileName: '' })
+    setUploadProgress({ show: true, current: 0, total: validFiles.length, fileName: '' })
 
     let successCount = 0
     let failCount = 0
 
-    for (let i = 0; i < fileArray.length; i++) {
-      const file = fileArray[i]
-      setUploadProgress({ show: true, current: i + 1, total: fileArray.length, fileName: file.name })
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i]
+      setUploadProgress({ show: true, current: i + 1, total: validFiles.length, fileName: file.name })
 
       const formData = new FormData()
       formData.append('file', file)
