@@ -222,8 +222,8 @@ export default function Dashboard({ onLogout, userName }) {
   const loadPurchaseTimeline = async () => {
     const { data } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
 
-    // 기존 데이터가 구버전인지 확인 - 두번째 항목이 15가 아니면 구버전
-    const isOldFormat = data && data.length > 1 && data[1]?.hour !== 15
+    // 기존 데이터가 구버전인지 확인 - 두번째 항목이 10이 아니면 구버전
+    const isOldFormat = data && data.length > 1 && data[1]?.hour !== 10
 
     // 새 형식 데이터가 있으면 그대로 사용
     if (data && data.length > 0 && !isOldFormat) {
@@ -426,8 +426,8 @@ export default function Dashboard({ onLogout, userName }) {
   }
 
   const getIntervalLabel = (minuteValue) => {
-    // 15분 단위 레이블 생성
-    const endMin = minuteValue + 15
+    // 10분 단위 레이블 생성
+    const endMin = minuteValue + 10
     return `${minuteValue}~${endMin}`
   }
 
@@ -707,7 +707,13 @@ export default function Dashboard({ onLogout, userName }) {
                           dataKey="shortName"
                           tick={{ fill: '#94a3b8', fontSize: 10 }}
                           interval={2}
-                          tickFormatter={(value) => value % 60 === 0 ? `${Math.floor(value/60)}시간` : `${value}분`}
+                          tickFormatter={(value) => {
+                            const min = parseInt(value)
+                            if (min === 0) return '0분'
+                            if (min % 60 === 0) return `${min / 60}시간`
+                            if (min > 60) return `${Math.floor(min / 60)}시간${min % 60}분`
+                            return `${min}분`
+                          }}
                         />
                         <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
                         <Tooltip
