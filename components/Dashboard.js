@@ -79,7 +79,6 @@ export default function Dashboard({ onLogout, userName }) {
       loadMemos()
       loadYoutubeLinks()
       loadPurchaseTimeline()
-      loadAttachments()
       const session = sessions.find(s => s.id === selectedSessionId)
       if (session) {
         loadSheetData(session.instructors?.name, session.session_name).then(data => {
@@ -89,6 +88,13 @@ export default function Dashboard({ onLogout, userName }) {
       }
     }
   }, [selectedSessionId, sessions])
+
+  // 강사 변경 시 첨부파일 로드
+  useEffect(() => {
+    if (selectedInstructor && instructors.length > 0) {
+      loadAttachments()
+    }
+  }, [selectedInstructor, instructors])
 
   // 전체 시트 데이터 로드 (랭킹/대조용)
   useEffect(() => {
@@ -301,13 +307,17 @@ export default function Dashboard({ onLogout, userName }) {
     }
   }
 
-  // 첨부파일 관련 함수들 (강사별 공유)
+  // 첨부파일 관련 함수들 (강사별)
+  const getSelectedInstructorId = () => {
+    const instructor = instructors.find(i => i.name === selectedInstructor)
+    return instructor?.id
+  }
+
   const loadAttachments = async () => {
-    if (!selectedSessionId) return
-    const session = sessions.find(s => s.id === selectedSessionId)
-    if (!session?.instructor_id) return
+    const instructorId = getSelectedInstructorId()
+    if (!instructorId) return
     try {
-      const response = await fetch(`/api/files?instructor_id=${session.instructor_id}&t=${Date.now()}`, {
+      const response = await fetch(`/api/files?instructor_id=${instructorId}&t=${Date.now()}`, {
         headers: getAuthHeaders(),
         cache: 'no-store'
       })
@@ -321,8 +331,8 @@ export default function Dashboard({ onLogout, userName }) {
 
   const uploadFiles = async (files) => {
     if (!files || files.length === 0) return
-    const session = sessions.find(s => s.id === selectedSessionId)
-    if (!session?.instructor_id) return
+    const instructorId = getSelectedInstructorId()
+    if (!instructorId) return
 
     const fileArray = Array.from(files)
     setFileUploading(true)
@@ -337,7 +347,7 @@ export default function Dashboard({ onLogout, userName }) {
 
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('instructor_id', session.instructor_id)
+      formData.append('instructor_id', instructorId)
       formData.append('file_type', 'file')
 
       try {
@@ -451,12 +461,12 @@ export default function Dashboard({ onLogout, userName }) {
 
   const handleLinkSave = async () => {
     if (!newLink.url) return
-    const session = sessions.find(s => s.id === selectedSessionId)
-    if (!session?.instructor_id) return
+    const instructorId = getSelectedInstructorId()
+    if (!instructorId) return
     setFileUploading(true)
 
     const formData = new FormData()
-    formData.append('instructor_id', session.instructor_id)
+    formData.append('instructor_id', instructorId)
     formData.append('file_type', 'link')
     formData.append('link_url', newLink.url)
     formData.append('link_title', newLink.title)
@@ -690,11 +700,10 @@ export default function Dashboard({ onLogout, userName }) {
         }
       }
 
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          sessionData: {
+      // 상세정보 분석은 강사 정보만, 대시보드 분석은 기수 정보 포함
+      const sessionData = tab === 'detail'
+        ? { instructorName: selectedInstructor, sessionName: '' }
+        : {
             instructorName: session.instructors?.name,
             sessionName: session.session_name,
             topic: session.topic,
@@ -707,8 +716,14 @@ export default function Dashboard({ onLogout, userName }) {
             liveViewers: sheetData?.liveViewers || session.live_viewers,
             totalPurchases: sheetData?.totalPurchases || session.total_purchases,
             purchaseConversionRate: sheetData?.purchaseConversionRate || null
-          },
-          memos: memos,
+          }
+
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          sessionData,
+          memos: tab === 'detail' ? [] : memos,
           attachments: fileContents,
           analysisType: tab
         })
@@ -967,39 +982,41 @@ export default function Dashboard({ onLogout, userName }) {
               ))}
             </select>
 
-            {/* 기수 선택 */}
-            <select
-              value={selectedSessionId || ''}
-              onChange={(e) => {
-                setSelectedSessionId(e.target.value)
-                setAiAnalysis(null)
-              }}
-              style={{
-                background: 'rgba(255,255,255,0.08)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-                border: '1px solid rgba(255,255,255,0.2)',
-                borderRadius: '14px',
-                padding: '14px 20px',
-                color: '#fff',
-                fontSize: '15px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                minWidth: '200px',
-                appearance: 'none',
-                backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M6 8L1 3h10z%27/%3E%3C/svg%3E")',
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 16px center'
-              }}
-            >
-              {sessions.filter(s => s.instructors?.name === selectedInstructor)
-                .sort((a, b) => getSessionNumber(a.session_name) - getSessionNumber(b.session_name))
-                .map(session => (
-                <option key={session.id} value={session.id} style={{ background: '#1e1e2e', color: '#fff' }}>
-                  {session.session_name} {session.free_class_date ? `(${session.free_class_date})` : ''}
-                </option>
-              ))}
-            </select>
+            {/* 기수 선택 - 상세정보 탭에서는 숨김 */}
+            {currentTab !== 'detail' && (
+              <select
+                value={selectedSessionId || ''}
+                onChange={(e) => {
+                  setSelectedSessionId(e.target.value)
+                  setAiAnalysis(null)
+                }}
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  backdropFilter: 'blur(12px)',
+                  WebkitBackdropFilter: 'blur(12px)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '14px',
+                  padding: '14px 20px',
+                  color: '#fff',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  minWidth: '200px',
+                  appearance: 'none',
+                  backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M6 8L1 3h10z%27/%3E%3C/svg%3E")',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 16px center'
+                }}
+              >
+                {sessions.filter(s => s.instructors?.name === selectedInstructor)
+                  .sort((a, b) => getSessionNumber(a.session_name) - getSessionNumber(b.session_name))
+                  .map(session => (
+                  <option key={session.id} value={session.id} style={{ background: '#1e1e2e', color: '#fff' }}>
+                    {session.session_name} {session.free_class_date ? `(${session.free_class_date})` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>}
 
           {/* 대시보드 탭 */}
