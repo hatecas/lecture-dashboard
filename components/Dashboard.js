@@ -1342,49 +1342,28 @@ export default function Dashboard({ onLogout, userName }) {
 
                 {!isDragging && attachments.length > 0 ? (
                   <>
-                    <div style={{ marginBottom: '12px', fontSize: '13px', color: '#64748b' }}>
+                    <div style={{ marginBottom: '8px', fontSize: '12px', color: '#64748b' }}>
                       총 {attachments.length}개 파일
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
-                      {attachments.map((file) => (
-                        <div key={file.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '16px', display: 'flex', alignItems: 'center', gap: '12px', position: 'relative' }}>
-                          <div style={{ fontSize: '28px' }}>{getFileIcon(file.file_type)}</div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            {file.file_type === 'link' ? (
-                              <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ color: '#a5b4fc', fontSize: '14px', fontWeight: '500', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {file.file_name}
-                              </a>
-                            ) : (
-                              <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ color: '#e2e8f0', fontSize: '14px', fontWeight: '500', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {file.file_name}
-                              </a>
-                            )}
-                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                              {file.file_type === 'link' ? '🔗 링크' : formatFileSize(file.file_size)}
-                              {file.created_at && ` • ${new Date(file.created_at).toLocaleDateString('ko-KR')}`}
-                            </div>
-                            {file.description && (
-                              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                                {file.description}
-                              </div>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => deleteAttachment(file.id)}
-                            style={{ background: 'rgba(239,68,68,0.1)', border: 'none', color: '#f87171', fontSize: '16px', cursor: 'pointer', padding: '6px 10px', borderRadius: '8px', transition: 'all 0.2s' }}
-                            title="삭제"
-                          >
-                            🗑️
-                          </button>
+                    <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '8px', maxHeight: '300px', overflowY: 'auto' }}>
+                      {attachments.map((file, idx) => (
+                        <div key={file.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: idx < attachments.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', gap: '8px' }}>
+                          <span style={{ fontSize: '14px' }}>{getFileIcon(file.file_type)}</span>
+                          <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, color: file.file_type === 'link' ? '#a5b4fc' : '#e2e8f0', fontSize: '12px', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {file.file_name}
+                          </a>
+                          <span style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                            {file.file_type === 'link' ? '링크' : formatFileSize(file.file_size)}
+                          </span>
+                          <button onClick={() => deleteAttachment(file.id)} style={{ background: 'none', border: 'none', color: '#f87171', fontSize: '12px', cursor: 'pointer', padding: '2px 6px' }} title="삭제">✕</button>
                         </div>
                       ))}
                     </div>
                   </>
                 ) : !isDragging && (
-                  <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', border: '2px dashed rgba(255,255,255,0.1)', borderRadius: '12px' }}>
-                    <div style={{ fontSize: '32px', marginBottom: '12px' }}>📁</div>
-                    <p>파일을 드래그하여 업로드하세요</p>
-                    <p style={{ fontSize: '13px', marginTop: '8px' }}>이미지, PDF, 문서, 동영상, ZIP 등 모든 파일 지원</p>
+                  <div style={{ textAlign: 'center', padding: '30px', color: '#64748b', border: '2px dashed rgba(255,255,255,0.1)', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>📁</div>
+                    <p style={{ fontSize: '13px' }}>파일을 드래그하여 업로드</p>
                   </div>
                 )}
               </div>
