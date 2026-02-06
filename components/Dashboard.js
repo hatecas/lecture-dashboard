@@ -525,6 +525,24 @@ export default function Dashboard({ onLogout, userName }) {
     }
   }
 
+  const deleteAllAttachments = async () => {
+    const instructorId = getSelectedInstructorId()
+    if (!instructorId) return
+    if (!confirm(`${selectedInstructor} 강사의 모든 파일(${attachments.length}개)을 삭제하시겠습니까?`)) return
+    try {
+      const response = await fetch(`/api/files?instructor_id=${instructorId}&delete_all=true`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      })
+      if (response.ok) {
+        loadAttachments()
+        alert('전체 삭제 완료')
+      }
+    } catch (e) {
+      alert('삭제 실패')
+    }
+  }
+
   const getFileIcon = (type) => {
     switch(type) {
       case 'image': return '🖼️'
@@ -1350,8 +1368,9 @@ export default function Dashboard({ onLogout, userName }) {
 
                 {!isDragging && attachments.length > 0 ? (
                   <>
-                    <div style={{ marginBottom: '8px', fontSize: '12px', color: '#64748b' }}>
-                      총 {attachments.length}개 파일
+                    <div style={{ marginBottom: '8px', fontSize: '12px', color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>총 {attachments.length}개 파일</span>
+                      <button onClick={deleteAllAttachments} style={{ background: 'rgba(239,68,68,0.2)', border: 'none', color: '#f87171', fontSize: '11px', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>전체삭제</button>
                     </div>
                     <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '8px', maxHeight: '300px', overflowY: 'auto' }}>
                       {attachments.map((file, idx) => (

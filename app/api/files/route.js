@@ -105,10 +105,25 @@ export async function POST(request) {
     // Supabase Storage에 업로드
     const storagePath = `instructor_${instructorId}/${Date.now()}_${fileName}`
 
+    // MIME type 결정 (브라우저가 제대로 감지 못하는 경우 대비)
+    let contentType = file.type
+    if (!contentType || contentType === 'application/octet-stream') {
+      const mimeMap = {
+        'md': 'text/markdown',
+        'txt': 'text/plain',
+        'json': 'application/json',
+        'xml': 'application/xml',
+        'yaml': 'text/yaml',
+        'yml': 'text/yaml',
+        'csv': 'text/csv'
+      }
+      contentType = mimeMap[ext] || 'application/octet-stream'
+    }
+
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('attachments')
       .upload(storagePath, buffer, {
-        contentType: file.type,
+        contentType: contentType,
         upsert: false
       })
 
@@ -159,7 +174,41 @@ export async function DELETE(request) {
 
   const { searchParams } = new URL(request.url)
   const fileId = searchParams.get('id')
+  const instructorId = searchParams.get('instructor_id')
+  const deleteAll = searchParams.get('delete_all')
 
+  // 전체 삭제
+  if (deleteAll === 'true' && instructorId) {
+    // 모든 파일 정보 조회
+    const { data: files } = await supabase
+      .from('instructor_attachments')
+      .select('storage_path')
+      .eq('instructor_id', instructorId)
+
+    // Storage에서 모든 파일 삭제
+    if (files && files.length > 0) {
+      const storagePaths = files.filter(f => f.storage_path).map(f => f.storage_path)
+      if (storagePaths.length > 0) {
+        await supabase.storage
+          .from('attachments')
+          .remove(storagePaths)
+      }
+    }
+
+    // DB에서 모두 삭제
+    const { error } = await supabase
+      .from('instructor_attachments')
+      .delete()
+      .eq('instructor_id', instructorId)
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true, deleted: files?.length || 0 })
+  }
+
+  // 단일 파일 삭제
   if (!fileId) {
     return NextResponse.json({ error: 'file id 필요' }, { status: 400 })
   }
