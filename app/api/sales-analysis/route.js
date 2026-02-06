@@ -108,11 +108,11 @@ export async function POST(request) {
 
     const firstPurchase = valid[0].datetime
 
-    // 10분 단위 구간 분석 (총 18개 구간: 0~180분)
+    // 5분 단위 구간 분석 (총 36개 구간: 0~180분)
     const intervals = []
-    for (let i = 0; i < 18; i++) {
-      const startMin = i * 10
-      const endMin = (i + 1) * 10
+    for (let i = 0; i < 36; i++) {
+      const startMin = i * 5
+      const endMin = (i + 1) * 5
       intervals.push({
         label: `${startMin}~${endMin}분`,
         startMin,
