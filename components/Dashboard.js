@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ onLogout, userName }) {
   const [sessions, setSessions] = useState([])
   const [instructors, setInstructors] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
@@ -24,14 +24,14 @@ export default function Dashboard({ onLogout }) {
   const [allSheetData, setAllSheetData] = useState([])
   const [selectedInstructor, setSelectedInstructor] = useState('')
   const [showYoutubeModal, setShowYoutubeModal] = useState(false)
-  const [showSalesModal, setShowSalesModal] = useState(false)
-  const [salesTabName, setSalesTabName] = useState('')
-  const [salesAnalyzing, setSalesAnalyzing] = useState(false)
   const autoAnalyzedRef = useRef(new Set())
+  const [timelineInterval, setTimelineInterval] = useState(10) // 5, 10, 15, 20, 30분
   const [rankingMetric, setRankingMetric] = useState('revenue')
   const [rankingOrder, setRankingOrder] = useState('desc')
   const [compareLeftId, setCompareLeftId] = useState(null)
   const [compareRightId, setCompareRightId] = useState(null)
+  const [compareLeftInstructor, setCompareLeftInstructor] = useState('')
+  const [compareRightInstructor, setCompareRightInstructor] = useState('')
   const [newYoutube, setNewYoutube] = useState({ channel_name: '', url: '', views: '', conversions: '' })
   const [youtubeFetching, setYoutubeFetching] = useState(false)
   const [newInstructor, setNewInstructor] = useState('')
@@ -43,6 +43,15 @@ export default function Dashboard({ onLogout }) {
   })
 
   const [synced, setSynced] = useState(false)
+
+  // API 호출용 인증 헤더 생성
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('authToken')
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : ''
+    }
+  }
 
   useEffect(() => {
     loadSessions()
@@ -80,7 +89,9 @@ export default function Dashboard({ onLogout }) {
 
   const loadAllSheetData = async () => {
     try {
-      const response = await fetch('/api/sheets')
+      const response = await fetch('/api/sheets', {
+        headers: getAuthHeaders()
+      })
       const result = await response.json()
       if (result.data) setAllSheetData(result.data)
     } catch (e) {
@@ -99,16 +110,19 @@ export default function Dashboard({ onLogout }) {
       .select('*, instructors (name)')
     if (data && data.length > 0) {
       setSessions(data)
-      // 강사를 ㄱㄴㄷ순으로 정렬 후 첫 번째 강사 선택
+      // 강사를 ㄱㄴㄷ순으로 정렬 후 첫 번째 강사 선택 (최초 로드 시에만)
       const sortedInstructorNames = [...new Set(data.map(s => s.instructors?.name))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'))
       const firstInstructor = sortedInstructorNames[0] || ''
-      setSelectedInstructor(firstInstructor)
-      // 해당 강사의 기수를 1기순으로 정렬 후 첫 번째 기수 선택
       const getNum = (name) => { const m = name?.match(/(\d+)/); return m ? parseInt(m[1]) : 0 }
-      const firstSession = data
-        .filter(s => s.instructors?.name === firstInstructor)
-        .sort((a, b) => getNum(a.session_name) - getNum(b.session_name))[0]
-      if (firstSession) setSelectedSessionId(firstSession.id)
+      // 기존 선택이 없을 때만 기본값 설정
+      setSelectedInstructor(prev => {
+        if (prev) return prev // 이미 선택된 경우 유지
+        const firstSession = data
+          .filter(s => s.instructors?.name === firstInstructor)
+          .sort((a, b) => getNum(a.session_name) - getNum(b.session_name))[0]
+        if (firstSession) setSelectedSessionId(firstSession.id)
+        return firstInstructor
+      })
     }
     setLoading(false)
   }
@@ -116,7 +130,9 @@ export default function Dashboard({ onLogout }) {
   const loadSheetData = async (instructorName, sessionName) => {
     const name = `${instructorName} ${sessionName}`
     try {
-      const response = await fetch(`/api/sheets?name=${encodeURIComponent(name)}`)
+      const response = await fetch(`/api/sheets?name=${encodeURIComponent(name)}`, {
+        headers: getAuthHeaders()
+      })
       const data = await response.json()
       if (!data.error) return data
     } catch (error) {
@@ -127,7 +143,9 @@ export default function Dashboard({ onLogout }) {
 
   const syncFromSheet = async () => {
     try {
-      const response = await fetch('/api/sheets')
+      const response = await fetch('/api/sheets', {
+        headers: getAuthHeaders()
+      })
       const { data } = await response.json()
       if (!data) return
 
@@ -206,24 +224,43 @@ export default function Dashboard({ onLogout }) {
 
   const loadPurchaseTimeline = async () => {
     const { data } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
-    if (data && data.length > 0) {
+
+    // 기존 데이터가 구버전인지 확인 - 두번째 항목이 5가 아니면 구버전
+    const isOldFormat = data && data.length > 1 && data[1]?.hour !== 5
+
+    // 새 형식 데이터가 있으면 그대로 사용
+    if (data && data.length > 0 && !isOldFormat) {
       setPurchaseTimeline(data)
       return
     }
-    setPurchaseTimeline([])
 
-    // 데이터 없으면 자동으로 매출표에서 분석 시도
-    if (autoAnalyzedRef.current.has(selectedSessionId)) return
+    // 데이터 없으면 빈 배열로 초기화
+    if (!data || data.length === 0) {
+      setPurchaseTimeline([])
+    }
+
+    // 구버전 데이터는 무시하고 항상 새로 분석 (autoAnalyzedRef는 데이터 없는 경우에만 체크)
+    const needsAnalysis = isOldFormat || !data || data.length === 0
+    if (!needsAnalysis) return
+
+    // 데이터 없는 경우에만 중복 분석 방지
+    if (!isOldFormat && autoAnalyzedRef.current.has(selectedSessionId)) {
+      return
+    }
     autoAnalyzedRef.current.add(selectedSessionId)
 
     const session = sessions.find(s => s.id === selectedSessionId)
-    if (!session || !session.free_class_date) return
+    if (!session || !session.free_class_date) {
+      // 무료강의 날짜 없으면 구버전 데이터라도 표시
+      if (data && data.length > 0) setPurchaseTimeline(data)
+      return
+    }
 
     const tabName = `${session.instructors?.name} ${session.session_name}`
     try {
       const response = await fetch('/api/sales-analysis', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           tabName,
           freeClassDate: session.free_class_date,
@@ -234,9 +271,13 @@ export default function Dashboard({ onLogout }) {
       if (result.success) {
         const { data: newData } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
         if (newData) setPurchaseTimeline(newData)
+      } else if (data && data.length > 0) {
+        // 분석 실패시 기존 데이터 표시
+        setPurchaseTimeline(data)
       }
     } catch (e) {
-      // 탭이 없거나 데이터 없으면 무시
+      // 탭이 없거나 데이터 없으면 기존 데이터라도 표시
+      if (data && data.length > 0) setPurchaseTimeline(data)
     }
   }
 
@@ -303,7 +344,7 @@ export default function Dashboard({ onLogout }) {
     try {
       const res = await fetch('/api/youtube-info', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ url })
       })
       const data = await res.json()
@@ -357,7 +398,7 @@ export default function Dashboard({ onLogout }) {
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           sessionData: {
             instructorName: session.instructors?.name,
@@ -387,38 +428,38 @@ export default function Dashboard({ onLogout }) {
     setAnalyzing(false)
   }
 
-  const runSalesAnalysis = async () => {
-    if (!salesTabName.trim()) return alert('매출표 탭 이름을 입력하세요')
-    setSalesAnalyzing(true)
-    try {
-      const session = currentSession
-      const response = await fetch('/api/sales-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tabName: salesTabName.trim(),
-          freeClassDate: session.free_class_date,
-          sessionId: selectedSessionId
-        })
-      })
-      const data = await response.json()
-      if (data.error) {
-        alert('분석 실패: ' + data.error)
-      } else {
-        alert(`분석 완료! ${data.totalInRange}건 (범위 내) / 전체 ${data.totalAll}건`)
-        setShowSalesModal(false)
-        setSalesTabName('')
-        loadPurchaseTimeline()
-      }
-    } catch (error) {
-      alert('매출 분석 중 오류: ' + error.message)
-    }
-    setSalesAnalyzing(false)
+  const getIntervalLabel = (minuteValue, interval = timelineInterval) => {
+    // 선택된 간격 단위 레이블 생성
+    const endMin = minuteValue + interval
+    return `${minuteValue}~${endMin}`
   }
 
-  const getIntervalLabel = (minuteValue) => {
-    const labels = { 0: '0~30', 30: '30~60', 60: '60~90', 90: '90~120', 120: '120~180', 180: '180~' }
-    return labels[minuteValue] || minuteValue + '분'
+  // 5분 단위 데이터를 선택된 간격으로 그룹화
+  const getGroupedTimelineData = () => {
+    if (purchaseTimeline.length === 0) return []
+
+    // 5분 단위 데이터를 선택된 간격으로 묶기
+    const grouped = []
+    const intervalCount = 180 / timelineInterval // 180분을 간격으로 나눈 개수
+
+    for (let i = 0; i < intervalCount; i++) {
+      const startMin = i * timelineInterval
+      const endMin = (i + 1) * timelineInterval
+
+      // 해당 범위에 속하는 5분 단위 데이터들의 구매건수 합산
+      let purchases = 0
+      for (let j = startMin; j < endMin; j += 5) {
+        const item = purchaseTimeline.find(p => p.hour === j)
+        if (item) purchases += item.purchases
+      }
+
+      grouped.push({
+        hour: startMin,
+        purchases
+      })
+    }
+
+    return grouped
   }
 
   const getSessionNumber = (sessionName) => {
@@ -451,39 +492,114 @@ export default function Dashboard({ onLogout }) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex' }}>
-      {/* 사이드바 */}
-      <div style={{ width: '240px', background: 'rgba(0,0,0,0.3)', borderRight: '1px solid rgba(255,255,255,0.1)', padding: '20px 0', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)' }}>
+      {/* 사이드바 - 글래스모피즘 */}
+      <div style={{
+        width: '240px',
+        background: 'rgba(255,255,255,0.03)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderRight: '1px solid rgba(255,255,255,0.08)',
+        padding: '20px 0',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
         <div style={{ padding: '0 20px', marginBottom: '32px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: '700' }}>📊 강의 통합 관리</h1>
+          <h1 style={{ fontSize: '18px', fontWeight: '700', background: 'linear-gradient(135deg, #60a5fa, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>📊 강의 통합 관리</h1>
         </div>
         <div style={{ flex: 1 }}>
-          <button onClick={() => setCurrentTab('dashboard')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'dashboard' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button onClick={() => setCurrentTab('dashboard')} style={{
+            width: '100%',
+            padding: '14px 20px',
+            background: currentTab === 'dashboard' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'dashboard' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'dashboard' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'dashboard' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            transition: 'all 0.3s ease'
+          }}>
             📈 대시보드
           </button>
-          <button onClick={() => setCurrentTab('detail')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'detail' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button onClick={() => setCurrentTab('detail')} style={{
+            width: '100%',
+            padding: '14px 20px',
+            background: currentTab === 'detail' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'detail' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'detail' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'detail' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            transition: 'all 0.3s ease'
+          }}>
             📝 상세 정보
           </button>
-          <button onClick={() => setCurrentTab('ranking')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'ranking' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button onClick={() => setCurrentTab('ranking')} style={{
+            width: '100%',
+            padding: '14px 20px',
+            background: currentTab === 'ranking' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'ranking' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'ranking' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'ranking' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            transition: 'all 0.3s ease'
+          }}>
             🏆 랭킹
           </button>
-          <button onClick={() => setCurrentTab('compare')} style={{ width: '100%', padding: '12px 20px', background: currentTab === 'compare' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent', border: 'none', color: '#fff', fontSize: '14px', fontWeight: '500', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button onClick={() => setCurrentTab('compare')} style={{
+            width: '100%',
+            padding: '14px 20px',
+            background: currentTab === 'compare' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'compare' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'compare' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'compare' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            transition: 'all 0.3s ease'
+          }}>
             ⚖️ 대조
-          </button>
-          <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '16px 20px' }} />
-          <button onClick={syncFromSheet} style={{ width: '100%', padding: '12px 20px', background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '14px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            🔄 시트 동기화
-          </button>
-        </div>
-        <div style={{ padding: '0 20px' }}>
-          <button onClick={onLogout} style={{ width: '100%', padding: '12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '13px' }}>
-            로그아웃
           </button>
         </div>
       </div>
 
       {/* 메인 컨텐츠 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
+        {/* 우측 상단 환영 메시지 + 로그아웃 - 글래스모피즘 */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 32px 0', maxWidth: '1200px', margin: '0 auto' }}>
+          {userName && (
+            <div style={{ padding: '10px 18px', background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.15)' }}>
+              <span style={{ color: '#a5b4fc', fontSize: '14px' }}><strong>{userName}</strong>님 반갑습니다 👋</span>
+            </div>
+          )}
+          <button onClick={onLogout} style={{ padding: '10px 18px', background: 'rgba(239,68,68,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', color: '#f87171', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'all 0.3s ease' }}>
+            로그아웃
+          </button>
+        </div>
         <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
           {/* 드롭다운 - 대시보드/상세 탭에서만 표시 */}
           {(currentTab === 'dashboard' || currentTab === 'detail') && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -500,9 +616,11 @@ export default function Dashboard({ onLogout }) {
                 }
               }}
               style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '12px',
+                background: 'rgba(255,255,255,0.08)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '14px',
                 padding: '14px 20px',
                 color: '#fff',
                 fontSize: '15px',
@@ -528,9 +646,11 @@ export default function Dashboard({ onLogout }) {
                 setAiAnalysis(null)
               }}
               style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '12px',
+                background: 'rgba(255,255,255,0.08)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '14px',
                 padding: '14px 20px',
                 color: '#fff',
                 fontSize: '15px',
@@ -556,78 +676,119 @@ export default function Dashboard({ onLogout }) {
           {/* 대시보드 탭 */}
           {currentTab === 'dashboard' && (
             <>
-              {/* 지표 카드 */}
+              {/* 지표 카드 - 글래스모피즘 + 그라데이션 테두리 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>💰 총 매출</div>
-                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
-                    {sheetData?.revenue ? formatMoney(sheetData.revenue) : (currentSession.revenue > 0 ? formatMoney(currentSession.revenue) : '진행중')}
+                <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(96,165,250,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(167,139,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
+                  <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>매출</div>
+                    <div style={{ fontSize: '26px', fontWeight: '700', color: '#60a5fa' }}>
+                      {sheetData?.revenue ? formatMoney(sheetData.revenue) : (currentSession.revenue > 0 ? formatMoney(currentSession.revenue) : '진행중')}
+                    </div>
                   </div>
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>🎯 구매전환율</div>
-                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
-                    {sheetData?.purchaseConversionRate ? `${(sheetData.purchaseConversionRate * 100).toFixed(2)}%` : `${purchaseConversionRate}%`}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>시청자 {sheetData?.liveViewers ? formatNumber(sheetData.liveViewers) : formatNumber(currentSession.live_viewers)}명 → 결제 {sheetData?.totalPurchases ? formatNumber(sheetData.totalPurchases) : currentSession.total_purchases}명</div>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3C6.5 3 2 6.58 2 11C2 13.13 3.05 15.07 4.75 16.5C4.75 17.1 4.33 18.67 2 21C4.37 20.89 6.64 20 8.47 18.5C9.61 18.83 10.81 19 12 19C17.5 19 22 15.42 22 11C22 6.58 17.5 3 12 3Z" fill="#FAE100"/></svg>
-                    카톡방 DB
-                  </div>
-                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
-                    {sheetData?.kakaoRoomDb ? formatNumber(sheetData.kakaoRoomDb) : formatNumber(currentSession.kakao_room_db)}명
+                <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(52,211,153,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(96,165,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
+                  <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>구매전환율</div>
+                    <div style={{ fontSize: '26px', fontWeight: '700', color: '#34d399' }}>
+                      {sheetData?.purchaseConversionRate ? `${(sheetData.purchaseConversionRate * 100).toFixed(2)}%` : `${purchaseConversionRate}%`}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>시청자 {sheetData?.liveViewers ? formatNumber(sheetData.liveViewers) : formatNumber(currentSession.live_viewers)}명 → 결제 {sheetData?.totalPurchases ? formatNumber(sheetData.totalPurchases) : currentSession.total_purchases}명</div>
                   </div>
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>📈 광고 전환비용</div>
-                  <div style={{ fontSize: '28px', fontWeight: '700', color: '#fff' }}>
-                    {sheetData?.conversionCost ? formatNumber(sheetData.conversionCost) : formatNumber(currentSession.conversion_cost)}원
+                <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(251,191,36,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(52,211,153,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
+                  <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>카톡방 DB</div>
+                    <div style={{ fontSize: '26px', fontWeight: '700', color: '#fbbf24' }}>
+                      {sheetData?.kakaoRoomDb ? formatNumber(sheetData.kakaoRoomDb) : formatNumber(currentSession.kakao_room_db)}명
+                    </div>
+                  </div>
+                </div>
+                <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(167,139,250,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(251,191,36,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
+                  <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>광고 전환비용</div>
+                    <div style={{ fontSize: '26px', fontWeight: '700', color: '#a78bfa' }}>
+                      {sheetData?.conversionCost ? formatNumber(sheetData.conversionCost) : formatNumber(currentSession.conversion_cost)}원
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* 2단 레이아웃 */}
+              {/* 2단 레이아웃 - 글래스모피즘 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <div style={{ fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
-                    <button onClick={() => { setSalesTabName(currentSession.instructors?.name + ' ' + currentSession.session_name); setShowSalesModal(true) }} style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', padding: '6px 12px', color: '#a5b4fc', fontSize: '12px', cursor: 'pointer' }}>매출표 분석</button>
+                <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
+                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</span>
+                    <select
+                      value={timelineInterval}
+                      onChange={(e) => setTimelineInterval(parseInt(e.target.value))}
+                      style={{
+                        background: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: '8px',
+                        padding: '6px 12px',
+                        color: '#fff',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        appearance: 'none',
+                        backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%2710%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M6 8L1 3h10z%27/%3E%3C/svg%3E")',
+                        backgroundRepeat: 'no-repeat',
+                        backgroundPosition: 'right 8px center',
+                        paddingRight: '28px'
+                      }}
+                    >
+                      <option value={5} style={{ background: '#1e1e2e' }}>5분</option>
+                      <option value={10} style={{ background: '#1e1e2e' }}>10분</option>
+                      <option value={15} style={{ background: '#1e1e2e' }}>15분</option>
+                      <option value={20} style={{ background: '#1e1e2e' }}>20분</option>
+                      <option value={30} style={{ background: '#1e1e2e' }}>30분</option>
+                    </select>
                   </div>
-                  {purchaseTimeline.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <AreaChart data={purchaseTimeline.map(item => {
-                        const total = purchaseTimeline.reduce((sum, p) => sum + p.purchases, 0)
-                        return {
+                  {purchaseTimeline.length > 0 ? (() => {
+                    const groupedData = getGroupedTimelineData()
+                    const total = groupedData.reduce((sum, p) => sum + p.purchases, 0)
+                    return (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={groupedData.map(item => ({
                           name: getIntervalLabel(item.hour) + '분',
+                          shortName: item.hour + '',
                           purchases: item.purchases,
                           pct: total > 0 ? ((item.purchases / total) * 100).toFixed(1) : 0
-                        }
-                      })}>
+                        }))}>
                         <defs>
                           <linearGradient id="purchaseGradient" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
                             <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                        <XAxis
+                          dataKey="shortName"
+                          tick={{ fill: '#94a3b8', fontSize: 10 }}
+                          interval={2}
+                          tickFormatter={(value) => {
+                            const min = parseInt(value)
+                            if (min === 0) return '0분'
+                            if (min % 60 === 0) return `${min / 60}시간`
+                            if (min > 60) return `${Math.floor(min / 60)}시간${min % 60}분`
+                            return `${min}분`
+                          }}
+                        />
                         <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
                         <Tooltip
                           contentStyle={{ background: '#1e1e2e', border: '1px solid #4c4c6d', borderRadius: '8px', color: '#e2e8f0' }}
                           formatter={(value, name, props) => [`${value}건 (${props.payload.pct}%)`, '구매건수']}
-                          labelFormatter={(label) => label}
+                          labelFormatter={(label, payload) => payload?.[0]?.payload?.name || label}
                         />
                         <Area type="monotone" dataKey="purchases" stroke="#6366f1" fill="url(#purchaseGradient)" strokeWidth={2} />
                       </AreaChart>
                     </ResponsiveContainer>
-                  ) : (
+                    )
+                  })() : (
                     <div style={{ height: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
                       아직 판매 데이터가 없습니다
                     </div>
                   )}
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>💵 영업이익 현황</div>
                   {(sheetData?.revenue || currentSession.revenue > 0) ? (() => {
                     const profit = sheetData?.operatingProfit || currentSession.operating_profit || 0
@@ -658,39 +819,39 @@ export default function Dashboard({ onLogout }) {
                 </div>
               </div>
 
-              {/* 광고 성과 */}
+              {/* 광고 성과 - 글래스모피즘 */}
               {sheetData ? (() => {
                 const roas = sheetData.adSpend > 0 ? (sheetData.revenue / sheetData.adSpend).toFixed(1) : '-'
                 const revenuePerPurchase = sheetData.totalPurchases > 0 ? Math.round(sheetData.revenue / sheetData.totalPurchases) : 0
                 return (
-                  <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
-                    <div style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>📈 광고 성과</div>
+                  <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)', marginBottom: '24px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px', color: 'rgba(255,255,255,0.8)' }}>📈 광고 성과</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>ROAS (광고수익률)</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#60a5fa', marginBottom: '6px', fontWeight: '500' }}>ROAS (광고수익률)</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#f59e0b' }}>{roas}배</div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>매출 ÷ 광고비</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>GDN 전환단가</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#38bdf8', marginBottom: '6px', fontWeight: '500' }}>GDN 전환단가</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#38bdf8' }}>{sheetData.gdnConvCost ? formatNumber(Math.round(sheetData.gdnConvCost)) + '원' : '-'}</div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>구글 광고</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>메타 전환단가</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#818cf8', marginBottom: '6px', fontWeight: '500' }}>메타 전환단가</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#818cf8' }}>{sheetData.metaConvCost ? formatNumber(Math.round(sheetData.metaConvCost)) + '원' : '-'}</div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>페이스북 / 인스타</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>총 광고비</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#f472b6', marginBottom: '6px', fontWeight: '500' }}>총 광고비</div>
                         <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatMoney(sheetData.adSpend)}</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>동시접속 / 결제건수</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#fbbf24', marginBottom: '6px', fontWeight: '500' }}>동시접속 / 결제건수</div>
                         <div style={{ fontSize: '20px', fontWeight: '700' }}>{formatNumber(sheetData.liveViewers)}명 / {formatNumber(sheetData.totalPurchases)}건</div>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>인당 매출 (객단가)</div>
+                      <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ fontSize: '12px', color: '#10b981', marginBottom: '6px', fontWeight: '500' }}>인당 매출 (객단가)</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#10b981' }}>{formatMoney(revenuePerPurchase)}</div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>매출 ÷ 결제건수</div>
                       </div>
@@ -899,6 +1060,34 @@ export default function Dashboard({ onLogout }) {
             const leftData = allSheetData.find(d => d.name === compareLeftId)
             const rightData = allSheetData.find(d => d.name === compareRightId)
 
+            // allSheetData에서 강사명 추출 (name은 "강사명 기수명" 형식)
+            const getInstructorFromName = (name) => {
+              const parts = name.split(' ')
+              return parts.slice(0, -1).join(' ')
+            }
+            const getSessionFromName = (name) => {
+              const parts = name.split(' ')
+              return parts[parts.length - 1]
+            }
+
+            // 강사 목록 (ㄱㄴㄷ순 정렬)
+            const compareInstructors = [...new Set(allSheetData.map(d => getInstructorFromName(d.name)))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'))
+
+            // 선택된 강사의 기수 목록
+            const getSessionsForInstructor = (instructor) => {
+              return allSheetData
+                .filter(d => getInstructorFromName(d.name) === instructor)
+                .map(d => ({ name: d.name, session: getSessionFromName(d.name) }))
+                .sort((a, b) => {
+                  const numA = parseInt(a.session.match(/\d+/)?.[0]) || 0
+                  const numB = parseInt(b.session.match(/\d+/)?.[0]) || 0
+                  return numA - numB
+                })
+            }
+
+            const leftSessions = getSessionsForInstructor(compareLeftInstructor)
+            const rightSessions = getSessionsForInstructor(compareRightInstructor)
+
             const COMPARE_ITEMS = [
               { label: '총 매출', key: 'revenue', format: v => formatMoney(v), higherBetter: true },
               { label: '영업이익', key: 'operatingProfit', format: v => formatMoney(v), higherBetter: true },
@@ -915,21 +1104,90 @@ export default function Dashboard({ onLogout }) {
               { label: '인당 매출', key: 'revenuePerPurchase', format: v => formatMoney(v), higherBetter: true, calc: d => d.totalPurchases > 0 ? Math.round(d.revenue / d.totalPurchases) : 0 },
             ]
 
-            const selectStyle = { padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', color: '#fff', fontSize: '14px', cursor: 'pointer', flex: 1 }
+            const selectStyle = {
+              padding: '12px 16px',
+              background: 'rgba(255,255,255,0.08)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '12px',
+              color: '#fff',
+              fontSize: '14px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              flex: 1,
+              appearance: 'none',
+              backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M6 8L1 3h10z%27/%3E%3C/svg%3E")',
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 12px center'
+            }
 
             return (
               <>
                 <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>⚖️ 대조</h2>
                 <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center' }}>
-                  <select value={compareLeftId || ''} onChange={(e) => setCompareLeftId(e.target.value)} style={selectStyle}>
-                    <option value="" style={{ background: '#1e1e2e' }}>좌측 선택</option>
-                    {allSheetData.map(d => <option key={d.name} value={d.name} style={{ background: '#1e1e2e' }}>{d.name}</option>)}
-                  </select>
+                  {/* 좌측 선택 */}
+                  <div style={{ flex: 1, display: 'flex', gap: '8px' }}>
+                    <select
+                      value={compareLeftInstructor}
+                      onChange={(e) => {
+                        setCompareLeftInstructor(e.target.value)
+                        setCompareLeftId(null)
+                        // 첫 번째 기수 자동 선택
+                        const sessions = getSessionsForInstructor(e.target.value)
+                        if (sessions.length > 0) setCompareLeftId(sessions[0].name)
+                      }}
+                      style={selectStyle}
+                    >
+                      <option value="" style={{ background: '#1e1e2e' }}>강사 선택</option>
+                      {compareInstructors.map(name => (
+                        <option key={name} value={name} style={{ background: '#1e1e2e' }}>{name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={compareLeftId || ''}
+                      onChange={(e) => setCompareLeftId(e.target.value)}
+                      style={selectStyle}
+                      disabled={!compareLeftInstructor}
+                    >
+                      <option value="" style={{ background: '#1e1e2e' }}>기수 선택</option>
+                      {leftSessions.map(s => (
+                        <option key={s.name} value={s.name} style={{ background: '#1e1e2e' }}>{s.session}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <span style={{ fontSize: '20px', fontWeight: '700', color: '#6366f1' }}>VS</span>
-                  <select value={compareRightId || ''} onChange={(e) => setCompareRightId(e.target.value)} style={selectStyle}>
-                    <option value="" style={{ background: '#1e1e2e' }}>우측 선택</option>
-                    {allSheetData.map(d => <option key={d.name} value={d.name} style={{ background: '#1e1e2e' }}>{d.name}</option>)}
-                  </select>
+
+                  {/* 우측 선택 */}
+                  <div style={{ flex: 1, display: 'flex', gap: '8px' }}>
+                    <select
+                      value={compareRightInstructor}
+                      onChange={(e) => {
+                        setCompareRightInstructor(e.target.value)
+                        setCompareRightId(null)
+                        // 첫 번째 기수 자동 선택
+                        const sessions = getSessionsForInstructor(e.target.value)
+                        if (sessions.length > 0) setCompareRightId(sessions[0].name)
+                      }}
+                      style={selectStyle}
+                    >
+                      <option value="" style={{ background: '#1e1e2e' }}>강사 선택</option>
+                      {compareInstructors.map(name => (
+                        <option key={name} value={name} style={{ background: '#1e1e2e' }}>{name}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={compareRightId || ''}
+                      onChange={(e) => setCompareRightId(e.target.value)}
+                      style={selectStyle}
+                      disabled={!compareRightInstructor}
+                    >
+                      <option value="" style={{ background: '#1e1e2e' }}>기수 선택</option>
+                      {rightSessions.map(s => (
+                        <option key={s.name} value={s.name} style={{ background: '#1e1e2e' }}>{s.session}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 {leftData && rightData ? (
@@ -1090,29 +1348,6 @@ export default function Dashboard({ onLogout }) {
         </div>
       )}
 
-      {/* 매출표 분석 모달 */}
-      {showSalesModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '32px', width: '500px', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '20px', fontWeight: '700' }}>매출표 분석</h3>
-              <button onClick={() => setShowSalesModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer' }}>×</button>
-            </div>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>매출표 시트 탭 이름</label>
-              <input type="text" value={salesTabName} onChange={(e) => setSalesTabName(e.target.value)} placeholder="예: 션 2기" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
-              <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>매출표 시트에서 해당 강사의 탭 이름을 입력하세요</p>
-            </div>
-            <div style={{ marginBottom: '16px', padding: '14px', background: 'rgba(99,102,241,0.1)', borderRadius: '10px', fontSize: '13px', color: '#a5b4fc' }}>
-              <div>무료강의 날짜: <strong>{currentSession.free_class_date || '미설정'}</strong></div>
-              <div style={{ marginTop: '4px' }}>분석 범위: 무료강의일 19:30 이후 첫 결제 ~ 다음날 12:30</div>
-            </div>
-            <button onClick={runSalesAnalysis} disabled={salesAnalyzing} style={{ width: '100%', padding: '14px', background: salesAnalyzing ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: salesAnalyzing ? 'wait' : 'pointer' }}>
-              {salesAnalyzing ? '분석 중...' : '분석 실행'}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
