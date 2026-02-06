@@ -352,11 +352,10 @@ export default function Dashboard({ onLogout, userName }) {
 
     let successCount = 0
     let failCount = 0
+    const PARALLEL_LIMIT = 5 // 동시 업로드 개수
 
-    for (let i = 0; i < validFiles.length; i++) {
-      const file = validFiles[i]
-      setUploadProgress({ show: true, current: i + 1, total: validFiles.length, fileName: file.name })
-
+    // 파일 업로드 함수
+    const uploadSingleFile = async (file) => {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('instructor_id', instructorId)
@@ -369,14 +368,23 @@ export default function Dashboard({ onLogout, userName }) {
           body: formData
         })
         const result = await response.json()
-        if (result.success) {
-          successCount++
-        } else {
-          failCount++
-        }
+        return result.success
       } catch (e) {
-        failCount++
+        return false
       }
+    }
+
+    // 병렬 업로드 (5개씩)
+    for (let i = 0; i < validFiles.length; i += PARALLEL_LIMIT) {
+      const batch = validFiles.slice(i, i + PARALLEL_LIMIT)
+      const batchNames = batch.map(f => f.name).join(', ')
+      setUploadProgress({ show: true, current: Math.min(i + PARALLEL_LIMIT, validFiles.length), total: validFiles.length, fileName: batchNames })
+
+      const results = await Promise.all(batch.map(uploadSingleFile))
+      results.forEach(success => {
+        if (success) successCount++
+        else failCount++
+      })
     }
 
     setFileUploading(false)
