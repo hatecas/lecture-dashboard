@@ -301,11 +301,13 @@ export default function Dashboard({ onLogout, userName }) {
     }
   }
 
-  // 첨부파일 관련 함수들
+  // 첨부파일 관련 함수들 (강사별 공유)
   const loadAttachments = async () => {
     if (!selectedSessionId) return
+    const session = sessions.find(s => s.id === selectedSessionId)
+    if (!session?.instructor_id) return
     try {
-      const response = await fetch(`/api/files?session_id=${selectedSessionId}&t=${Date.now()}`, {
+      const response = await fetch(`/api/files?instructor_id=${session.instructor_id}&t=${Date.now()}`, {
         headers: getAuthHeaders(),
         cache: 'no-store'
       })
@@ -319,6 +321,8 @@ export default function Dashboard({ onLogout, userName }) {
 
   const uploadFiles = async (files) => {
     if (!files || files.length === 0) return
+    const session = sessions.find(s => s.id === selectedSessionId)
+    if (!session?.instructor_id) return
 
     const fileArray = Array.from(files)
     setFileUploading(true)
@@ -333,7 +337,7 @@ export default function Dashboard({ onLogout, userName }) {
 
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('session_id', selectedSessionId)
+      formData.append('instructor_id', session.instructor_id)
       formData.append('file_type', 'file')
 
       try {
@@ -447,10 +451,12 @@ export default function Dashboard({ onLogout, userName }) {
 
   const handleLinkSave = async () => {
     if (!newLink.url) return
+    const session = sessions.find(s => s.id === selectedSessionId)
+    if (!session?.instructor_id) return
     setFileUploading(true)
 
     const formData = new FormData()
-    formData.append('session_id', selectedSessionId)
+    formData.append('instructor_id', session.instructor_id)
     formData.append('file_type', 'link')
     formData.append('link_url', newLink.url)
     formData.append('link_title', newLink.title)
@@ -621,7 +627,41 @@ export default function Dashboard({ onLogout, userName }) {
       let fileContents = []
       if (tab === 'detail' && attachments.length > 0) {
         for (const file of attachments) {
-          if (['text', 'document'].includes(file.file_type) ||
+          // ZIP 파일인 경우 내부 파일 추출
+          if (file.file_type === 'archive' || file.file_name?.match(/\.zip$/i)) {
+            try {
+              const zipResponse = await fetch('/api/extract-zip', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ fileUrl: file.file_url })
+              })
+              const zipResult = await zipResponse.json()
+              if (zipResult.success && zipResult.files) {
+                fileContents.push({
+                  name: file.file_name,
+                  type: 'archive',
+                  content: `[ZIP 파일: ${zipResult.totalFiles}개 파일 포함]`,
+                  extractedFiles: zipResult.files
+                })
+                // ZIP 내부 텍스트 파일 내용도 추가
+                for (const extracted of zipResult.files) {
+                  if (extracted.content) {
+                    fileContents.push({
+                      name: `${file.file_name}/${extracted.name}`,
+                      type: extracted.type,
+                      content: extracted.content
+                    })
+                  }
+                }
+              }
+            } catch (e) {
+              fileContents.push({
+                name: file.file_name,
+                type: 'archive',
+                content: '[ZIP 파일 추출 실패]'
+              })
+            }
+          } else if (['text', 'document'].includes(file.file_type) ||
               file.file_name?.match(/\.(txt|md|json|xml|yaml|yml|log)$/i)) {
             try {
               const textResponse = await fetch(file.file_url)
