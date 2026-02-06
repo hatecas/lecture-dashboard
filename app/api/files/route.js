@@ -54,7 +54,7 @@ export async function POST(request) {
       const { data, error } = await supabase
         .from('session_attachments')
         .insert({
-          session_id: parseInt(sessionId),
+          session_id: sessionId,
           file_type: 'link',
           file_name: linkTitle || linkUrl,
           file_url: linkUrl,
@@ -126,7 +126,7 @@ export async function POST(request) {
     const { data: dbData, error: dbError } = await supabase
       .from('session_attachments')
       .insert({
-        session_id: parseInt(sessionId),
+        session_id: sessionId,
         file_type: category,
         file_name: fileName,
         file_url: urlData.publicUrl,
