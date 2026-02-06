@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ onLogout, userName }) {
   const [sessions, setSessions] = useState([])
   const [instructors, setInstructors] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
@@ -476,6 +476,11 @@ export default function Dashboard({ onLogout }) {
           </button>
         </div>
         <div style={{ padding: '0 20px' }}>
+          {userName && (
+            <div style={{ marginBottom: '12px', padding: '12px', background: 'rgba(99,102,241,0.1)', borderRadius: '8px', textAlign: 'center' }}>
+              <span style={{ color: '#a5b4fc', fontSize: '13px' }}><strong>{userName}</strong>님 반갑습니다</span>
+            </div>
+          )}
           <button onClick={onLogout} style={{ width: '100%', padding: '12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '13px' }}>
             로그아웃
           </button>

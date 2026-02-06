@@ -7,24 +7,31 @@ import Dashboard from '@/components/Dashboard'
 
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [userName, setUserName] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     // 로컬스토리지에서 로그인 상태 확인
     const loggedIn = localStorage.getItem('isLoggedIn')
+    const storedName = localStorage.getItem('userName')
     if (loggedIn === 'true') {
       setIsLoggedIn(true)
+      setUserName(storedName || '')
     }
     setLoading(false)
   }, [])
 
-  const handleLogin = () => {
+  const handleLogin = (name) => {
     localStorage.setItem('isLoggedIn', 'true')
+    localStorage.setItem('userName', name || '')
+    setUserName(name || '')
     setIsLoggedIn(true)
   }
 
   const handleLogout = () => {
     localStorage.removeItem('isLoggedIn')
+    localStorage.removeItem('userName')
+    setUserName('')
     setIsLoggedIn(false)
   }
 
@@ -45,5 +52,5 @@ export default function Home() {
     return <Login onLogin={handleLogin} />
   }
 
-  return <Dashboard onLogout={handleLogout} />
+  return <Dashboard onLogout={handleLogout} userName={userName} />
 }

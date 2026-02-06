@@ -26,7 +26,11 @@ export default function Login({ onLogin }) {
       if (error || !data) {
         setError('아이디 또는 비밀번호가 틀렸습니다.')
       } else {
-        onLogin()
+        // 로그인 로그 기록
+        await supabase.from('login_logs').insert({
+          name: data.name || data.username
+        })
+        onLogin(data.name || data.username)
       }
     } catch (err) {
       setError('로그인 중 오류가 발생했습니다.')
