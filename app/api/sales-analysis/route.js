@@ -92,12 +92,12 @@ export async function POST(request) {
     // 시간순 정렬
     purchases.sort((a, b) => a.datetime - b.datetime)
 
-    // 무료강의 날짜 기준 설정
+    // 무료강의 날짜 기준 설정 (19:30 ~ 다음날 00:30)
     const freeDate = new Date(freeClassDate)
     const cutoffStart = new Date(freeDate.getFullYear(), freeDate.getMonth(), freeDate.getDate(), 19, 30, 0)
     const nextDay = new Date(freeDate)
     nextDay.setDate(nextDay.getDate() + 1)
-    const cutoffEnd = new Date(nextDay.getFullYear(), nextDay.getMonth(), nextDay.getDate(), 12, 30, 0)
+    const cutoffEnd = new Date(nextDay.getFullYear(), nextDay.getMonth(), nextDay.getDate(), 0, 30, 0)
 
     // 범위 내 결제 필터
     const valid = purchases.filter(p => p.datetime >= cutoffStart && p.datetime <= cutoffEnd)
@@ -108,15 +108,17 @@ export async function POST(request) {
 
     const firstPurchase = valid[0].datetime
 
-    // 30분 단위 구간 분석
-    const intervals = [
-      { label: '0~30분', startMin: 0, endMin: 30 },
-      { label: '30~60분', startMin: 30, endMin: 60 },
-      { label: '60~90분', startMin: 60, endMin: 90 },
-      { label: '90~120분', startMin: 90, endMin: 120 },
-      { label: '120~180분', startMin: 120, endMin: 180 },
-      { label: '180분~', startMin: 180, endMin: 999999 },
-    ]
+    // 10분 단위 구간 분석 (총 30개 구간: 19:30 ~ 00:30 = 300분)
+    const intervals = []
+    for (let i = 0; i < 30; i++) {
+      const startMin = i * 10
+      const endMin = (i + 1) * 10
+      intervals.push({
+        label: `${startMin}~${endMin}분`,
+        startMin,
+        endMin
+      })
+    }
 
     const results = intervals.map(interval => {
       const count = valid.filter(p => {
