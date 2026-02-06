@@ -25,6 +25,7 @@ export default function Dashboard({ onLogout, userName }) {
   const [selectedInstructor, setSelectedInstructor] = useState('')
   const [showYoutubeModal, setShowYoutubeModal] = useState(false)
   const autoAnalyzedRef = useRef(new Set())
+  const [timelineInterval, setTimelineInterval] = useState(10) // 5, 10, 15, 20, 30분
   const [rankingMetric, setRankingMetric] = useState('revenue')
   const [rankingOrder, setRankingOrder] = useState('desc')
   const [compareLeftId, setCompareLeftId] = useState(null)
@@ -222,8 +223,8 @@ export default function Dashboard({ onLogout, userName }) {
   const loadPurchaseTimeline = async () => {
     const { data } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
 
-    // 기존 데이터가 구버전인지 확인 - 두번째 항목이 10이 아니면 구버전
-    const isOldFormat = data && data.length > 1 && data[1]?.hour !== 10
+    // 기존 데이터가 구버전인지 확인 - 두번째 항목이 5가 아니면 구버전
+    const isOldFormat = data && data.length > 1 && data[1]?.hour !== 5
 
     // 새 형식 데이터가 있으면 그대로 사용
     if (data && data.length > 0 && !isOldFormat) {
@@ -425,10 +426,38 @@ export default function Dashboard({ onLogout, userName }) {
     setAnalyzing(false)
   }
 
-  const getIntervalLabel = (minuteValue) => {
-    // 10분 단위 레이블 생성
-    const endMin = minuteValue + 10
+  const getIntervalLabel = (minuteValue, interval = timelineInterval) => {
+    // 선택된 간격 단위 레이블 생성
+    const endMin = minuteValue + interval
     return `${minuteValue}~${endMin}`
+  }
+
+  // 5분 단위 데이터를 선택된 간격으로 그룹화
+  const getGroupedTimelineData = () => {
+    if (purchaseTimeline.length === 0) return []
+
+    // 5분 단위 데이터를 선택된 간격으로 묶기
+    const grouped = []
+    const intervalCount = 180 / timelineInterval // 180분을 간격으로 나눈 개수
+
+    for (let i = 0; i < intervalCount; i++) {
+      const startMin = i * timelineInterval
+      const endMin = (i + 1) * timelineInterval
+
+      // 해당 범위에 속하는 5분 단위 데이터들의 구매건수 합산
+      let purchases = 0
+      for (let j = startMin; j < endMin; j += 5) {
+        const item = purchaseTimeline.find(p => p.hour === j)
+        if (item) purchases += item.purchases
+      }
+
+      grouped.push({
+        hour: startMin,
+        purchases
+      })
+    }
+
+    return grouped
   }
 
   const getSessionNumber = (sessionName) => {
@@ -685,18 +714,44 @@ export default function Dashboard({ onLogout, userName }) {
               {/* 2단 레이아웃 - 글래스모피즘 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
                 <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</div>
-                  {purchaseTimeline.length > 0 ? (
+                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</span>
+                    <select
+                      value={timelineInterval}
+                      onChange={(e) => setTimelineInterval(parseInt(e.target.value))}
+                      style={{
+                        background: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: '8px',
+                        padding: '6px 12px',
+                        color: '#fff',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        appearance: 'none',
+                        backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%2710%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M6 8L1 3h10z%27/%3E%3C/svg%3E")',
+                        backgroundRepeat: 'no-repeat',
+                        backgroundPosition: 'right 8px center',
+                        paddingRight: '28px'
+                      }}
+                    >
+                      <option value={5} style={{ background: '#1e1e2e' }}>5분</option>
+                      <option value={10} style={{ background: '#1e1e2e' }}>10분</option>
+                      <option value={15} style={{ background: '#1e1e2e' }}>15분</option>
+                      <option value={20} style={{ background: '#1e1e2e' }}>20분</option>
+                      <option value={30} style={{ background: '#1e1e2e' }}>30분</option>
+                    </select>
+                  </div>
+                  {purchaseTimeline.length > 0 ? (() => {
+                    const groupedData = getGroupedTimelineData()
+                    const total = groupedData.reduce((sum, p) => sum + p.purchases, 0)
+                    return (
                     <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={purchaseTimeline.map(item => {
-                        const total = purchaseTimeline.reduce((sum, p) => sum + p.purchases, 0)
-                        return {
+                      <AreaChart data={groupedData.map(item => ({
                           name: getIntervalLabel(item.hour) + '분',
                           shortName: item.hour + '',
                           purchases: item.purchases,
                           pct: total > 0 ? ((item.purchases / total) * 100).toFixed(1) : 0
-                        }
-                      })}>
+                        }))}>
                         <defs>
                           <linearGradient id="purchaseGradient" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
@@ -724,7 +779,8 @@ export default function Dashboard({ onLogout, userName }) {
                         <Area type="monotone" dataKey="purchases" stroke="#6366f1" fill="url(#purchaseGradient)" strokeWidth={2} />
                       </AreaChart>
                     </ResponsiveContainer>
-                  ) : (
+                    )
+                  })() : (
                     <div style={{ height: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
                       아직 판매 데이터가 없습니다
                     </div>
