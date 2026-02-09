@@ -56,9 +56,11 @@ export default function Login({ onLogin }) {
           Notification.requestPermission()
         }
 
-        // 로그인 로그 기록
-        await supabase.from('login_logs').insert({
-          name: data.name || data.username
+        // 로그인 로그 기록 (IP 포함)
+        await fetch('/api/login-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: data.name || data.username })
         })
         onLogin(data.name || data.username)
       }
@@ -80,8 +82,9 @@ export default function Login({ onLogin }) {
         background: 'rgba(255,255,255,0.05)',
         backdropFilter: 'blur(20px)',
         borderRadius: '24px',
-        padding: '48px',
-        width: '400px',
+        padding: '32px',
+        width: '90%',
+        maxWidth: '400px',
         border: '1px solid rgba(255,255,255,0.1)',
       }}>
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>

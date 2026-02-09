@@ -44,6 +44,8 @@ export default function Dashboard({ onLogout, userName }) {
 
   const [synced, setSynced] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [attachments, setAttachments] = useState([])
   const [showFileModal, setShowFileModal] = useState(false)
   const [fileUploading, setFileUploading] = useState(false)
@@ -65,6 +67,17 @@ export default function Dashboard({ onLogout, userName }) {
   useEffect(() => {
     loadSessions()
     loadInstructors()
+
+    // 모바일 감지
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768)
+      if (window.innerWidth <= 768) {
+        setSidebarCollapsed(true)
+      }
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
   useEffect(() => {
@@ -217,6 +230,23 @@ export default function Dashboard({ onLogout, userName }) {
             await supabase.from('sessions').delete().eq('id', s.id)
           } else {
             seen.set(key, s.id)
+          }
+        }
+      }
+
+      // 시트에 없는 강사/기수 삭제
+      const sheetInstructorNames = [...new Set(data.map(item => {
+        const parts = item.name.replace(/\s+/g, ' ').trim().split(' ')
+        return parts.slice(0, -1).join(' ')
+      }))]
+
+      const { data: dbInstructors } = await supabase.from('instructors').select('*')
+      if (dbInstructors) {
+        for (const inst of dbInstructors) {
+          if (!sheetInstructorNames.includes(inst.name.trim())) {
+            // 시트에 없는 강사 삭제 (cascade로 sessions도 삭제됨)
+            await supabase.from('sessions').delete().eq('instructor_id', inst.id)
+            await supabase.from('instructors').delete().eq('id', inst.id)
           }
         }
       }
@@ -807,9 +837,25 @@ export default function Dashboard({ onLogout, userName }) {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)' }}>
+      {/* 모바일 오버레이 */}
+      {isMobile && mobileMenuOpen && (
+        <div
+          onClick={() => setMobileMenuOpen(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 998
+          }}
+        />
+      )}
+
       {/* 사이드바 - 글래스모피즘 */}
       <div style={{
-        width: sidebarCollapsed ? '70px' : '240px',
+        width: isMobile ? '240px' : (sidebarCollapsed ? '70px' : '240px'),
         background: 'rgba(255,255,255,0.03)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
@@ -817,38 +863,63 @@ export default function Dashboard({ onLogout, userName }) {
         padding: '20px 0',
         display: 'flex',
         flexDirection: 'column',
-        transition: 'width 0.3s ease'
+        transition: 'all 0.3s ease',
+        ...(isMobile ? {
+          position: 'fixed',
+          top: 0,
+          left: mobileMenuOpen ? 0 : '-250px',
+          height: '100vh',
+          zIndex: 999
+        } : {})
       }}>
-        <div style={{ padding: sidebarCollapsed ? '0 10px' : '0 20px', marginBottom: '32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          {sidebarCollapsed ? (
+        <div style={{ padding: sidebarCollapsed && !isMobile ? '0 10px' : '0 20px', marginBottom: '32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {sidebarCollapsed && !isMobile ? (
             <span style={{ fontSize: '24px' }}>📊</span>
           ) : (
             <h1 style={{ fontSize: '18px', fontWeight: '700', background: 'linear-gradient(135deg, #60a5fa, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>📊 강의 통합 관리</h1>
           )}
           {/* 사이드바 토글 버튼 */}
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            style={{
-              padding: '6px',
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '6px',
-              color: 'rgba(255,255,255,0.5)',
-              fontSize: '12px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.3s ease',
-              transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)'
-            }}
-            title={sidebarCollapsed ? '사이드바 열기' : '사이드바 닫기'}
-          >
-            ◀
-          </button>
+          {!isMobile && (
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              style={{
+                padding: '6px',
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '6px',
+                color: 'rgba(255,255,255,0.5)',
+                fontSize: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.3s ease',
+                transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)'
+              }}
+              title={sidebarCollapsed ? '사이드바 열기' : '사이드바 닫기'}
+            >
+              ◀
+            </button>
+          )}
+          {isMobile && (
+            <button
+              onClick={() => setMobileMenuOpen(false)}
+              style={{
+                padding: '6px',
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '6px',
+                color: 'rgba(255,255,255,0.5)',
+                fontSize: '14px',
+                cursor: 'pointer'
+              }}
+            >
+              ✕
+            </button>
+          )}
         </div>
         <div style={{ flex: 1 }}>
-          <button onClick={() => setCurrentTab('dashboard')} style={{
+          <button onClick={() => { setCurrentTab('dashboard'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '14px 0' : '14px 20px',
             background: currentTab === 'dashboard' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -869,7 +940,7 @@ export default function Dashboard({ onLogout, userName }) {
             <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>📈</span>
             {!sidebarCollapsed && '대시보드'}
           </button>
-          <button onClick={() => setCurrentTab('detail')} style={{
+          <button onClick={() => { setCurrentTab('detail'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '14px 0' : '14px 20px',
             background: currentTab === 'detail' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -890,7 +961,7 @@ export default function Dashboard({ onLogout, userName }) {
             <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>📝</span>
             {!sidebarCollapsed && '상세 정보'}
           </button>
-          <button onClick={() => setCurrentTab('ranking')} style={{
+          <button onClick={() => { setCurrentTab('ranking'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '14px 0' : '14px 20px',
             background: currentTab === 'ranking' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -911,7 +982,7 @@ export default function Dashboard({ onLogout, userName }) {
             <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>🏆</span>
             {!sidebarCollapsed && '랭킹'}
           </button>
-          <button onClick={() => setCurrentTab('compare')} style={{
+          <button onClick={() => { setCurrentTab('compare'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '14px 0' : '14px 20px',
             background: currentTab === 'compare' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -936,9 +1007,44 @@ export default function Dashboard({ onLogout, userName }) {
       </div>
 
       {/* 메인 컨텐츠 */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{ flex: 1, overflow: 'auto', width: '100%' }}>
+        {/* 모바일 헤더 */}
+        {isMobile && (
+          <div style={{
+            position: 'sticky',
+            top: 0,
+            background: 'rgba(15,15,26,0.95)',
+            backdropFilter: 'blur(10px)',
+            padding: '12px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            zIndex: 100
+          }}>
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              style={{
+                padding: '8px 12px',
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '8px',
+                color: '#fff',
+                fontSize: '18px',
+                cursor: 'pointer'
+              }}
+            >
+              ☰
+            </button>
+            <span style={{ fontSize: '14px', fontWeight: '600', color: '#a5b4fc' }}>📊 강의 관리</span>
+            <button onClick={onLogout} style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '12px' }}>
+              로그아웃
+            </button>
+          </div>
+        )}
+
         {/* 우측 상단 환영 메시지 + 로그아웃 - 글래스모피즘 */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 32px 0', maxWidth: '1200px', margin: '0 auto' }}>
+        {!isMobile && <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 32px 0', maxWidth: '1200px', margin: '0 auto' }}>
           {userName && (
             <div style={{ padding: '10px 18px', background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.15)' }}>
               <span style={{ color: '#a5b4fc', fontSize: '14px' }}><strong>{userName}</strong>님 반갑습니다 👋</span>
@@ -947,10 +1053,10 @@ export default function Dashboard({ onLogout, userName }) {
           <button onClick={onLogout} style={{ padding: '10px 18px', background: 'rgba(239,68,68,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', color: '#f87171', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'all 0.3s ease' }}>
             로그아웃
           </button>
-        </div>
-        <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
+        </div>}
+        <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
           {/* 드롭다운 - 대시보드/상세 탭에서만 표시 */}
-          {(currentTab === 'dashboard' || currentTab === 'detail') && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+          {(currentTab === 'dashboard' || currentTab === 'detail') && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             {/* 강사 선택 */}
             <select
               value={selectedInstructor}
@@ -1027,7 +1133,7 @@ export default function Dashboard({ onLogout, userName }) {
           {currentTab === 'dashboard' && (
             <>
               {/* 지표 카드 - 글래스모피즘 + 그라데이션 테두리 */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px', marginBottom: '24px' }}>
                 <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(96,165,250,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(167,139,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
                   <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
                     <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>매출</div>
@@ -1064,7 +1170,7 @@ export default function Dashboard({ onLogout, userName }) {
               </div>
 
               {/* 2단 레이아웃 - 글래스모피즘 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
                 <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</span>
@@ -1146,7 +1252,7 @@ export default function Dashboard({ onLogout, userName }) {
                     const isPositive = profit >= 0
                     return (
                       <div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
                           <div style={{ background: isPositive ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', borderRadius: '12px', padding: '20px', textAlign: 'center', border: `1px solid ${isPositive ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}` }}>
                             <div style={{ fontSize: '13px', color: isPositive ? '#10b981' : '#f87171', marginBottom: '8px' }}>최종 영업이익</div>
                             <div style={{ fontSize: '24px', fontWeight: '700', color: isPositive ? '#10b981' : '#f87171' }}>{formatMoney(profit)}</div>
@@ -1176,7 +1282,7 @@ export default function Dashboard({ onLogout, userName }) {
                 return (
                   <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)', marginBottom: '24px' }}>
                     <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px', color: 'rgba(255,255,255,0.8)' }}>📈 광고 성과</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '12px' }}>
                       <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
                         <div style={{ fontSize: '12px', color: '#60a5fa', marginBottom: '6px', fontWeight: '500' }}>ROAS (광고수익률)</div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#f59e0b' }}>{roas}배</div>
@@ -1255,7 +1361,7 @@ export default function Dashboard({ onLogout, userName }) {
                 <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(99,102,241,0.3)' }}>
                   <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '16px' }}>✨ AI 분석 결과</div>
                   <p style={{ color: '#cbd5e1', marginBottom: '16px', lineHeight: 1.6 }}>{aiAnalysis.summary}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                     <div style={{ background: 'rgba(16,185,129,0.1)', borderRadius: '12px', padding: '16px' }}>
                       <div style={{ color: '#10b981', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>💪 강점</div>
                       {aiAnalysis.strengths.map((s, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {s}</div>))}
@@ -1404,7 +1510,7 @@ export default function Dashboard({ onLogout, userName }) {
                 <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(99,102,241,0.3)' }}>
                   <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '16px' }}>✨ AI 종합 분석 결과</div>
                   <p style={{ color: '#cbd5e1', marginBottom: '16px', lineHeight: 1.6 }}>{aiAnalysis.summary}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                     <div style={{ background: 'rgba(16,185,129,0.1)', borderRadius: '12px', padding: '16px' }}>
                       <div style={{ color: '#10b981', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>💪 강점</div>
                       {aiAnalysis.strengths?.map((s, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {s}</div>))}
@@ -1784,7 +1890,7 @@ export default function Dashboard({ onLogout, userName }) {
             {youtubeFetching && (
               <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(99,102,241,0.1)', borderRadius: '10px', fontSize: '13px', color: '#a5b4fc', textAlign: 'center' }}>채널 정보 가져오는 중...</div>
             )}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
               <div>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>채널명 {newYoutube.channel_name && '✓'}</label>
                 <input type="text" value={newYoutube.channel_name} onChange={(e) => setNewYoutube({...newYoutube, channel_name: e.target.value})} placeholder="자동 입력됨" style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: '14px' }} />
