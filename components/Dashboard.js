@@ -221,6 +221,23 @@ export default function Dashboard({ onLogout, userName }) {
         }
       }
 
+      // 시트에 없는 강사/기수 삭제
+      const sheetInstructorNames = [...new Set(data.map(item => {
+        const parts = item.name.replace(/\s+/g, ' ').trim().split(' ')
+        return parts.slice(0, -1).join(' ')
+      }))]
+
+      const { data: dbInstructors } = await supabase.from('instructors').select('*')
+      if (dbInstructors) {
+        for (const inst of dbInstructors) {
+          if (!sheetInstructorNames.includes(inst.name.trim())) {
+            // 시트에 없는 강사 삭제 (cascade로 sessions도 삭제됨)
+            await supabase.from('sessions').delete().eq('instructor_id', inst.id)
+            await supabase.from('instructors').delete().eq('id', inst.id)
+          }
+        }
+      }
+
       await loadInstructors()
       await loadSessions()
     } catch (error) {
