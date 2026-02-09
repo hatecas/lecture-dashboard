@@ -56,9 +56,11 @@ export default function Login({ onLogin }) {
           Notification.requestPermission()
         }
 
-        // 로그인 로그 기록
-        await supabase.from('login_logs').insert({
-          name: data.name || data.username
+        // 로그인 로그 기록 (IP 포함)
+        await fetch('/api/login-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: data.name || data.username })
         })
         onLogin(data.name || data.username)
       }
