@@ -82,8 +82,9 @@ export default function Login({ onLogin }) {
         background: 'rgba(255,255,255,0.05)',
         backdropFilter: 'blur(20px)',
         borderRadius: '24px',
-        padding: '48px',
-        width: '400px',
+        padding: '32px',
+        width: '90%',
+        maxWidth: '400px',
         border: '1px solid rgba(255,255,255,0.1)',
       }}>
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
