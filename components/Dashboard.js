@@ -78,11 +78,12 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
   // 리소스 허브 상태
   const [currentResource, setCurrentResource] = useState('weekly') // 현재 선택된 리소스
-  const [resourceZoom, setResourceZoom] = useState(100) // 줌 레벨 (%)
+  const [resourceZoom, setResourceZoom] = useState(75) // 줌 레벨 (%) - 기본 75%로 더 많이 보이게
   const [resourceFullscreen, setResourceFullscreen] = useState(false) // 전체화면 모드
   const [resourceViewMode, setResourceViewMode] = useState('iframe') // 'iframe' or 'api'
   const [sheetApiData, setSheetApiData] = useState(null) // API로 가져온 시트 데이터
   const [sheetApiLoading, setSheetApiLoading] = useState(false)
+  const [iframeLoading, setIframeLoading] = useState(true) // iframe 로딩 상태
 
   // 리소스 목록 (시트/문서 등)
   // 같은 스프레드시트의 다른 탭은 gid 값만 다르게 설정하면 됩니다
@@ -96,14 +97,15 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
   // 구글 시트 URL을 임베드 URL로 변환
   const getEmbedUrl = (url) => {
-    // 구글 스프레드시트
+    // 구글 스프레드시트 - 탭이 보이는 형식 사용
     if (url.includes('docs.google.com/spreadsheets')) {
       const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/)
       const gidMatch = url.match(/gid=(\d+)/)
       if (match) {
         const sheetId = match[1]
         const gid = gidMatch ? gidMatch[1] : '0'
-        return `https://docs.google.com/spreadsheets/d/${sheetId}/htmlembed?gid=${gid}`
+        // pubhtml 형식: 시트 탭 포함, 더 나은 렌더링
+        return `https://docs.google.com/spreadsheets/d/${sheetId}/pubhtml?gid=${gid}&single=false&widget=false&headers=false&chrome=false`
       }
     }
     // 구글 문서
@@ -3082,6 +3084,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     onClick={() => {
                       setCurrentResource(resource.id)
                       setSheetApiData(null)
+                      setIframeLoading(true)
                     }}
                     style={{
                       padding: '10px 16px',
@@ -3145,14 +3148,14 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 {resourceViewMode === 'iframe' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '4px 8px' }}>
                     <button
-                      onClick={() => setResourceZoom(Math.max(50, resourceZoom - 10))}
+                      onClick={() => setResourceZoom(Math.max(40, resourceZoom - 10))}
                       style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
                     >
                       −
                     </button>
                     <span style={{ color: '#94a3b8', fontSize: '12px', minWidth: '45px', textAlign: 'center' }}>{resourceZoom}%</span>
                     <button
-                      onClick={() => setResourceZoom(Math.min(150, resourceZoom + 10))}
+                      onClick={() => setResourceZoom(Math.min(120, resourceZoom + 10))}
                       style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
                     >
                       +
@@ -3234,28 +3237,53 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {/* 시트 표시 영역 */}
               {resourceList.length > 0 ? (
                 <div style={{
-                  background: 'rgba(255,255,255,0.02)',
-                  borderRadius: '16px',
+                  background: '#fff',
+                  borderRadius: '12px',
                   border: '1px solid rgba(255,255,255,0.1)',
                   overflow: 'hidden',
-                  height: 'calc(100vh - 320px)',
-                  minHeight: '500px'
+                  height: 'calc(100vh - 240px)',
+                  minHeight: '600px',
+                  position: 'relative'
                 }}>
                   {resourceViewMode === 'iframe' ? (
                     // 임베드 모드 (줌 지원)
-                    <div style={{ width: '100%', height: '100%', overflow: 'auto' }}>
+                    <div style={{ width: '100%', height: '100%', overflow: 'auto', background: '#fff' }}>
+                      {/* 로딩 인디케이터 */}
+                      {iframeLoading && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          background: '#fff',
+                          zIndex: 10
+                        }}>
+                          <div style={{ textAlign: 'center', color: '#64748b' }}>
+                            <div style={{ fontSize: '40px', marginBottom: '16px' }}>📊</div>
+                            <p style={{ fontSize: '14px' }}>시트를 불러오는 중...</p>
+                            <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '8px' }}>잠시만 기다려주세요</p>
+                          </div>
+                        </div>
+                      )}
                       {(() => {
                         const selected = resourceList.find(r => r.id === currentResource)
                         if (!selected) return null
                         return (
                           <iframe
                             src={getEmbedUrl(selected.url)}
+                            onLoad={() => setIframeLoading(false)}
                             style={{
                               width: `${10000 / resourceZoom}%`,
                               height: `${10000 / resourceZoom}%`,
                               border: 'none',
                               transform: `scale(${resourceZoom / 100})`,
-                              transformOrigin: 'top left'
+                              transformOrigin: 'top left',
+                              opacity: iframeLoading ? 0 : 1,
+                              transition: 'opacity 0.3s ease'
                             }}
                             title={selected.label}
                           />
@@ -3431,9 +3459,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   {/* 줌 컨트롤 */}
                   {resourceViewMode === 'iframe' && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <button onClick={() => setResourceZoom(Math.max(50, resourceZoom - 10))} style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer' }}>−</button>
+                      <button onClick={() => setResourceZoom(Math.max(40, resourceZoom - 10))} style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer' }}>−</button>
                       <span style={{ color: '#94a3b8', fontSize: '11px', minWidth: '40px', textAlign: 'center' }}>{resourceZoom}%</span>
-                      <button onClick={() => setResourceZoom(Math.min(150, resourceZoom + 10))} style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer' }}>+</button>
+                      <button onClick={() => setResourceZoom(Math.min(120, resourceZoom + 10))} style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer' }}>+</button>
                     </div>
                   )}
                 </div>
@@ -3473,9 +3501,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               </div>
 
               {/* 모달 컨텐츠 */}
-              <div style={{ flex: 1, overflow: 'auto' }}>
+              <div style={{ flex: 1, overflow: 'auto', background: '#fff' }}>
                 {resourceViewMode === 'iframe' ? (
-                  <div style={{ width: '100%', height: '100%', overflow: 'auto' }}>
+                  <div style={{ width: '100%', height: '100%', overflow: 'auto', background: '#fff' }}>
                     {(() => {
                       const selected = resourceList.find(r => r.id === currentResource)
                       if (!selected) return null
