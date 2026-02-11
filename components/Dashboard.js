@@ -85,43 +85,33 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sheetApiLoading, setSheetApiLoading] = useState(false)
   const [iframeLoading, setIframeLoading] = useState(true) // iframe 로딩 상태
 
-  // Google Sheets API 설정
-  const [sheetsApiKey, setSheetsApiKey] = useState('') // Google API 키
-  const [sheetsUrl, setSheetsUrl] = useState('https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit') // 스프레드시트 URL
+  // Google Sheets API 설정 (하드코딩)
+  const SHEETS_API_KEY = 'AIzaSyB0EjAxzu3JxwqZYf0cfB4sN5DNbZFSpbA'
+  const SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit'
   const [sheetTabs, setSheetTabs] = useState([]) // 시트 탭 목록
   const [sheetsLoading, setSheetsLoading] = useState(false)
-  const [showSheetsSettings, setShowSheetsSettings] = useState(false)
   const [spreadsheetId, setSpreadsheetId] = useState('')
   const [spreadsheetTitle, setSpreadsheetTitle] = useState('')
 
-  // localStorage에서 API 키 로드
-  useEffect(() => {
-    const savedApiKey = localStorage.getItem('googleSheetsApiKey')
-    const savedUrl = localStorage.getItem('googleSheetsUrl')
-    if (savedApiKey) setSheetsApiKey(savedApiKey)
-    if (savedUrl) setSheetsUrl(savedUrl)
-  }, [])
-
   // 시트 탭 목록 가져오기
   const fetchSheetTabs = async () => {
-    if (!sheetsApiKey || !sheetsUrl) {
-      alert('Google API 키와 스프레드시트 URL을 입력하세요.')
-      setShowSheetsSettings(true)
-      return
-    }
-
     setSheetsLoading(true)
     try {
       const response = await fetch('/api/sheets-meta', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ spreadsheetUrl: sheetsUrl, apiKey: sheetsApiKey })
+        body: JSON.stringify({ spreadsheetUrl: SHEETS_URL, apiKey: SHEETS_API_KEY })
       })
 
       const data = await response.json()
 
       if (!response.ok) {
-        alert(data.error || '시트 정보를 가져올 수 없습니다.')
+        // API 할당량 초과 체크
+        if (response.status === 429 || (data.error && data.error.includes('quota'))) {
+          alert('Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.')
+        } else {
+          alert(data.error || '시트 정보를 가져올 수 없습니다.')
+        }
         return
       }
 
@@ -138,11 +128,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
         }
       }
 
-      // 설정 저장
-      localStorage.setItem('googleSheetsApiKey', sheetsApiKey)
-      localStorage.setItem('googleSheetsUrl', sheetsUrl)
-      setShowSheetsSettings(false)
-
     } catch (error) {
       console.error('Fetch tabs error:', error)
       alert('시트 정보를 가져오는 중 오류가 발생했습니다.')
@@ -153,14 +138,12 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
   // API로 시트 데이터 가져오기
   const fetchSheetDataByApi = async (sheetId, sheetName) => {
-    if (!sheetsApiKey) return
-
     setSheetApiLoading(true)
     setSheetApiData(null)
     try {
       const params = new URLSearchParams({
         spreadsheetId: sheetId || spreadsheetId,
-        apiKey: sheetsApiKey,
+        apiKey: SHEETS_API_KEY,
         sheetName: sheetName
       })
 
@@ -171,6 +154,10 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       const data = await response.json()
 
       if (!response.ok) {
+        // API 할당량 초과 체크
+        if (response.status === 429 || (data.error && data.error.includes('quota'))) {
+          alert('Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.')
+        }
         console.error('Sheet data error:', data.error)
         return
       }
@@ -362,6 +349,13 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [ytCollecting])
+
+  // 리소스 탭 진입 시 시트 탭 자동 로드
+  useEffect(() => {
+    if (currentTab === 'resources' && sheetTabs.length === 0 && !sheetsLoading) {
+      fetchSheetTabs()
+    }
+  }, [currentTab])
 
   // 로그아웃 핸들러 (수집 중 확인)
   const handleLogoutWithConfirm = () => {
@@ -3179,20 +3173,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 리소스 {spreadsheetTitle && `- ${spreadsheetTitle}`}</h2>
-                <button
-                  onClick={() => setShowSheetsSettings(true)}
-                  style={{
-                    padding: '8px 16px',
-                    background: 'rgba(99,102,241,0.2)',
-                    border: '1px solid rgba(99,102,241,0.3)',
-                    borderRadius: '8px',
-                    color: '#a5b4fc',
-                    fontSize: '12px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  ⚙️ 설정
-                </button>
               </div>
 
               {/* 시트 탭 버튼들 */}
@@ -3227,21 +3207,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 </div>
               ) : (
                 <div style={{ marginBottom: '16px', padding: '20px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', textAlign: 'center' }}>
-                  <p style={{ color: '#64748b', marginBottom: '12px' }}>시트 탭을 불러오려면 설정에서 API 키를 입력하세요.</p>
-                  <button
-                    onClick={() => setShowSheetsSettings(true)}
-                    style={{
-                      padding: '10px 20px',
-                      background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: '#fff',
-                      fontSize: '13px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    🔑 API 키 설정하기
-                  </button>
+                  {sheetsLoading ? (
+                    <p style={{ color: '#a5b4fc' }}>📊 시트 탭 불러오는 중...</p>
+                  ) : (
+                    <p style={{ color: '#64748b' }}>시트 탭을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</p>
+                  )}
                 </div>
               )}
 
@@ -3500,7 +3470,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           <div style={{ textAlign: 'center' }}>
                             <div style={{ fontSize: '32px', marginBottom: '12px' }}>📊</div>
                             <p>테이블 모드로 보려면 시트가 공개되어 있어야 합니다.</p>
-                            <p style={{ fontSize: '12px', marginTop: '8px' }}>시트 설정 → 공유 → "링크가 있는 모든 사용자"</p>
+                            <p style={{ fontSize: '12px', marginTop: '8px' }}>시트 설정 → 공유 → &quot;링크가 있는 모든 사용자&quot;</p>
                           </div>
                         </div>
                       )}
@@ -3516,128 +3486,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   </p>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Google Sheets API 설정 모달 */}
-          {showSheetsSettings && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: 'rgba(0,0,0,0.8)',
-              zIndex: 10000,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center'
-            }}>
-              <div style={{
-                background: '#1a1a2e',
-                borderRadius: '16px',
-                padding: '24px',
-                width: '90%',
-                maxWidth: '500px',
-                border: '1px solid rgba(255,255,255,0.1)'
-              }}>
-                <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '20px', color: '#fff' }}>
-                  🔑 Google Sheets API 설정
-                </h3>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
-                    Google API 키
-                  </label>
-                  <input
-                    type="password"
-                    value={sheetsApiKey}
-                    onChange={(e) => setSheetsApiKey(e.target.value)}
-                    placeholder="AIzaSy..."
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '8px',
-                      color: '#fff',
-                      fontSize: '14px'
-                    }}
-                  />
-                  <p style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                    Google Cloud Console에서 Sheets API를 활성화하고 API 키를 발급받으세요.
-                  </p>
-                </div>
-
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
-                    스프레드시트 URL
-                  </label>
-                  <input
-                    type="text"
-                    value={sheetsUrl}
-                    onChange={(e) => setSheetsUrl(e.target.value)}
-                    placeholder="https://docs.google.com/spreadsheets/d/..."
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '8px',
-                      color: '#fff',
-                      fontSize: '14px'
-                    }}
-                  />
-                  <p style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                    시트가 "링크가 있는 모든 사용자"에게 공유되어 있어야 합니다.
-                  </p>
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                  <button
-                    onClick={() => setShowSheetsSettings(false)}
-                    style={{
-                      padding: '10px 20px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '8px',
-                      color: '#94a3b8',
-                      fontSize: '13px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    취소
-                  </button>
-                  <button
-                    onClick={fetchSheetTabs}
-                    disabled={sheetsLoading}
-                    style={{
-                      padding: '10px 20px',
-                      background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: '#fff',
-                      fontSize: '13px',
-                      cursor: sheetsLoading ? 'not-allowed' : 'pointer',
-                      opacity: sheetsLoading ? 0.7 : 1
-                    }}
-                  >
-                    {sheetsLoading ? '불러오는 중...' : '시트 탭 불러오기'}
-                  </button>
-                </div>
-
-                <div style={{ marginTop: '20px', padding: '12px', background: 'rgba(99,102,241,0.1)', borderRadius: '8px' }}>
-                  <p style={{ fontSize: '12px', color: '#a5b4fc', marginBottom: '8px', fontWeight: '500' }}>
-                    💡 API 키 발급 방법
-                  </p>
-                  <ol style={{ fontSize: '11px', color: '#94a3b8', paddingLeft: '16px', margin: 0, lineHeight: '1.6' }}>
-                    <li>Google Cloud Console 접속</li>
-                    <li>새 프로젝트 생성 또는 기존 프로젝트 선택</li>
-                    <li>API 및 서비스 → 라이브러리 → "Google Sheets API" 검색 후 활성화</li>
-                    <li>API 및 서비스 → 사용자 인증 정보 → API 키 만들기</li>
-                  </ol>
-                </div>
-              </div>
             </div>
           )}
 
