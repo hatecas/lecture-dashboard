@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 
-export default function Dashboard({ onLogout, userName }) {
+export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sessions, setSessions] = useState([])
   const [instructors, setInstructors] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
@@ -56,7 +56,7 @@ export default function Dashboard({ onLogout, userName }) {
   const folderInputRef = useRef(null)
 
   // 툴 관련 상태
-  const [currentTool, setCurrentTool] = useState('inflow') // inflow, crm, kakao, media
+  const [currentTool, setCurrentTool] = useState('crm') // crm, kakao, youtube (inflow는 권한 필요)
   const [toolFiles1, setToolFiles1] = useState([]) // 여러 파일 지원
   const [toolFiles2, setToolFiles2] = useState([]) // 여러 파일 지원
   const [toolResult, setToolResult] = useState(null)
@@ -115,6 +115,15 @@ export default function Dashboard({ onLogout, userName }) {
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
+
+  // 권한에 따라 기본 툴 설정
+  useEffect(() => {
+    if (permissions.canUseInflow) {
+      setCurrentTool('inflow')
+    } else if (currentTool === 'inflow') {
+      setCurrentTool('crm')
+    }
+  }, [permissions.canUseInflow])
 
   // 유튜브 채팅 수집 중 페이지 이탈 방지
   useEffect(() => {
@@ -1886,11 +1895,11 @@ export default function Dashboard({ onLogout, userName }) {
               {/* 툴 서브탭 */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
                 {[
-                  { id: 'inflow', icon: '🔀', label: '유입경로 매칭' },
+                  { id: 'inflow', icon: '🔀', label: '유입경로 매칭', requiresPermission: 'canUseInflow' },
                   { id: 'crm', icon: '📋', label: 'CRM 정리' },
                   { id: 'kakao', icon: '💬', label: '카톡 매칭' },
                   { id: 'youtube', icon: '📡', label: 'YT채팅 수집' }
-                ].map(tool => (
+                ].filter(tool => !tool.requiresPermission || permissions[tool.requiresPermission]).map(tool => (
                   <button
                     key={tool.id}
                     onClick={() => {
