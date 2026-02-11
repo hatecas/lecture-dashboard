@@ -37,7 +37,16 @@ function parseDate(dateStr) {
     return jsDate.getTime()
   }
 
-  // 다양한 한국어 날짜 형식 파싱
+  // "2026. 1. 15. 오후 6:14:31" 형식 (구글폼 등)
+  const googleFormMatch = str.match(/(\d{4})\.\s*(\d+)\.\s*(\d+)\.\s*(오전|오후)\s*(\d+):(\d+):?(\d+)?/)
+  if (googleFormMatch) {
+    const [, year, month, day, ampm, hour, minute, second] = googleFormMatch
+    let h = parseInt(hour)
+    if (ampm === '오후' && h < 12) h += 12
+    if (ampm === '오전' && h === 12) h = 0
+    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), h, parseInt(minute), parseInt(second) || 0).getTime()
+  }
+
   // "1월 13일 오후 8시 9분" 형식
   const koreanMatch = str.match(/(\d+)월\s*(\d+)일\s*(오전|오후)?\s*(\d+)시\s*(\d+)분?/)
   if (koreanMatch) {
@@ -45,7 +54,6 @@ function parseDate(dateStr) {
     let h = parseInt(hour)
     if (ampm === '오후' && h < 12) h += 12
     if (ampm === '오전' && h === 12) h = 0
-    // 연도는 현재 연도로 가정
     const year = new Date().getFullYear()
     return new Date(year, parseInt(month) - 1, parseInt(day), h, parseInt(minute) || 0).getTime()
   }
