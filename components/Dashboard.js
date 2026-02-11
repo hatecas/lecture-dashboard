@@ -78,6 +78,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
   // 리소스 허브 상태
   const [currentResource, setCurrentResource] = useState('weekly') // 현재 선택된 리소스
+  const [resourceZoom, setResourceZoom] = useState(100) // 줌 레벨 (%)
+  const [resourceFullscreen, setResourceFullscreen] = useState(false) // 전체화면 모드
+  const [resourceViewMode, setResourceViewMode] = useState('iframe') // 'iframe' or 'api'
+  const [sheetApiData, setSheetApiData] = useState(null) // API로 가져온 시트 데이터
+  const [sheetApiLoading, setSheetApiLoading] = useState(false)
 
   // 리소스 목록 (시트/문서 등)
   const resourceList = [
@@ -112,6 +117,82 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       return url
     }
     return url
+  }
+
+  // 구글 시트 데이터를 API로 가져오기 (공개된 시트만 가능)
+  const fetchSheetData = async (url) => {
+    setSheetApiLoading(true)
+    setSheetApiData(null)
+    try {
+      const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/)
+      const gidMatch = url.match(/gid=(\d+)/)
+      if (!match) throw new Error('Invalid sheet URL')
+
+      const sheetId = match[1]
+      const gid = gidMatch ? gidMatch[1] : '0'
+
+      // 공개된 시트의 CSV 데이터 가져오기
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+      const response = await fetch(csvUrl)
+
+      if (!response.ok) {
+        throw new Error('시트가 공개되지 않았거나 접근할 수 없습니다.')
+      }
+
+      const csvText = await response.text()
+
+      // CSV 파싱
+      const rows = []
+      let currentRow = []
+      let currentCell = ''
+      let inQuotes = false
+
+      for (let i = 0; i < csvText.length; i++) {
+        const char = csvText[i]
+        const nextChar = csvText[i + 1]
+
+        if (inQuotes) {
+          if (char === '"' && nextChar === '"') {
+            currentCell += '"'
+            i++
+          } else if (char === '"') {
+            inQuotes = false
+          } else {
+            currentCell += char
+          }
+        } else {
+          if (char === '"') {
+            inQuotes = true
+          } else if (char === ',') {
+            currentRow.push(currentCell)
+            currentCell = ''
+          } else if (char === '\n' || (char === '\r' && nextChar === '\n')) {
+            currentRow.push(currentCell)
+            if (currentRow.some(cell => cell.trim())) {
+              rows.push(currentRow)
+            }
+            currentRow = []
+            currentCell = ''
+            if (char === '\r') i++
+          } else {
+            currentCell += char
+          }
+        }
+      }
+      if (currentCell || currentRow.length > 0) {
+        currentRow.push(currentCell)
+        if (currentRow.some(cell => cell.trim())) {
+          rows.push(currentRow)
+        }
+      }
+
+      setSheetApiData(rows)
+    } catch (error) {
+      console.error('Sheet fetch error:', error)
+      alert('시트 데이터를 가져올 수 없습니다. 시트가 "링크가 있는 모든 사용자"에게 공개되어 있는지 확인하세요.')
+    } finally {
+      setSheetApiLoading(false)
+    }
   }
 
   // 툴 상태 초기화 함수
@@ -2993,11 +3074,14 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>📁 리소스</h2>
 
               {/* 리소스 탭 버튼들 */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
                 {resourceList.map(resource => (
                   <button
                     key={resource.id}
-                    onClick={() => setCurrentResource(resource.id)}
+                    onClick={() => {
+                      setCurrentResource(resource.id)
+                      setSheetApiData(null)
+                    }}
                     style={{
                       padding: '10px 16px',
                       background: currentResource === resource.id ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
@@ -3016,25 +3100,127 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     {resource.label}
                   </button>
                 ))}
+              </div>
 
-                {/* 새 탭에서 열기 버튼 */}
+              {/* 컨트롤 바 */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                {/* 뷰 모드 토글 */}
+                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '2px' }}>
+                  <button
+                    onClick={() => setResourceViewMode('iframe')}
+                    style={{
+                      padding: '6px 12px',
+                      background: resourceViewMode === 'iframe' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                      border: 'none',
+                      borderRadius: '6px',
+                      color: resourceViewMode === 'iframe' ? '#a5b4fc' : '#64748b',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    📄 임베드
+                  </button>
+                  <button
+                    onClick={() => {
+                      setResourceViewMode('api')
+                      const selected = resourceList.find(r => r.id === currentResource)
+                      if (selected && !sheetApiData) fetchSheetData(selected.url)
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      background: resourceViewMode === 'api' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                      border: 'none',
+                      borderRadius: '6px',
+                      color: resourceViewMode === 'api' ? '#a5b4fc' : '#64748b',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    📊 테이블
+                  </button>
+                </div>
+
+                {/* 줌 컨트롤 (임베드 모드에서만) */}
+                {resourceViewMode === 'iframe' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '4px 8px' }}>
+                    <button
+                      onClick={() => setResourceZoom(Math.max(50, resourceZoom - 10))}
+                      style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
+                    >
+                      −
+                    </button>
+                    <span style={{ color: '#94a3b8', fontSize: '12px', minWidth: '45px', textAlign: 'center' }}>{resourceZoom}%</span>
+                    <button
+                      onClick={() => setResourceZoom(Math.min(150, resourceZoom + 10))}
+                      style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
+                    >
+                      +
+                    </button>
+                    <button
+                      onClick={() => setResourceZoom(100)}
+                      style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#64748b', fontSize: '11px', cursor: 'pointer' }}
+                    >
+                      리셋
+                    </button>
+                  </div>
+                )}
+
+                {/* 전체화면 버튼 */}
+                <button
+                  onClick={() => setResourceFullscreen(true)}
+                  style={{
+                    padding: '6px 12px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '8px',
+                    color: '#94a3b8',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  ⛶ 전체화면
+                </button>
+
+                {/* 새로고침 버튼 (API 모드) */}
+                {resourceViewMode === 'api' && (
+                  <button
+                    onClick={() => {
+                      const selected = resourceList.find(r => r.id === currentResource)
+                      if (selected) fetchSheetData(selected.url)
+                    }}
+                    disabled={sheetApiLoading}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#94a3b8',
+                      fontSize: '12px',
+                      cursor: sheetApiLoading ? 'not-allowed' : 'pointer',
+                      opacity: sheetApiLoading ? 0.5 : 1
+                    }}
+                  >
+                    {sheetApiLoading ? '⏳ 로딩...' : '🔄 새로고침'}
+                  </button>
+                )}
+
+                {/* 새 탭에서 열기 */}
                 {resourceList.find(r => r.id === currentResource) && (
                   <a
                     href={resourceList.find(r => r.id === currentResource)?.url}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
-                      padding: '10px 16px',
-                      background: 'rgba(16,185,129,0.2)',
+                      padding: '6px 12px',
+                      background: 'rgba(16,185,129,0.15)',
                       border: '1px solid rgba(16,185,129,0.3)',
-                      borderRadius: '10px',
+                      borderRadius: '8px',
                       color: '#34d399',
-                      fontSize: '13px',
-                      fontWeight: '500',
+                      fontSize: '12px',
                       cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
                       textDecoration: 'none',
                       marginLeft: 'auto'
                     }}
@@ -3044,31 +3230,98 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 )}
               </div>
 
-              {/* 시트 임베드 영역 */}
+              {/* 시트 표시 영역 */}
               {resourceList.length > 0 ? (
                 <div style={{
                   background: 'rgba(255,255,255,0.02)',
                   borderRadius: '16px',
                   border: '1px solid rgba(255,255,255,0.1)',
                   overflow: 'hidden',
-                  height: 'calc(100vh - 280px)',
+                  height: 'calc(100vh - 320px)',
                   minHeight: '500px'
                 }}>
-                  {(() => {
-                    const selected = resourceList.find(r => r.id === currentResource)
-                    if (!selected) return null
-                    return (
-                      <iframe
-                        src={getEmbedUrl(selected.url)}
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          border: 'none'
-                        }}
-                        title={selected.label}
-                      />
-                    )
-                  })()}
+                  {resourceViewMode === 'iframe' ? (
+                    // 임베드 모드 (줌 지원)
+                    <div style={{ width: '100%', height: '100%', overflow: 'auto' }}>
+                      {(() => {
+                        const selected = resourceList.find(r => r.id === currentResource)
+                        if (!selected) return null
+                        return (
+                          <iframe
+                            src={getEmbedUrl(selected.url)}
+                            style={{
+                              width: `${10000 / resourceZoom}%`,
+                              height: `${10000 / resourceZoom}%`,
+                              border: 'none',
+                              transform: `scale(${resourceZoom / 100})`,
+                              transformOrigin: 'top left'
+                            }}
+                            title={selected.label}
+                          />
+                        )
+                      })()}
+                    </div>
+                  ) : (
+                    // API 테이블 모드
+                    <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: '16px' }}>
+                      {sheetApiLoading ? (
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+                            <p>데이터를 불러오는 중...</p>
+                          </div>
+                        </div>
+                      ) : sheetApiData ? (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                          <thead>
+                            {sheetApiData.length > 0 && (
+                              <tr>
+                                {sheetApiData[0].map((cell, i) => (
+                                  <th key={i} style={{
+                                    padding: '10px 12px',
+                                    background: 'rgba(99,102,241,0.2)',
+                                    borderBottom: '2px solid rgba(99,102,241,0.3)',
+                                    textAlign: 'left',
+                                    fontWeight: '600',
+                                    color: '#a5b4fc',
+                                    whiteSpace: 'nowrap',
+                                    position: 'sticky',
+                                    top: 0
+                                  }}>
+                                    {cell}
+                                  </th>
+                                ))}
+                              </tr>
+                            )}
+                          </thead>
+                          <tbody>
+                            {sheetApiData.slice(1).map((row, rowIdx) => (
+                              <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                                {row.map((cell, cellIdx) => (
+                                  <td key={cellIdx} style={{
+                                    padding: '10px 12px',
+                                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                    color: '#e2e8f0',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    {cell}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '32px', marginBottom: '12px' }}>📊</div>
+                            <p>테이블 모드로 보려면 시트가 공개되어 있어야 합니다.</p>
+                            <p style={{ fontSize: '12px', marginTop: '8px' }}>시트 설정 → 공유 → "링크가 있는 모든 사용자"</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
@@ -3079,6 +3332,198 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   </p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* 리소스 전체화면 모달 */}
+          {resourceFullscreen && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0,0,0,0.95)',
+              zIndex: 10000,
+              display: 'flex',
+              flexDirection: 'column'
+            }}>
+              {/* 모달 헤더 */}
+              <div style={{
+                padding: '12px 20px',
+                background: 'rgba(30,30,50,0.9)',
+                borderBottom: '1px solid rgba(255,255,255,0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '18px' }}>
+                    {resourceList.find(r => r.id === currentResource)?.icon}
+                  </span>
+                  <span style={{ color: '#fff', fontWeight: '600' }}>
+                    {resourceList.find(r => r.id === currentResource)?.label}
+                  </span>
+
+                  {/* 뷰 모드 토글 */}
+                  <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '6px', padding: '2px', marginLeft: '20px' }}>
+                    <button
+                      onClick={() => setResourceViewMode('iframe')}
+                      style={{
+                        padding: '4px 10px',
+                        background: resourceViewMode === 'iframe' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: resourceViewMode === 'iframe' ? '#a5b4fc' : '#64748b',
+                        fontSize: '11px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      임베드
+                    </button>
+                    <button
+                      onClick={() => {
+                        setResourceViewMode('api')
+                        const selected = resourceList.find(r => r.id === currentResource)
+                        if (selected && !sheetApiData) fetchSheetData(selected.url)
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        background: resourceViewMode === 'api' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: resourceViewMode === 'api' ? '#a5b4fc' : '#64748b',
+                        fontSize: '11px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      테이블
+                    </button>
+                  </div>
+
+                  {/* 줌 컨트롤 */}
+                  {resourceViewMode === 'iframe' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <button onClick={() => setResourceZoom(Math.max(50, resourceZoom - 10))} style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer' }}>−</button>
+                      <span style={{ color: '#94a3b8', fontSize: '11px', minWidth: '40px', textAlign: 'center' }}>{resourceZoom}%</span>
+                      <button onClick={() => setResourceZoom(Math.min(150, resourceZoom + 10))} style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer' }}>+</button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <a
+                    href={resourceList.find(r => r.id === currentResource)?.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(16,185,129,0.2)',
+                      border: '1px solid rgba(16,185,129,0.3)',
+                      borderRadius: '6px',
+                      color: '#34d399',
+                      fontSize: '12px',
+                      textDecoration: 'none'
+                    }}
+                  >
+                    🔗 새 탭
+                  </a>
+                  <button
+                    onClick={() => setResourceFullscreen(false)}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(239,68,68,0.2)',
+                      border: '1px solid rgba(239,68,68,0.3)',
+                      borderRadius: '6px',
+                      color: '#f87171',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ✕ 닫기
+                  </button>
+                </div>
+              </div>
+
+              {/* 모달 컨텐츠 */}
+              <div style={{ flex: 1, overflow: 'auto' }}>
+                {resourceViewMode === 'iframe' ? (
+                  <div style={{ width: '100%', height: '100%', overflow: 'auto' }}>
+                    {(() => {
+                      const selected = resourceList.find(r => r.id === currentResource)
+                      if (!selected) return null
+                      return (
+                        <iframe
+                          src={getEmbedUrl(selected.url)}
+                          style={{
+                            width: `${10000 / resourceZoom}%`,
+                            height: `${10000 / resourceZoom}%`,
+                            border: 'none',
+                            transform: `scale(${resourceZoom / 100})`,
+                            transformOrigin: 'top left'
+                          }}
+                          title={selected.label}
+                        />
+                      )
+                    })()}
+                  </div>
+                ) : (
+                  <div style={{ padding: '20px', height: '100%', overflow: 'auto' }}>
+                    {sheetApiLoading ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+                          <p>데이터를 불러오는 중...</p>
+                        </div>
+                      </div>
+                    ) : sheetApiData ? (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <thead>
+                          {sheetApiData.length > 0 && (
+                            <tr>
+                              {sheetApiData[0].map((cell, i) => (
+                                <th key={i} style={{
+                                  padding: '12px 14px',
+                                  background: 'rgba(99,102,241,0.2)',
+                                  borderBottom: '2px solid rgba(99,102,241,0.3)',
+                                  textAlign: 'left',
+                                  fontWeight: '600',
+                                  color: '#a5b4fc',
+                                  whiteSpace: 'nowrap',
+                                  position: 'sticky',
+                                  top: 0
+                                }}>
+                                  {cell}
+                                </th>
+                              ))}
+                            </tr>
+                          )}
+                        </thead>
+                        <tbody>
+                          {sheetApiData.slice(1).map((row, rowIdx) => (
+                            <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                              {row.map((cell, cellIdx) => (
+                                <td key={cellIdx} style={{
+                                  padding: '12px 14px',
+                                  borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                  color: '#e2e8f0',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  {cell}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
+                        <p>테이블 모드로 보려면 시트가 공개되어 있어야 합니다.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
