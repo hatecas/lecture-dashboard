@@ -9,6 +9,7 @@ import Dashboard from '@/components/Dashboard'
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [userName, setUserName] = useState('')
+  const [userPermissions, setUserPermissions] = useState({})
   const [loading, setLoading] = useState(true)
   const [showExpiryModal, setShowExpiryModal] = useState(false)
   const [countdown, setCountdown] = useState(60)
@@ -132,6 +133,13 @@ export default function Home() {
         if (valid) {
           setIsLoggedIn(true)
           setUserName(storedName || user?.name || '')
+          // 권한 정보 복원
+          try {
+            const storedPermissions = localStorage.getItem('userPermissions')
+            if (storedPermissions) {
+              setUserPermissions(JSON.parse(storedPermissions))
+            }
+          } catch (e) {}
           // 알림 권한 요청 (새로고침 시에도)
           requestNotificationPermission()
           // 세션이 유효하면 타이머 시작 (첫 로드 시에만)
@@ -162,10 +170,12 @@ export default function Home() {
     }
   }, [startExpiryTimer])
 
-  const handleLogin = (name) => {
+  const handleLogin = (name, permissions = {}) => {
     localStorage.setItem('isLoggedIn', 'true')
     localStorage.setItem('userName', name || '')
+    localStorage.setItem('userPermissions', JSON.stringify(permissions))
     setUserName(name || '')
+    setUserPermissions(permissions)
     setIsLoggedIn(true)
     // 로그인 시 타이머 시작
     sessionStartRef.current = Date.now()
@@ -190,7 +200,9 @@ export default function Home() {
     localStorage.removeItem('isLoggedIn')
     localStorage.removeItem('userName')
     localStorage.removeItem('authToken')
+    localStorage.removeItem('userPermissions')
     setUserName('')
+    setUserPermissions({})
     setIsLoggedIn(false)
   }
 
@@ -213,7 +225,7 @@ export default function Home() {
 
   return (
     <>
-      <Dashboard onLogout={handleLogout} userName={userName} />
+      <Dashboard onLogout={handleLogout} userName={userName} permissions={userPermissions} />
 
       {/* 세션 만료 알림 모달 */}
       {showExpiryModal && (
