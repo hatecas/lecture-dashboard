@@ -97,15 +97,15 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
   // 구글 시트 URL을 임베드 URL로 변환
   const getEmbedUrl = (url) => {
-    // 구글 스프레드시트 - 탭이 보이는 형식 사용
+    // 구글 스프레드시트
     if (url.includes('docs.google.com/spreadsheets')) {
       const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/)
       const gidMatch = url.match(/gid=(\d+)/)
       if (match) {
         const sheetId = match[1]
         const gid = gidMatch ? gidMatch[1] : '0'
-        // pubhtml 형식: 시트 탭 포함, 더 나은 렌더링
-        return `https://docs.google.com/spreadsheets/d/${sheetId}/pubhtml?gid=${gid}&single=false&widget=false&headers=false&chrome=false`
+        // htmlembed: 링크 공유만 되어 있으면 작동
+        return `https://docs.google.com/spreadsheets/d/${sheetId}/htmlembed?gid=${gid}`
       }
     }
     // 구글 문서
