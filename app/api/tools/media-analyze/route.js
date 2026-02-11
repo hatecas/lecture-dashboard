@@ -50,27 +50,29 @@ function parseNumber(value) {
 export async function POST(request) {
   try {
     const formData = await request.formData()
-    const file = formData.get('file')
+    const files = formData.getAll('files')
 
-    if (!file) {
+    if (files.length === 0) {
       return NextResponse.json({ success: false, error: '파일이 필요합니다.' })
     }
 
-    const logs = ['파일 업로드 완료']
+    const logs = [`${files.length}개 파일 업로드됨`]
 
-    // 파일 읽기
-    const buffer = await file.arrayBuffer()
-    logs.push('파일 파싱 중...')
+    // 모든 파일 데이터 병합
+    let allData = []
+    for (const file of files) {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer)
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const data = XLSX.utils.sheet_to_json(sheet)
+      allData = allData.concat(data)
+      logs.push(`파일 "${file.name}": ${data.length}건`)
+    }
 
-    // Excel/CSV 파싱
-    const wb = XLSX.read(buffer)
-    const sheet = wb.Sheets[wb.SheetNames[0]]
-    const data = XLSX.utils.sheet_to_json(sheet)
-
-    logs.push(`레코드 수: ${data.length}`)
+    logs.push(`총 레코드 수: ${allData.length}`)
 
     // 컬럼 찾기
-    const headers = Object.keys(data[0] || {})
+    const headers = Object.keys(allData[0] || {})
     const viewsCol = findViewsColumn(headers)
     const conversionsCol = findConversionsColumn(headers)
     const titleCol = findTitleColumn(headers)
@@ -84,7 +86,7 @@ export async function POST(request) {
     let totalConversions = 0
     const videoStats = []
 
-    for (const row of data) {
+    for (const row of allData) {
       const views = viewsCol ? parseNumber(row[viewsCol]) : 0
       const conversions = conversionsCol ? parseNumber(row[conversionsCol]) : 0
       const title = titleCol ? String(row[titleCol] || '').trim() : '(제목 없음)'
@@ -124,7 +126,7 @@ export async function POST(request) {
     try {
       if (process.env.OPENAI_API_KEY) {
         const prompt = `유튜브/미디어 데이터 분석 결과입니다:
-- 총 영상 수: ${data.length}
+- 총 영상 수: ${allData.length}
 - 총 조회수: ${totalViews.toLocaleString()}
 - 총 전환수: ${totalConversions}
 - 평균 전환율: ${avgConversionRate.toFixed(2)}%
@@ -172,7 +174,7 @@ ${bottomVideos.map((v, i) => `${i + 1}. ${v.title} (조회수: ${v.views}, 전�
       aiInsight = `📊 기본 분석 결과
 
 🎯 전체 성과
-총 ${data.length}개 영상에서 ${totalViews.toLocaleString()} 조회, ${totalConversions}건 전환 발생
+총 ${allData.length}개 영상에서 ${totalViews.toLocaleString()} 조회, ${totalConversions}건 전환 발생
 평균 전환율 ${avgConversionRate.toFixed(2)}%
 
 ✅ 상위 전환율 영상
@@ -190,12 +192,12 @@ ${bottomVideos.slice(0, 3).map((v, i) => `${i + 1}. ${v.title} (${v.conversionRa
     const newWb = XLSX.utils.book_new()
 
     // 원본 데이터 + 전환율
-    const mainWs = XLSX.utils.json_to_sheet(data)
+    const mainWs = XLSX.utils.json_to_sheet(allData)
     XLSX.utils.book_append_sheet(newWb, mainWs, '전체데이터')
 
     // 요약 시트
     const summaryData = [
-      { 항목: '총 영상 수', 값: data.length },
+      { 항목: '총 영상 수', 값: allData.length },
       { 항목: '총 조회수', 값: totalViews },
       { 항목: '총 전환수', 값: totalConversions },
       { 항목: '평균 전환율(%)', 값: avgConversionRate.toFixed(2) }
@@ -221,7 +223,7 @@ ${bottomVideos.slice(0, 3).map((v, i) => `${i + 1}. ${v.title} (${v.conversionRa
     return NextResponse.json({
       success: true,
       stats: {
-        totalVideos: data.length,
+        totalVideos: allData.length,
         totalViews,
         totalConversions,
         avgConversionRate

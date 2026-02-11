@@ -57,8 +57,8 @@ export default function Dashboard({ onLogout, userName }) {
 
   // 툴 관련 상태
   const [currentTool, setCurrentTool] = useState('inflow') // inflow, crm, kakao, media
-  const [toolFile1, setToolFile1] = useState(null)
-  const [toolFile2, setToolFile2] = useState(null)
+  const [toolFiles1, setToolFiles1] = useState([]) // 여러 파일 지원
+  const [toolFiles2, setToolFiles2] = useState([]) // 여러 파일 지원
   const [toolResult, setToolResult] = useState(null)
   const [toolProcessing, setToolProcessing] = useState(false)
   const [toolLog, setToolLog] = useState([])
@@ -1837,8 +1837,8 @@ export default function Dashboard({ onLogout, userName }) {
                     key={tool.id}
                     onClick={() => {
                       setCurrentTool(tool.id)
-                      setToolFile1(null)
-                      setToolFile2(null)
+                      setToolFiles1([])
+                      setToolFiles2([])
                       setToolResult(null)
                       setToolLog([])
                     }}
@@ -1871,7 +1871,7 @@ export default function Dashboard({ onLogout, userName }) {
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-                    {/* 신청자 파일 */}
+                    {/* 신청자 파일 (여러개 가능) */}
                     <div style={{
                       padding: '20px',
                       background: 'rgba(99,102,241,0.1)',
@@ -1881,11 +1881,12 @@ export default function Dashboard({ onLogout, userName }) {
                     }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>📥</div>
                       <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>신청자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>연락처, 유입경로 포함 (Excel/CSV)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>연락처, 유입경로 포함 (Excel/CSV, 여러개 가능)</p>
                       <input
                         type="file"
                         accept=".xlsx,.xls,.csv"
-                        onChange={(e) => setToolFile1(e.target.files[0])}
+                        multiple
+                        onChange={(e) => setToolFiles1(Array.from(e.target.files))}
                         style={{ display: 'none' }}
                         id="tool-file1"
                       />
@@ -1903,12 +1904,14 @@ export default function Dashboard({ onLogout, userName }) {
                       >
                         파일 선택
                       </label>
-                      {toolFile1 && (
-                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile1.name}</p>
+                      {toolFiles1.length > 0 && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
+                          {toolFiles1.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                        </div>
                       )}
                     </div>
 
-                    {/* 결제자 파일 */}
+                    {/* 결제자 파일 (여러개 가능) */}
                     <div style={{
                       padding: '20px',
                       background: 'rgba(168,85,247,0.1)',
@@ -1918,11 +1921,12 @@ export default function Dashboard({ onLogout, userName }) {
                     }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>💳</div>
                       <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>결제자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>결제자 연락처 포함 (Excel/CSV)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>결제자 연락처 포함 (Excel/CSV, 여러개 가능)</p>
                       <input
                         type="file"
                         accept=".xlsx,.xls,.csv"
-                        onChange={(e) => setToolFile2(e.target.files[0])}
+                        multiple
+                        onChange={(e) => setToolFiles2(Array.from(e.target.files))}
                         style={{ display: 'none' }}
                         id="tool-file2"
                       />
@@ -1940,24 +1944,26 @@ export default function Dashboard({ onLogout, userName }) {
                       >
                         파일 선택
                       </label>
-                      {toolFile2 && (
-                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile2.name}</p>
+                      {toolFiles2.length > 0 && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
+                          {toolFiles2.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                        </div>
                       )}
                     </div>
                   </div>
 
                   <button
                     onClick={async () => {
-                      if (!toolFile1 || !toolFile2) {
-                        alert('두 파일을 모두 선택해주세요.')
+                      if (toolFiles1.length === 0 || toolFiles2.length === 0) {
+                        alert('두 쪽 모두 파일을 선택해주세요.')
                         return
                       }
                       setToolProcessing(true)
                       setToolLog(['처리 시작...'])
 
                       const formData = new FormData()
-                      formData.append('applicants', toolFile1)
-                      formData.append('payers', toolFile2)
+                      toolFiles1.forEach(f => formData.append('applicants', f))
+                      toolFiles2.forEach(f => formData.append('payers', f))
 
                       try {
                         const res = await fetch('/api/tools/inflow-match', {
@@ -1976,7 +1982,7 @@ export default function Dashboard({ onLogout, userName }) {
                       }
                       setToolProcessing(false)
                     }}
-                    disabled={toolProcessing || !toolFile1 || !toolFile2}
+                    disabled={toolProcessing || toolFiles1.length === 0 || toolFiles2.length === 0}
                     style={{
                       width: '100%',
                       padding: '14px',
@@ -2061,11 +2067,12 @@ export default function Dashboard({ onLogout, userName }) {
                   }}>
                     <div style={{ fontSize: '32px', marginBottom: '8px' }}>📊</div>
                     <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>CRM 데이터</p>
-                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>정리할 CRM 데이터 (Excel/CSV)</p>
+                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>정리할 CRM 데이터 (Excel/CSV, 여러개 가능)</p>
                     <input
                       type="file"
                       accept=".xlsx,.xls,.csv"
-                      onChange={(e) => setToolFile1(e.target.files[0])}
+                      multiple
+                      onChange={(e) => setToolFiles1(Array.from(e.target.files))}
                       style={{ display: 'none' }}
                       id="crm-file"
                     />
@@ -2083,14 +2090,16 @@ export default function Dashboard({ onLogout, userName }) {
                     >
                       파일 선택
                     </label>
-                    {toolFile1 && (
-                      <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile1.name}</p>
+                    {toolFiles1.length > 0 && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
+                        {toolFiles1.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                      </div>
                     )}
                   </div>
 
                   <button
                     onClick={async () => {
-                      if (!toolFile1) {
+                      if (toolFiles1.length === 0) {
                         alert('파일을 선택해주세요.')
                         return
                       }
@@ -2098,7 +2107,7 @@ export default function Dashboard({ onLogout, userName }) {
                       setToolLog(['처리 시작...'])
 
                       const formData = new FormData()
-                      formData.append('file', toolFile1)
+                      toolFiles1.forEach(f => formData.append('files', f))
 
                       try {
                         const res = await fetch('/api/tools/crm-cleanup', {
@@ -2117,7 +2126,7 @@ export default function Dashboard({ onLogout, userName }) {
                       }
                       setToolProcessing(false)
                     }}
-                    disabled={toolProcessing || !toolFile1}
+                    disabled={toolProcessing || toolFiles1.length === 0}
                     style={{
                       width: '100%',
                       padding: '14px',
@@ -2212,11 +2221,12 @@ export default function Dashboard({ onLogout, userName }) {
                     }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>💬</div>
                       <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>카톡 입장 로그</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>오픈채팅 입장 내역 (TXT/Excel)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>오픈채팅 입장 내역 (TXT/Excel, 여러개 가능)</p>
                       <input
                         type="file"
                         accept=".txt,.xlsx,.xls,.csv"
-                        onChange={(e) => setToolFile1(e.target.files[0])}
+                        multiple
+                        onChange={(e) => setToolFiles1(Array.from(e.target.files))}
                         style={{ display: 'none' }}
                         id="kakao-file1"
                       />
@@ -2234,8 +2244,10 @@ export default function Dashboard({ onLogout, userName }) {
                       >
                         파일 선택
                       </label>
-                      {toolFile1 && (
-                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile1.name}</p>
+                      {toolFiles1.length > 0 && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
+                          {toolFiles1.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                        </div>
                       )}
                     </div>
 
@@ -2249,11 +2261,12 @@ export default function Dashboard({ onLogout, userName }) {
                     }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>💳</div>
                       <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>결제자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>결제자 이름/연락처 (Excel/CSV)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>결제자 이름/연락처 (Excel/CSV, 여러개 가능)</p>
                       <input
                         type="file"
                         accept=".xlsx,.xls,.csv"
-                        onChange={(e) => setToolFile2(e.target.files[0])}
+                        multiple
+                        onChange={(e) => setToolFiles2(Array.from(e.target.files))}
                         style={{ display: 'none' }}
                         id="kakao-file2"
                       />
@@ -2271,24 +2284,26 @@ export default function Dashboard({ onLogout, userName }) {
                       >
                         파일 선택
                       </label>
-                      {toolFile2 && (
-                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile2.name}</p>
+                      {toolFiles2.length > 0 && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
+                          {toolFiles2.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                        </div>
                       )}
                     </div>
                   </div>
 
                   <button
                     onClick={async () => {
-                      if (!toolFile1 || !toolFile2) {
-                        alert('두 파일을 모두 선택해주세요.')
+                      if (toolFiles1.length === 0 || toolFiles2.length === 0) {
+                        alert('두 쪽 모두 파일을 선택해주세요.')
                         return
                       }
                       setToolProcessing(true)
                       setToolLog(['처리 시작...'])
 
                       const formData = new FormData()
-                      formData.append('kakaoLog', toolFile1)
-                      formData.append('payers', toolFile2)
+                      toolFiles1.forEach(f => formData.append('kakaoLogs', f))
+                      toolFiles2.forEach(f => formData.append('payers', f))
 
                       try {
                         const res = await fetch('/api/tools/kakao-match', {
@@ -2307,7 +2322,7 @@ export default function Dashboard({ onLogout, userName }) {
                       }
                       setToolProcessing(false)
                     }}
-                    disabled={toolProcessing || !toolFile1 || !toolFile2}
+                    disabled={toolProcessing || toolFiles1.length === 0 || toolFiles2.length === 0}
                     style={{
                       width: '100%',
                       padding: '14px',
@@ -2401,11 +2416,12 @@ export default function Dashboard({ onLogout, userName }) {
                   }}>
                     <div style={{ fontSize: '32px', marginBottom: '8px' }}>📊</div>
                     <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>YouTube 데이터</p>
-                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>조회수, 전환수 등 포함 (Excel/CSV)</p>
+                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>조회수, 전환수 등 포함 (Excel/CSV, 여러개 가능)</p>
                     <input
                       type="file"
                       accept=".xlsx,.xls,.csv"
-                      onChange={(e) => setToolFile1(e.target.files[0])}
+                      multiple
+                      onChange={(e) => setToolFiles1(Array.from(e.target.files))}
                       style={{ display: 'none' }}
                       id="media-file"
                     />
@@ -2423,14 +2439,16 @@ export default function Dashboard({ onLogout, userName }) {
                     >
                       파일 선택
                     </label>
-                    {toolFile1 && (
-                      <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile1.name}</p>
+                    {toolFiles1.length > 0 && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
+                        {toolFiles1.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                      </div>
                     )}
                   </div>
 
                   <button
                     onClick={async () => {
-                      if (!toolFile1) {
+                      if (toolFiles1.length === 0) {
                         alert('파일을 선택해주세요.')
                         return
                       }
@@ -2438,7 +2456,7 @@ export default function Dashboard({ onLogout, userName }) {
                       setToolLog(['분석 시작...'])
 
                       const formData = new FormData()
-                      formData.append('file', toolFile1)
+                      toolFiles1.forEach(f => formData.append('files', f))
 
                       try {
                         const res = await fetch('/api/tools/media-analyze', {
@@ -2457,7 +2475,7 @@ export default function Dashboard({ onLogout, userName }) {
                       }
                       setToolProcessing(false)
                     }}
-                    disabled={toolProcessing || !toolFile1}
+                    disabled={toolProcessing || toolFiles1.length === 0}
                     style={{
                       width: '100%',
                       padding: '14px',

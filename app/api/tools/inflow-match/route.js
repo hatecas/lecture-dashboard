@@ -44,37 +44,42 @@ function findInflowColumn(headers) {
 export async function POST(request) {
   try {
     const formData = await request.formData()
-    const applicantsFile = formData.get('applicants')
-    const payersFile = formData.get('payers')
+    const applicantsFiles = formData.getAll('applicants')
+    const payersFiles = formData.getAll('payers')
 
-    if (!applicantsFile || !payersFile) {
-      return NextResponse.json({ success: false, error: '두 파일이 모두 필요합니다.' })
+    if (applicantsFiles.length === 0 || payersFiles.length === 0) {
+      return NextResponse.json({ success: false, error: '두 쪽 모두 파일이 필요합니다.' })
     }
 
-    const logs = ['파일 업로드 완료']
+    const logs = [`신청자 파일 ${applicantsFiles.length}개, 결제자 파일 ${payersFiles.length}개 업로드됨`]
 
-    // 파일 읽기
-    const applicantsBuffer = await applicantsFile.arrayBuffer()
-    const payersBuffer = await payersFile.arrayBuffer()
+    // 모든 신청자 파일 병합
+    let allApplicantsData = []
+    for (const file of applicantsFiles) {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer)
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const data = XLSX.utils.sheet_to_json(sheet)
+      allApplicantsData = allApplicantsData.concat(data)
+      logs.push(`신청자 파일 "${file.name}": ${data.length}건`)
+    }
 
-    logs.push('파일 파싱 중...')
+    // 모든 결제자 파일 병합
+    let allPayersData = []
+    for (const file of payersFiles) {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer)
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const data = XLSX.utils.sheet_to_json(sheet)
+      allPayersData = allPayersData.concat(data)
+      logs.push(`결제자 파일 "${file.name}": ${data.length}건`)
+    }
 
-    // Excel/CSV 파싱
-    const applicantsWb = XLSX.read(applicantsBuffer)
-    const payersWb = XLSX.read(payersBuffer)
-
-    const applicantsSheet = applicantsWb.Sheets[applicantsWb.SheetNames[0]]
-    const payersSheet = payersWb.Sheets[payersWb.SheetNames[0]]
-
-    const applicantsData = XLSX.utils.sheet_to_json(applicantsSheet)
-    const payersData = XLSX.utils.sheet_to_json(payersSheet)
-
-    logs.push(`신청자 데이터: ${applicantsData.length}명`)
-    logs.push(`결제자 데이터: ${payersData.length}명`)
+    logs.push(`총 신청자: ${allApplicantsData.length}명, 총 결제자: ${allPayersData.length}명`)
 
     // 컬럼 찾기
-    const applicantHeaders = Object.keys(applicantsData[0] || {})
-    const payerHeaders = Object.keys(payersData[0] || {})
+    const applicantHeaders = Object.keys(allApplicantsData[0] || {})
+    const payerHeaders = Object.keys(allPayersData[0] || {})
 
     const applicantPhoneCol = findPhoneColumn(applicantHeaders)
     const payerPhoneCol = findPhoneColumn(payerHeaders)
@@ -93,7 +98,7 @@ export async function POST(request) {
 
     // 신청자 맵 생성 (전화번호 -> 유입경로)
     const applicantMap = new Map()
-    for (const row of applicantsData) {
+    for (const row of allApplicantsData) {
       const phone = normalizePhone(row[applicantPhoneCol])
       if (phone) {
         applicantMap.set(phone, {
@@ -110,7 +115,7 @@ export async function POST(request) {
     let matched = 0
     let unmatched = 0
 
-    for (const payer of payersData) {
+    for (const payer of allPayersData) {
       const phone = normalizePhone(payer[payerPhoneCol])
       const matchedApplicant = applicantMap.get(phone)
 
@@ -153,7 +158,7 @@ export async function POST(request) {
       success: true,
       matched,
       unmatched,
-      total: payersData.length,
+      total: allPayersData.length,
       logs,
       downloadUrl
     })

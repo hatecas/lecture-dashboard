@@ -57,28 +57,30 @@ function normalizeName(name) {
 export async function POST(request) {
   try {
     const formData = await request.formData()
-    const file = formData.get('file')
+    const files = formData.getAll('files')
 
-    if (!file) {
+    if (files.length === 0) {
       return NextResponse.json({ success: false, error: '파일이 필요합니다.' })
     }
 
-    const logs = ['파일 업로드 완료']
+    const logs = [`${files.length}개 파일 업로드됨`]
 
-    // 파일 읽기
-    const buffer = await file.arrayBuffer()
-    logs.push('파일 파싱 중...')
+    // 모든 파일 데이터 병합
+    let allData = []
+    for (const file of files) {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer)
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const data = XLSX.utils.sheet_to_json(sheet)
+      allData = allData.concat(data)
+      logs.push(`파일 "${file.name}": ${data.length}건`)
+    }
 
-    // Excel/CSV 파싱
-    const wb = XLSX.read(buffer)
-    const sheet = wb.Sheets[wb.SheetNames[0]]
-    const data = XLSX.utils.sheet_to_json(sheet)
-
-    const originalCount = data.length
-    logs.push(`원본 레코드 수: ${originalCount}`)
+    const originalCount = allData.length
+    logs.push(`총 원본 레코드 수: ${originalCount}`)
 
     // 컬럼 찾기
-    const headers = Object.keys(data[0] || {})
+    const headers = Object.keys(allData[0] || {})
     const phoneCol = findPhoneColumn(headers)
 
     logs.push(`전화번호 컬럼: ${phoneCol || '(자동 감지 실패)'}`)
@@ -89,7 +91,7 @@ export async function POST(request) {
     let duplicatesRemoved = 0
     let phoneFormatted = 0
 
-    for (const row of data) {
+    for (const row of allData) {
       // 전화번호 정규화
       if (phoneCol && row[phoneCol]) {
         const original = row[phoneCol]

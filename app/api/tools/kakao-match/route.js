@@ -83,57 +83,67 @@ function parseKakaoLog(text) {
 export async function POST(request) {
   try {
     const formData = await request.formData()
-    const kakaoLogFile = formData.get('kakaoLog')
-    const payersFile = formData.get('payers')
+    const kakaoLogFiles = formData.getAll('kakaoLogs')
+    const payersFiles = formData.getAll('payers')
 
-    if (!kakaoLogFile || !payersFile) {
-      return NextResponse.json({ success: false, error: '두 파일이 모두 필요합니다.' })
+    if (kakaoLogFiles.length === 0 || payersFiles.length === 0) {
+      return NextResponse.json({ success: false, error: '두 쪽 모두 파일이 필요합니다.' })
     }
 
-    const logs = ['파일 업로드 완료']
+    const logs = [`카톡 파일 ${kakaoLogFiles.length}개, 결제자 파일 ${payersFiles.length}개 업로드됨`]
 
-    // 결제자 파일 읽기
-    const payersBuffer = await payersFile.arrayBuffer()
-    const payersWb = XLSX.read(payersBuffer)
-    const payersSheet = payersWb.Sheets[payersWb.SheetNames[0]]
-    const payersData = XLSX.utils.sheet_to_json(payersSheet)
+    // 모든 결제자 파일 병합
+    let allPayersData = []
+    for (const file of payersFiles) {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer)
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const data = XLSX.utils.sheet_to_json(sheet)
+      allPayersData = allPayersData.concat(data)
+      logs.push(`결제자 파일 "${file.name}": ${data.length}건`)
+    }
 
-    logs.push(`결제자 데이터: ${payersData.length}명`)
+    logs.push(`총 결제자: ${allPayersData.length}명`)
 
-    // 카톡 로그 파일 읽기
-    let kakaoEntries = []
-    const kakaoFileName = kakaoLogFile.name.toLowerCase()
+    // 모든 카톡 로그 파일 병합
+    let allKakaoEntries = []
+    for (const file of kakaoLogFiles) {
+      const fileName = file.name.toLowerCase()
 
-    if (kakaoFileName.endsWith('.txt')) {
-      // TXT 파일 처리
-      const text = await kakaoLogFile.text()
-      kakaoEntries = parseKakaoLog(text)
-      logs.push(`카톡 로그 파싱: ${kakaoEntries.length}명 입장 기록`)
-    } else {
-      // Excel/CSV 파일 처리
-      const kakaoBuffer = await kakaoLogFile.arrayBuffer()
-      const kakaoWb = XLSX.read(kakaoBuffer)
-      const kakaoSheet = kakaoWb.Sheets[kakaoWb.SheetNames[0]]
-      const kakaoData = XLSX.utils.sheet_to_json(kakaoSheet)
+      if (fileName.endsWith('.txt')) {
+        // TXT 파일 처리
+        const text = await file.text()
+        const entries = parseKakaoLog(text)
+        allKakaoEntries = allKakaoEntries.concat(entries)
+        logs.push(`카톡 파일 "${file.name}": ${entries.length}명 입장 기록`)
+      } else {
+        // Excel/CSV 파일 처리
+        const buffer = await file.arrayBuffer()
+        const wb = XLSX.read(buffer)
+        const sheet = wb.Sheets[wb.SheetNames[0]]
+        const data = XLSX.utils.sheet_to_json(sheet)
 
-      const kakaoHeaders = Object.keys(kakaoData[0] || {})
-      const kakaoNameCol = findNameColumn(kakaoHeaders)
+        const headers = Object.keys(data[0] || {})
+        const nameCol = findNameColumn(headers)
 
-      if (kakaoNameCol) {
-        for (const row of kakaoData) {
-          if (row[kakaoNameCol]) {
-            kakaoEntries.push({
-              name: String(row[kakaoNameCol]).trim(),
-              type: '입장'
-            })
+        if (nameCol) {
+          for (const row of data) {
+            if (row[nameCol]) {
+              allKakaoEntries.push({
+                name: String(row[nameCol]).trim(),
+                type: '입장'
+              })
+            }
           }
         }
+        logs.push(`카톡 파일 "${file.name}": ${data.length}건`)
       }
-      logs.push(`카톡 입장자 데이터: ${kakaoEntries.length}명`)
     }
 
+    logs.push(`총 카톡 입장자: ${allKakaoEntries.length}명`)
+
     // 결제자 컬럼 찾기
-    const payerHeaders = Object.keys(payersData[0] || {})
+    const payerHeaders = Object.keys(allPayersData[0] || {})
     const payerNameCol = findNameColumn(payerHeaders)
     const payerPhoneCol = findPhoneColumn(payerHeaders)
 
@@ -142,7 +152,7 @@ export async function POST(request) {
 
     // 결제자 맵 생성 (이름 -> 결제자 정보)
     const payerMap = new Map()
-    for (const payer of payersData) {
+    for (const payer of allPayersData) {
       if (payerNameCol && payer[payerNameCol]) {
         const normalizedName = normalizeName(payer[payerNameCol])
         if (!payerMap.has(normalizedName)) {
@@ -159,7 +169,7 @@ export async function POST(request) {
     let unmatched = 0
     const processedNames = new Set()
 
-    for (const entry of kakaoEntries) {
+    for (const entry of allKakaoEntries) {
       const normalizedName = normalizeName(entry.name)
 
       // 중복 처리 방지
