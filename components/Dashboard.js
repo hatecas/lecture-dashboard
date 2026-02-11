@@ -85,12 +85,13 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sheetApiLoading, setSheetApiLoading] = useState(false)
 
   // 리소스 목록 (시트/문서 등)
+  // 같은 스프레드시트의 다른 탭은 gid 값만 다르게 설정하면 됩니다
   const resourceList = [
-    { id: 'weekly', icon: '📋', label: '주간보고', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit?gid=0#gid=0' },
-    // 아래는 예시 - 실제 URL로 교체하세요
-    // { id: 'monthly', icon: '📊', label: '월간보고', url: 'https://docs.google.com/spreadsheets/d/...' },
-    // { id: 'sales', icon: '💰', label: '매출현황', url: 'https://docs.google.com/spreadsheets/d/...' },
-    // { id: 'calendar', icon: '📅', label: '일정', url: 'https://calendar.google.com/calendar/embed?src=...' },
+    { id: 'weekly', icon: '📋', label: '운대표2기', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit?gid=0#gid=0' },
+    // 아래는 같은 시트의 다른 탭 예시 - gid 값을 해당 탭의 gid로 변경하세요
+    // 시트 탭의 gid는 해당 탭 클릭 후 URL에서 확인 가능합니다
+    // { id: 'bubusan6', icon: '📊', label: '부부산6기', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit?gid=123456789' },
+    // { id: 'bio6', icon: '📊', label: '비오6기', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit?gid=987654321' },
   ]
 
   // 구글 시트 URL을 임베드 URL로 변환
@@ -3262,8 +3263,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                       })()}
                     </div>
                   ) : (
-                    // API 테이블 모드
-                    <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: '16px', background: '#12121f' }}>
+                    // API 테이블 모드 - 밝은 배경 스타일
+                    <div style={{ width: '100%', height: '100%', overflow: 'auto', background: '#ffffff', borderRadius: '8px' }}>
                       {sheetApiLoading ? (
                         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
                           <div style={{ textAlign: 'center' }}>
@@ -3272,21 +3273,46 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           </div>
                         </div>
                       ) : sheetApiData ? (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: '#1a1a2e' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: '#fff' }}>
                           <thead>
+                            {/* 첫 번째 행 - 테이블 제목 (sticky) */}
                             {sheetApiData.length > 0 && (
                               <tr>
                                 {sheetApiData[0].map((cell, i) => (
                                   <th key={i} style={{
-                                    padding: '10px 12px',
-                                    background: '#252547',
-                                    borderBottom: '2px solid #6366f1',
+                                    padding: '12px 14px',
+                                    background: '#1e3a5f',
+                                    borderBottom: '1px solid #ccc',
+                                    borderRight: '1px solid rgba(255,255,255,0.2)',
                                     textAlign: 'left',
-                                    fontWeight: '600',
-                                    color: '#a5b4fc',
+                                    fontWeight: '700',
+                                    color: '#fff',
                                     whiteSpace: 'nowrap',
                                     position: 'sticky',
-                                    top: 0
+                                    top: 0,
+                                    zIndex: 2
+                                  }}>
+                                    {cell}
+                                  </th>
+                                ))}
+                              </tr>
+                            )}
+                            {/* 두 번째 행 - 컬럼 헤더 (sticky) */}
+                            {sheetApiData.length > 1 && (
+                              <tr>
+                                {sheetApiData[1].map((cell, i) => (
+                                  <th key={i} style={{
+                                    padding: '10px 14px',
+                                    background: '#f0f4f8',
+                                    borderBottom: '2px solid #3b82f6',
+                                    borderRight: '1px solid #e2e8f0',
+                                    textAlign: 'left',
+                                    fontWeight: '600',
+                                    color: '#1e293b',
+                                    whiteSpace: 'nowrap',
+                                    position: 'sticky',
+                                    top: '41px',
+                                    zIndex: 1
                                   }}>
                                     {cell}
                                   </th>
@@ -3295,13 +3321,14 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                             )}
                           </thead>
                           <tbody>
-                            {sheetApiData.slice(1).map((row, rowIdx) => (
-                              <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? '#1a1a2e' : '#1f1f38' }}>
+                            {sheetApiData.slice(2).map((row, rowIdx) => (
+                              <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? '#fff' : '#f8fafc' }}>
                                 {row.map((cell, cellIdx) => (
                                   <td key={cellIdx} style={{
-                                    padding: '10px 12px',
-                                    borderBottom: '1px solid rgba(255,255,255,0.08)',
-                                    color: '#e2e8f0',
+                                    padding: '10px 14px',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    borderRight: '1px solid #f1f5f9',
+                                    color: '#334155',
                                     whiteSpace: 'nowrap'
                                   }}>
                                     {cell}
@@ -3468,7 +3495,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     })()}
                   </div>
                 ) : (
-                  <div style={{ padding: '20px', height: '100%', overflow: 'auto', background: '#12121f' }}>
+                  <div style={{ padding: '20px', height: '100%', overflow: 'auto', background: '#f8fafc' }}>
                     {sheetApiLoading ? (
                       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
                         <div style={{ textAlign: 'center' }}>
@@ -3477,21 +3504,46 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                         </div>
                       </div>
                     ) : sheetApiData ? (
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: '#1a1a2e' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                         <thead>
+                          {/* 첫 번째 행 - 테이블 제목 (sticky) */}
                           {sheetApiData.length > 0 && (
                             <tr>
                               {sheetApiData[0].map((cell, i) => (
                                 <th key={i} style={{
-                                  padding: '12px 14px',
-                                  background: '#252547',
-                                  borderBottom: '2px solid #6366f1',
+                                  padding: '14px 16px',
+                                  background: '#1e3a5f',
+                                  borderBottom: '1px solid #ccc',
+                                  borderRight: '1px solid rgba(255,255,255,0.2)',
                                   textAlign: 'left',
-                                  fontWeight: '600',
-                                  color: '#a5b4fc',
+                                  fontWeight: '700',
+                                  color: '#fff',
                                   whiteSpace: 'nowrap',
                                   position: 'sticky',
-                                  top: 0
+                                  top: 0,
+                                  zIndex: 2
+                                }}>
+                                  {cell}
+                                </th>
+                              ))}
+                            </tr>
+                          )}
+                          {/* 두 번째 행 - 컬럼 헤더 (sticky) */}
+                          {sheetApiData.length > 1 && (
+                            <tr>
+                              {sheetApiData[1].map((cell, i) => (
+                                <th key={i} style={{
+                                  padding: '12px 16px',
+                                  background: '#f0f4f8',
+                                  borderBottom: '2px solid #3b82f6',
+                                  borderRight: '1px solid #e2e8f0',
+                                  textAlign: 'left',
+                                  fontWeight: '600',
+                                  color: '#1e293b',
+                                  whiteSpace: 'nowrap',
+                                  position: 'sticky',
+                                  top: '47px',
+                                  zIndex: 1
                                 }}>
                                   {cell}
                                 </th>
@@ -3500,13 +3552,14 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           )}
                         </thead>
                         <tbody>
-                          {sheetApiData.slice(1).map((row, rowIdx) => (
-                            <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? '#1a1a2e' : '#1f1f38' }}>
+                          {sheetApiData.slice(2).map((row, rowIdx) => (
+                            <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? '#fff' : '#f8fafc' }}>
                               {row.map((cell, cellIdx) => (
                                 <td key={cellIdx} style={{
-                                  padding: '12px 14px',
-                                  borderBottom: '1px solid rgba(255,255,255,0.08)',
-                                  color: '#e2e8f0',
+                                  padding: '12px 16px',
+                                  borderBottom: '1px solid #e2e8f0',
+                                  borderRight: '1px solid #f1f5f9',
+                                  color: '#334155',
                                   whiteSpace: 'nowrap'
                                 }}>
                                   {cell}
