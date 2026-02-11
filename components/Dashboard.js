@@ -76,6 +76,58 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const pollingRef = useRef(null)
   const viewPollingRef = useRef(null) // 채팅 보기 자동 새로고침용
 
+  // 리소스 허브 상태
+  const [resourceMode, setResourceMode] = useState('supabase') // 'supabase' or 'hardcoded'
+  const [resources, setResources] = useState([])
+  const [resourceSearch, setResourceSearch] = useState('')
+  const [showAddResource, setShowAddResource] = useState(false)
+  const [newResource, setNewResource] = useState({ name: '', url: '', category: '', subcategory: '', icon: '📄' })
+  const [expandedCategories, setExpandedCategories] = useState({})
+
+  // 하드코딩된 리소스 (옵션 2)
+  const hardcodedResources = [
+    { category: '📊 스프레드시트', subcategory: '매출 관련', name: '월별 매출 현황', url: 'https://docs.google.com/spreadsheets/d/example1', icon: '📈' },
+    { category: '📊 스프레드시트', subcategory: '매출 관련', name: '강사별 정산', url: 'https://docs.google.com/spreadsheets/d/example2', icon: '💰' },
+    { category: '📊 스프레드시트', subcategory: '고객 관리', name: '고객 DB', url: 'https://docs.google.com/spreadsheets/d/example3', icon: '👥' },
+    { category: '📊 스프레드시트', subcategory: '마케팅', name: '광고 성과', url: 'https://docs.google.com/spreadsheets/d/example4', icon: '📢' },
+    { category: '📅 캘린더', subcategory: '', name: '팀 일정', url: 'https://calendar.google.com/calendar/example1', icon: '📅' },
+    { category: '📅 캘린더', subcategory: '', name: '라이브 스케줄', url: 'https://calendar.google.com/calendar/example2', icon: '🎬' },
+    { category: '📝 문서', subcategory: '매뉴얼', name: '운영 매뉴얼', url: 'https://docs.google.com/document/d/example1', icon: '📖' },
+    { category: '📝 문서', subcategory: '템플릿', name: '회의록 템플릿', url: 'https://docs.google.com/document/d/example2', icon: '📝' },
+  ]
+
+  // 리소스 로드 (Supabase)
+  const loadResources = async () => {
+    const { data, error } = await supabase
+      .from('resources')
+      .select('*')
+      .order('category')
+      .order('subcategory')
+      .order('name')
+    if (data) setResources(data)
+  }
+
+  // 리소스 추가
+  const addResource = async () => {
+    if (!newResource.name || !newResource.url || !newResource.category) {
+      alert('이름, URL, 카테고리는 필수입니다.')
+      return
+    }
+    const { error } = await supabase.from('resources').insert([newResource])
+    if (!error) {
+      setNewResource({ name: '', url: '', category: '', subcategory: '', icon: '📄' })
+      setShowAddResource(false)
+      loadResources()
+    }
+  }
+
+  // 리소스 삭제
+  const deleteResource = async (id) => {
+    if (!confirm('정말 삭제하시겠습니까?')) return
+    await supabase.from('resources').delete().eq('id', id)
+    loadResources()
+  }
+
   // 툴 상태 초기화 함수
   const resetToolState = () => {
     setToolFiles1([])
@@ -1108,6 +1160,30 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           }} title="툴">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🛠️</span>
             툴
+          </button>
+
+          {/* 리소스 메뉴 */}
+          <button onClick={() => { setCurrentTab('resources'); loadResources(); if(isMobile) setMobileMenuOpen(false) }} style={{
+            width: '100%',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+            background: currentTab === 'resources' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'resources' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'resources' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'resources' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
+            alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+            gap: sidebarCollapsed ? '4px' : '10px',
+            transition: 'all 0.3s ease'
+          }} title="리소스">
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📁</span>
+            리소스
           </button>
         </div>
       </div>
@@ -2919,6 +2995,278 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                         ))}
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 리소스 탭 */}
+          {currentTab === 'resources' && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 리소스 허브</h2>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={() => setResourceMode(resourceMode === 'supabase' ? 'hardcoded' : 'supabase')}
+                    style={{
+                      padding: '8px 16px',
+                      background: 'rgba(99,102,241,0.2)',
+                      border: '1px solid rgba(99,102,241,0.3)',
+                      borderRadius: '8px',
+                      color: '#a5b4fc',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {resourceMode === 'supabase' ? '📡 DB 모드' : '📄 하드코딩 모드'}
+                  </button>
+                  {resourceMode === 'supabase' && (
+                    <button
+                      onClick={() => setShowAddResource(true)}
+                      style={{
+                        padding: '8px 16px',
+                        background: 'linear-gradient(135deg, #10b981, #059669)',
+                        border: 'none',
+                        borderRadius: '8px',
+                        color: '#fff',
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      + 추가
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 검색 */}
+              <div style={{ marginBottom: '20px' }}>
+                <input
+                  type="text"
+                  placeholder="🔍 검색..."
+                  value={resourceSearch}
+                  onChange={(e) => setResourceSearch(e.target.value)}
+                  style={{
+                    width: '100%',
+                    maxWidth: '400px',
+                    padding: '12px 16px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '10px',
+                    color: '#fff',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+
+              {/* 리소스 목록 */}
+              {(() => {
+                const data = resourceMode === 'supabase' ? resources : hardcodedResources
+                const filtered = data.filter(r =>
+                  r.name.toLowerCase().includes(resourceSearch.toLowerCase()) ||
+                  r.category.toLowerCase().includes(resourceSearch.toLowerCase()) ||
+                  (r.subcategory && r.subcategory.toLowerCase().includes(resourceSearch.toLowerCase()))
+                )
+
+                // 카테고리별 그룹화
+                const grouped = filtered.reduce((acc, item) => {
+                  const key = item.category
+                  if (!acc[key]) acc[key] = {}
+                  const subKey = item.subcategory || '기타'
+                  if (!acc[key][subKey]) acc[key][subKey] = []
+                  acc[key][subKey].push(item)
+                  return acc
+                }, {})
+
+                return Object.entries(grouped).map(([category, subcategories]) => (
+                  <div key={category} style={{ marginBottom: '16px' }}>
+                    <div
+                      onClick={() => setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }))}
+                      style={{
+                        padding: '14px 18px',
+                        background: 'rgba(255,255,255,0.05)',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        border: '1px solid rgba(255,255,255,0.08)'
+                      }}
+                    >
+                      <span style={{ fontWeight: '600', fontSize: '15px' }}>{category}</span>
+                      <span style={{ color: '#64748b' }}>{expandedCategories[category] !== false ? '▼' : '▶'}</span>
+                    </div>
+
+                    {expandedCategories[category] !== false && (
+                      <div style={{ marginTop: '8px', marginLeft: '12px' }}>
+                        {Object.entries(subcategories).map(([subcategory, items]) => (
+                          <div key={subcategory} style={{ marginBottom: '12px' }}>
+                            {subcategory !== '기타' && (
+                              <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px', paddingLeft: '8px' }}>
+                                {subcategory}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {items.map((item, idx) => (
+                                <div
+                                  key={item.id || idx}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '10px 14px',
+                                    background: 'rgba(255,255,255,0.03)',
+                                    borderRadius: '8px',
+                                    border: '1px solid rgba(255,255,255,0.05)',
+                                    transition: 'all 0.2s'
+                                  }}
+                                >
+                                  <a
+                                    href={item.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '10px',
+                                      color: '#e2e8f0',
+                                      textDecoration: 'none',
+                                      flex: 1
+                                    }}
+                                  >
+                                    <span style={{ fontSize: '16px' }}>{item.icon || '📄'}</span>
+                                    <span style={{ fontSize: '14px' }}>{item.name}</span>
+                                  </a>
+                                  {resourceMode === 'supabase' && (
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); deleteResource(item.id) }}
+                                      style={{
+                                        padding: '4px 8px',
+                                        background: 'rgba(239,68,68,0.2)',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        color: '#f87171',
+                                        fontSize: '11px',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      삭제
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))
+              })()}
+
+              {/* 데이터 없음 */}
+              {((resourceMode === 'supabase' && resources.length === 0) ||
+                (resourceMode === 'hardcoded' && hardcodedResources.filter(r =>
+                  r.name.toLowerCase().includes(resourceSearch.toLowerCase())
+                ).length === 0)) && (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                  {resourceMode === 'supabase' ? (
+                    <>
+                      <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
+                      <p>등록된 리소스가 없습니다.</p>
+                      <p style={{ fontSize: '12px', marginTop: '8px' }}>+ 추가 버튼을 눌러 리소스를 등록하세요.</p>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔍</div>
+                      <p>검색 결과가 없습니다.</p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* 리소스 추가 모달 */}
+              {showAddResource && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                  <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '28px', width: '450px', maxWidth: '95vw', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '20px' }}>📄 리소스 추가</h3>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>이름 *</label>
+                        <input
+                          type="text"
+                          value={newResource.name}
+                          onChange={(e) => setNewResource({ ...newResource, name: e.target.value })}
+                          placeholder="예: 월별 매출 현황"
+                          style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '14px' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>URL *</label>
+                        <input
+                          type="url"
+                          value={newResource.url}
+                          onChange={(e) => setNewResource({ ...newResource, url: e.target.value })}
+                          placeholder="https://docs.google.com/..."
+                          style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '14px' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>카테고리 *</label>
+                        <select
+                          value={newResource.category}
+                          onChange={(e) => setNewResource({ ...newResource, category: e.target.value })}
+                          style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '14px' }}
+                        >
+                          <option value="">선택하세요</option>
+                          <option value="📊 스프레드시트">📊 스프레드시트</option>
+                          <option value="📅 캘린더">📅 캘린더</option>
+                          <option value="📝 문서">📝 문서</option>
+                          <option value="🔗 기타">🔗 기타</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>서브 카테고리</label>
+                        <input
+                          type="text"
+                          value={newResource.subcategory}
+                          onChange={(e) => setNewResource({ ...newResource, subcategory: e.target.value })}
+                          placeholder="예: 매출 관련, 마케팅 등"
+                          style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '14px' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>아이콘</label>
+                        <input
+                          type="text"
+                          value={newResource.icon}
+                          onChange={(e) => setNewResource({ ...newResource, icon: e.target.value })}
+                          placeholder="이모지 입력 (예: 📈)"
+                          style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '14px' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '24px' }}>
+                      <button
+                        onClick={() => { setShowAddResource(false); setNewResource({ name: '', url: '', category: '', subcategory: '', icon: '📄' }) }}
+                        style={{ flex: 1, padding: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#94a3b8', fontSize: '14px', cursor: 'pointer' }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={addResource}
+                        style={{ flex: 1, padding: '12px', background: 'linear-gradient(135deg, #10b981, #059669)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+                      >
+                        추가
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
