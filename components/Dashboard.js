@@ -183,8 +183,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     }
   }
 
-  // 현재 선택된 탭 정보
-  const currentTab = sheetTabs.find(t => t.gid === currentResource)
+  // 현재 선택된 시트 탭 정보
+  const selectedSheetTab = sheetTabs.find(t => t.gid === currentResource)
 
   // 현재 탭의 URL 생성
   const getCurrentTabUrl = () => {
@@ -3267,8 +3267,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     <button
                       onClick={() => {
                         setResourceViewMode('api')
-                        if (currentTab && !sheetApiData) {
-                          fetchSheetDataByApi(spreadsheetId, currentTab.title)
+                        if (selectedSheetTab && !sheetApiData) {
+                          fetchSheetDataByApi(spreadsheetId, selectedSheetTab.title)
                         }
                       }}
                       style={{
@@ -3323,8 +3323,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   {/* 새로고침 버튼 */}
                   <button
                     onClick={() => {
-                      if (resourceViewMode === 'api' && currentTab) {
-                        fetchSheetDataByApi(spreadsheetId, currentTab.title)
+                      if (resourceViewMode === 'api' && selectedSheetTab) {
+                        fetchSheetDataByApi(spreadsheetId, selectedSheetTab.title)
                       } else {
                         setIframeLoading(true)
                       }
@@ -3415,7 +3415,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                             opacity: iframeLoading ? 0 : 1,
                             transition: 'opacity 0.3s ease'
                           }}
-                          title={currentTab?.title || '시트'}
+                          title={selectedSheetTab?.title || '시트'}
                         />
                       )}
                     </div>
