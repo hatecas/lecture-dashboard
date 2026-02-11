@@ -3263,7 +3263,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     </div>
                   ) : (
                     // API 테이블 모드
-                    <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: '16px' }}>
+                    <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: '16px', background: '#12121f' }}>
                       {sheetApiLoading ? (
                         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
                           <div style={{ textAlign: 'center' }}>
@@ -3272,15 +3272,15 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           </div>
                         </div>
                       ) : sheetApiData ? (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: '#1a1a2e' }}>
                           <thead>
                             {sheetApiData.length > 0 && (
                               <tr>
                                 {sheetApiData[0].map((cell, i) => (
                                   <th key={i} style={{
                                     padding: '10px 12px',
-                                    background: 'rgba(99,102,241,0.2)',
-                                    borderBottom: '2px solid rgba(99,102,241,0.3)',
+                                    background: '#252547',
+                                    borderBottom: '2px solid #6366f1',
                                     textAlign: 'left',
                                     fontWeight: '600',
                                     color: '#a5b4fc',
@@ -3296,11 +3296,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           </thead>
                           <tbody>
                             {sheetApiData.slice(1).map((row, rowIdx) => (
-                              <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                              <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? '#1a1a2e' : '#1f1f38' }}>
                                 {row.map((cell, cellIdx) => (
                                   <td key={cellIdx} style={{
                                     padding: '10px 12px',
-                                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                    borderBottom: '1px solid rgba(255,255,255,0.08)',
                                     color: '#e2e8f0',
                                     whiteSpace: 'nowrap'
                                   }}>
@@ -3343,7 +3343,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               left: 0,
               right: 0,
               bottom: 0,
-              background: 'rgba(0,0,0,0.95)',
+              background: '#0a0a12',
               zIndex: 10000,
               display: 'flex',
               flexDirection: 'column'
@@ -3468,7 +3468,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     })()}
                   </div>
                 ) : (
-                  <div style={{ padding: '20px', height: '100%', overflow: 'auto' }}>
+                  <div style={{ padding: '20px', height: '100%', overflow: 'auto', background: '#12121f' }}>
                     {sheetApiLoading ? (
                       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
                         <div style={{ textAlign: 'center' }}>
@@ -3477,15 +3477,15 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                         </div>
                       </div>
                     ) : sheetApiData ? (
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: '#1a1a2e' }}>
                         <thead>
                           {sheetApiData.length > 0 && (
                             <tr>
                               {sheetApiData[0].map((cell, i) => (
                                 <th key={i} style={{
                                   padding: '12px 14px',
-                                  background: 'rgba(99,102,241,0.2)',
-                                  borderBottom: '2px solid rgba(99,102,241,0.3)',
+                                  background: '#252547',
+                                  borderBottom: '2px solid #6366f1',
                                   textAlign: 'left',
                                   fontWeight: '600',
                                   color: '#a5b4fc',
@@ -3501,11 +3501,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                         </thead>
                         <tbody>
                           {sheetApiData.slice(1).map((row, rowIdx) => (
-                            <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                            <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? '#1a1a2e' : '#1f1f38' }}>
                               {row.map((cell, cellIdx) => (
                                 <td key={cellIdx} style={{
                                   padding: '12px 14px',
-                                  borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                  borderBottom: '1px solid rgba(255,255,255,0.08)',
                                   color: '#e2e8f0',
                                   whiteSpace: 'nowrap'
                                 }}>
