@@ -2815,6 +2815,7 @@ export default function Dashboard({ onLogout, userName }) {
                                   pollingRef.current = null
                                   setYtCollecting(false)
                                   setToolLog(prev => [...prev, '❌ 할당량 초과!'])
+                                  alert('⚠️ YouTube API 할당량이 초과되었습니다!\n\n수집이 자동으로 중지됩니다.\n(지금까지 수집된 데이터는 저장되어 있습니다)')
                                 }
                               } catch (e) {
                                 console.error('Poll error:', e)
