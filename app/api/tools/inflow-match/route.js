@@ -97,12 +97,14 @@ export async function POST(request) {
     logs.push(`유입경로 컬럼: ${inflowCol || '(없음)'}`)
 
     // 신청자 맵 생성 (전화번호 -> 유입경로)
+    // 중복 시 먼저 신청한 것(첫 번째)을 유지
     const applicantMap = new Map()
     for (const row of allApplicantsData) {
       const phone = normalizePhone(row[applicantPhoneCol])
-      if (phone) {
+      if (phone && !applicantMap.has(phone)) {
+        // 이미 등록된 번호가 아닐 때만 저장 (먼저 나온 것 = 먼저 신청한 것 유지)
         applicantMap.set(phone, {
-          inflow: inflowCol ? row[inflowCol] : '(알 수 없음)',
+          inflow: inflowCol ? row[inflowCol] : '',
           ...row
         })
       }
@@ -122,15 +124,13 @@ export async function POST(request) {
       if (matchedApplicant) {
         results.push({
           ...payer,
-          유입경로: matchedApplicant.inflow,
-          매칭상태: '매칭됨'
+          유입경로: matchedApplicant.inflow
         })
         matched++
       } else {
         results.push({
           ...payer,
-          유입경로: '(미매칭)',
-          매칭상태: '미매칭'
+          유입경로: ''
         })
         unmatched++
       }
@@ -144,7 +144,7 @@ export async function POST(request) {
     XLSX.utils.book_append_sheet(wb, ws, '매칭결과')
 
     // 미매칭만 따로 시트 추가
-    const unmatchedResults = results.filter(r => r.매칭상태 === '미매칭')
+    const unmatchedResults = results.filter(r => !r.유입경로)
     if (unmatchedResults.length > 0) {
       const unmatchedWs = XLSX.utils.json_to_sheet(unmatchedResults)
       XLSX.utils.book_append_sheet(wb, unmatchedWs, '미매칭')
