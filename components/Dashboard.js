@@ -3480,10 +3480,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               ) : (
                 <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
                   <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
-                  <p>등록된 리소스가 없습니다.</p>
-                  <p style={{ fontSize: '12px', marginTop: '8px', color: '#475569' }}>
-                    Dashboard.js의 resourceList 배열에 리소스를 추가하세요.
-                  </p>
+                  <p>시트를 선택해주세요.</p>
                 </div>
               )}
             </div>
@@ -3512,11 +3509,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 justifyContent: 'space-between'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '18px' }}>
-                    {resourceList.find(r => r.id === currentResource)?.icon}
-                  </span>
+                  <span style={{ fontSize: '18px' }}>📊</span>
                   <span style={{ color: '#fff', fontWeight: '600' }}>
-                    {resourceList.find(r => r.id === currentResource)?.label}
+                    {selectedSheetTab?.title || ''}
                   </span>
 
                   {/* 뷰 모드 토글 */}
@@ -3538,8 +3533,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     <button
                       onClick={() => {
                         setResourceViewMode('api')
-                        const selected = resourceList.find(r => r.id === currentResource)
-                        if (selected && !sheetApiData) fetchSheetData(selected.url)
+                        if (selectedSheetTab && !sheetApiData) {
+                          fetchSheetDataByApi(spreadsheetId, selectedSheetTab.title)
+                        }
                       }}
                       style={{
                         padding: '4px 10px',
@@ -3567,7 +3563,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <a
-                    href={resourceList.find(r => r.id === currentResource)?.url}
+                    href={getCurrentTabUrl()}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
@@ -3603,23 +3599,19 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               <div style={{ flex: 1, overflow: 'auto', background: '#fff' }}>
                 {resourceViewMode === 'iframe' ? (
                   <div style={{ width: '100%', height: '100%', overflow: 'auto', background: '#fff' }}>
-                    {(() => {
-                      const selected = resourceList.find(r => r.id === currentResource)
-                      if (!selected) return null
-                      return (
-                        <iframe
-                          src={getEmbedUrl(selected.url)}
-                          style={{
-                            width: `${10000 / resourceZoom}%`,
-                            height: `${10000 / resourceZoom}%`,
-                            border: 'none',
-                            transform: `scale(${resourceZoom / 100})`,
-                            transformOrigin: 'top left'
-                          }}
-                          title={selected.label}
-                        />
-                      )
-                    })()}
+                    {spreadsheetId && currentResource !== null && (
+                      <iframe
+                        src={getCurrentEmbedUrl()}
+                        style={{
+                          width: `${10000 / resourceZoom}%`,
+                          height: `${10000 / resourceZoom}%`,
+                          border: 'none',
+                          transform: `scale(${resourceZoom / 100})`,
+                          transformOrigin: 'top left'
+                        }}
+                        title={selectedSheetTab?.title || ''}
+                      />
+                    )}
                   </div>
                 ) : (
                   <div style={{ padding: '20px', height: '100%', overflow: 'auto', background: '#f8fafc' }}>
