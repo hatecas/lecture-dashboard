@@ -15,30 +15,13 @@ function normalizePhone(phone) {
   return cleaned
 }
 
-// 전화번호 컬럼 찾기
-function findPhoneColumn(headers) {
-  const phonePatterns = ['연락처', '전화번호', '전화', 'phone', '핸드폰', '휴대폰', '휴대전화', '연락번호']
-  for (const header of headers) {
-    for (const pattern of phonePatterns) {
-      if (String(header).toLowerCase().includes(pattern.toLowerCase())) {
-        return header
-      }
-    }
+// 컬럼 인덱스로 값 가져오기 (0부터 시작)
+function getColumnValue(row, colIndex) {
+  const keys = Object.keys(row)
+  if (colIndex < keys.length) {
+    return row[keys[colIndex]]
   }
-  return null
-}
-
-// 유입경로 컬럼 찾기
-function findInflowColumn(headers) {
-  const inflowPatterns = ['유입경로', '유입', '경로', '채널', 'source', 'inflow', 'channel', '알게된경로', '어떻게']
-  for (const header of headers) {
-    for (const pattern of inflowPatterns) {
-      if (String(header).toLowerCase().includes(pattern.toLowerCase())) {
-        return header
-      }
-    }
-  }
-  return null
+  return ''
 }
 
 export async function POST(request) {
@@ -53,83 +36,85 @@ export async function POST(request) {
 
     const logs = [`신청자 파일 ${applicantsFiles.length}개, 결제자 파일 ${payersFiles.length}개 업로드됨`]
 
-    // 모든 신청자 파일 병합
-    let allApplicantsData = []
+    // 모든 신청자 파일 병합 (파일명 포함)
+    // 신청자: D열(인덱스 3) = 전화번호, E열(인덱스 4) = 신청일
+    const applicantMap = new Map()
     for (const file of applicantsFiles) {
       const buffer = await file.arrayBuffer()
       const wb = XLSX.read(buffer)
       const sheet = wb.Sheets[wb.SheetNames[0]]
-      const data = XLSX.utils.sheet_to_json(sheet)
-      allApplicantsData = allApplicantsData.concat(data)
+      const data = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+
+      // 파일명에서 확장자 제거하여 유입경로로 사용
+      const fileName = file.name.replace(/\.(xlsx|xls|csv)$/i, '')
+
+      for (const row of data) {
+        // D열(인덱스 3) = 전화번호
+        const phone = normalizePhone(getColumnValue(row, 3))
+
+        if (phone && !applicantMap.has(phone)) {
+          // E열(인덱스 4) = 신청일
+          const applyDate = getColumnValue(row, 4)
+
+          applicantMap.set(phone, {
+            신청일: applyDate,
+            유입경로: fileName
+          })
+        }
+      }
+
       logs.push(`신청자 파일 "${file.name}": ${data.length}건`)
     }
 
+    logs.push(`신청자 맵: ${applicantMap.size}명 (중복 제거됨)`)
+
     // 모든 결제자 파일 병합
+    // 결제자: C열(인덱스 2) = 구매자, D열(인덱스 3) = 전화번호, G열(인덱스 6) = 결제금액, J열(인덱스 9) = 결제일
     let allPayersData = []
     for (const file of payersFiles) {
       const buffer = await file.arrayBuffer()
       const wb = XLSX.read(buffer)
       const sheet = wb.Sheets[wb.SheetNames[0]]
-      const data = XLSX.utils.sheet_to_json(sheet)
+      const data = XLSX.utils.sheet_to_json(sheet, { defval: '' })
       allPayersData = allPayersData.concat(data)
       logs.push(`결제자 파일 "${file.name}": ${data.length}건`)
     }
 
-    logs.push(`총 신청자: ${allApplicantsData.length}명, 총 결제자: ${allPayersData.length}명`)
-
-    // 컬럼 찾기
-    const applicantHeaders = Object.keys(allApplicantsData[0] || {})
-    const payerHeaders = Object.keys(allPayersData[0] || {})
-
-    const applicantPhoneCol = findPhoneColumn(applicantHeaders)
-    const payerPhoneCol = findPhoneColumn(payerHeaders)
-    const inflowCol = findInflowColumn(applicantHeaders)
-
-    if (!applicantPhoneCol) {
-      return NextResponse.json({ success: false, error: '신청자 데이터에서 전화번호 컬럼을 찾을 수 없습니다.' })
-    }
-    if (!payerPhoneCol) {
-      return NextResponse.json({ success: false, error: '결제자 데이터에서 전화번호 컬럼을 찾을 수 없습니다.' })
-    }
-
-    logs.push(`신청자 전화번호 컬럼: ${applicantPhoneCol}`)
-    logs.push(`결제자 전화번호 컬럼: ${payerPhoneCol}`)
-    logs.push(`유입경로 컬럼: ${inflowCol || '(없음)'}`)
-
-    // 신청자 맵 생성 (전화번호 -> 유입경로)
-    // 중복 시 먼저 신청한 것(첫 번째)을 유지
-    const applicantMap = new Map()
-    for (const row of allApplicantsData) {
-      const phone = normalizePhone(row[applicantPhoneCol])
-      if (phone && !applicantMap.has(phone)) {
-        // 이미 등록된 번호가 아닐 때만 저장 (먼저 나온 것 = 먼저 신청한 것 유지)
-        applicantMap.set(phone, {
-          inflow: inflowCol ? row[inflowCol] : '',
-          ...row
-        })
-      }
-    }
-
+    logs.push(`총 결제자: ${allPayersData.length}명`)
     logs.push('매칭 시작...')
 
-    // 결제자와 매칭
+    // 결제자와 매칭하여 새로운 형식으로 출력
     const results = []
     let matched = 0
     let unmatched = 0
 
     for (const payer of allPayersData) {
-      const phone = normalizePhone(payer[payerPhoneCol])
+      // 결제자 데이터에서 필요한 컬럼 추출
+      const 구매자 = getColumnValue(payer, 2)      // C열
+      const 전화번호Raw = getColumnValue(payer, 3)  // D열
+      const 결제금액 = getColumnValue(payer, 6)    // G열
+      const 결제일 = getColumnValue(payer, 9)      // J열
+
+      const phone = normalizePhone(전화번호Raw)
       const matchedApplicant = applicantMap.get(phone)
 
       if (matchedApplicant) {
         results.push({
-          ...payer,
-          유입경로: matchedApplicant.inflow
+          구매자: 구매자,
+          전화번호: 전화번호Raw,
+          결제금액: 결제금액,
+          결제일: 결제일,
+          신청일: matchedApplicant.신청일,
+          유입경로: matchedApplicant.유입경로
         })
         matched++
       } else {
         results.push({
-          ...payer,
+          구매자: 구매자,
+          전화번호: 전화번호Raw,
+          결제금액: 결제금액,
+          결제일: 결제일,
+          신청일: '',
           유입경로: ''
         })
         unmatched++
