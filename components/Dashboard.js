@@ -71,7 +71,10 @@ export default function Dashboard({ onLogout, userName }) {
   const [ytCollecting, setYtCollecting] = useState(false)
   const [ytSessions, setYtSessions] = useState([])
   const [ytMessageCount, setYtMessageCount] = useState(0)
+  const [ytViewSession, setYtViewSession] = useState(null) // 채팅 보기용 세션
+  const [ytViewMessages, setYtViewMessages] = useState([])
   const pollingRef = useRef(null)
+  const viewPollingRef = useRef(null) // 채팅 보기 자동 새로고침용
 
   // 툴 상태 초기화 함수
   const resetToolState = () => {
@@ -112,6 +115,35 @@ export default function Dashboard({ onLogout, userName }) {
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
+
+  // 유튜브 채팅 수집 중 페이지 이탈 방지
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (ytCollecting) {
+        e.preventDefault()
+        e.returnValue = '채팅 수집이 진행 중입니다. 페이지를 떠나면 수집이 중단됩니다.'
+        return e.returnValue
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [ytCollecting])
+
+  // 로그아웃 핸들러 (수집 중 확인)
+  const handleLogoutWithConfirm = () => {
+    if (ytCollecting) {
+      if (window.confirm('⚠️ 유튜브 채팅 수집이 진행 중입니다.\n\n로그아웃하면 현재 브라우저에서의 수집이 중단됩니다.\n(수집된 데이터는 저장되어 있습니다)\n\n정말 로그아웃하시겠습니까?')) {
+        // 폴링 중지
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current)
+          pollingRef.current = null
+        }
+        onLogout()
+      }
+    } else {
+      onLogout()
+    }
+  }
 
   useEffect(() => {
     // 데이터 로드 완료 후 한번만 동기화 (instructors가 로드되면)
@@ -1102,7 +1134,7 @@ export default function Dashboard({ onLogout, userName }) {
               ☰
             </button>
             <span style={{ fontSize: '14px', fontWeight: '600', color: '#a5b4fc' }}>📊 강의 관리</span>
-            <button onClick={onLogout} style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '12px' }}>
+            <button onClick={handleLogoutWithConfirm} style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '12px' }}>
               로그아웃
             </button>
           </div>
@@ -1115,7 +1147,7 @@ export default function Dashboard({ onLogout, userName }) {
               <span style={{ color: '#a5b4fc', fontSize: '14px' }}><strong>{userName}</strong>님 반갑습니다 👋</span>
             </div>
           )}
-          <button onClick={onLogout} style={{ padding: '10px 18px', background: 'rgba(239,68,68,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', color: '#f87171', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'all 0.3s ease' }}>
+          <button onClick={handleLogoutWithConfirm} style={{ padding: '10px 18px', background: 'rgba(239,68,68,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', color: '#f87171', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'all 0.3s ease' }}>
             로그아웃
           </button>
         </div>}
@@ -2930,8 +2962,38 @@ export default function Dashboard({ onLogout, userName }) {
                             flexWrap: 'wrap',
                             gap: '10px'
                           }}>
-                            <div>
-                              <div style={{ fontWeight: '600', color: '#fff', fontSize: '14px', marginBottom: '4px' }}>
+                            <div
+                              style={{ cursor: 'pointer', flex: 1 }}
+                              onClick={async () => {
+                                // 세션 클릭 시 채팅 보기
+                                const res = await fetch('/api/tools/youtube-chat', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
+                                })
+                                const data = await res.json()
+                                if (data.success) {
+                                  setYtViewSession(data.session)
+                                  setYtViewMessages(data.messages)
+                                  // 수집 중인 세션이면 자동 새로고침 시작
+                                  if (data.session.status === 'collecting') {
+                                    viewPollingRef.current = setInterval(async () => {
+                                      const r = await fetch('/api/tools/youtube-chat', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
+                                      })
+                                      const d = await r.json()
+                                      if (d.success) {
+                                        setYtViewSession(d.session)
+                                        setYtViewMessages(d.messages)
+                                      }
+                                    }, 10000)
+                                  }
+                                }
+                              }}
+                            >
+                              <div style={{ fontWeight: '600', color: '#a5b4fc', fontSize: '14px', marginBottom: '4px', textDecoration: 'underline' }}>
                                 {session.session_name || session.video_title || session.video_id}
                               </div>
                               <div style={{ fontSize: '12px', color: '#64748b' }}>
@@ -2939,7 +3001,47 @@ export default function Dashboard({ onLogout, userName }) {
                                 {session.target_user && ` · 필터: ${session.target_user}`}
                               </div>
                             </div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {/* 수집 중인 세션이면 정지 버튼 표시 */}
+                              {session.status === 'collecting' && (
+                                <button
+                                  onClick={async () => {
+                                    await fetch('/api/tools/youtube-chat', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'stop', sessionId: session.id })
+                                    })
+                                    // 세션 목록 새로고침
+                                    const listRes = await fetch('/api/tools/youtube-chat', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'list' })
+                                    })
+                                    const listData = await listRes.json()
+                                    if (listData.success) setYtSessions(listData.sessions)
+                                    // 내가 폴링 중이던 세션이면 폴링도 중지
+                                    if (ytSessionId === session.id) {
+                                      if (pollingRef.current) {
+                                        clearInterval(pollingRef.current)
+                                        pollingRef.current = null
+                                      }
+                                      setYtCollecting(false)
+                                      setToolLog(prev => [...prev, '⏹️ 수집 중지됨 (다른 사용자 또는 본인)'])
+                                    }
+                                  }}
+                                  style={{
+                                    padding: '6px 10px',
+                                    background: 'rgba(250,204,21,0.2)',
+                                    border: '1px solid rgba(250,204,21,0.3)',
+                                    borderRadius: '6px',
+                                    color: '#fcd34d',
+                                    fontSize: '11px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  ⏹️ 정지
+                                </button>
+                              )}
                               <button
                                 onClick={async () => {
                                   const res = await fetch('/api/tools/youtube-chat', {
@@ -2958,16 +3060,16 @@ export default function Dashboard({ onLogout, userName }) {
                                   }
                                 }}
                                 style={{
-                                  padding: '6px 12px',
+                                  padding: '6px 10px',
                                   background: 'rgba(16,185,129,0.2)',
                                   border: '1px solid rgba(16,185,129,0.3)',
                                   borderRadius: '6px',
                                   color: '#10b981',
-                                  fontSize: '12px',
+                                  fontSize: '11px',
                                   cursor: 'pointer'
                                 }}
                               >
-                                📥 다운로드
+                                📥
                               </button>
                               <button
                                 onClick={async () => {
@@ -2980,12 +3082,12 @@ export default function Dashboard({ onLogout, userName }) {
                                   setYtSessions(prev => prev.filter(s => s.id !== session.id))
                                 }}
                                 style={{
-                                  padding: '6px 12px',
+                                  padding: '6px 10px',
                                   background: 'rgba(239,68,68,0.2)',
                                   border: '1px solid rgba(239,68,68,0.3)',
                                   borderRadius: '6px',
                                   color: '#f87171',
-                                  fontSize: '12px',
+                                  fontSize: '11px',
                                   cursor: 'pointer'
                                 }}
                               >
@@ -3014,6 +3116,129 @@ export default function Dashboard({ onLogout, userName }) {
           개발자 이진우
         </div>
       </div>
+
+      {/* 유튜브 채팅 보기 모달 */}
+      {ytViewSession && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '24px', width: '600px', maxWidth: '95vw', border: '1px solid rgba(255,255,255,0.1)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '4px' }}>{ytViewSession.session_name || ytViewSession.video_title}</h3>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>
+                  {ytViewSession.message_count}개 메시지 · {ytViewSession.status === 'collecting' ? '🟢 수집 중' : ytViewSession.status === 'stopped' ? '⏹️ 중지됨' : '🔴 종료됨'}
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (viewPollingRef.current) {
+                    clearInterval(viewPollingRef.current)
+                    viewPollingRef.current = null
+                  }
+                  setYtViewSession(null)
+                  setYtViewMessages([])
+                }}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '28px', cursor: 'pointer', lineHeight: 1 }}
+              >×</button>
+            </div>
+
+            {/* 채팅 목록 */}
+            <div style={{
+              flex: 1,
+              overflow: 'auto',
+              background: 'rgba(0,0,0,0.3)',
+              borderRadius: '12px',
+              padding: '16px'
+            }}>
+              {ytViewMessages.length === 0 ? (
+                <p style={{ color: '#64748b', textAlign: 'center', padding: '40px' }}>수집된 채팅이 없습니다.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {ytViewMessages.map((msg, i) => (
+                    <div key={i} style={{ display: 'flex', gap: '10px', fontSize: '13px' }}>
+                      <span style={{ color: '#64748b', minWidth: '50px' }}>{msg.time_kst}</span>
+                      <span style={{ color: '#a5b4fc', fontWeight: '600', minWidth: '80px' }}>{msg.author}</span>
+                      <span style={{ color: '#e2e8f0', flex: 1 }}>{msg.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 하단 버튼 */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              {ytViewSession.status === 'collecting' && (
+                <button
+                  onClick={async () => {
+                    await fetch('/api/tools/youtube-chat', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'stop', sessionId: ytViewSession.id })
+                    })
+                    // 새로고침
+                    const res = await fetch('/api/tools/youtube-chat', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'messages', sessionId: ytViewSession.id, limit: 200 })
+                    })
+                    const data = await res.json()
+                    if (data.success) {
+                      setYtViewSession(data.session)
+                    }
+                    // 세션 목록도 새로고침
+                    const listRes = await fetch('/api/tools/youtube-chat', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'list' })
+                    })
+                    const listData = await listRes.json()
+                    if (listData.success) setYtSessions(listData.sessions)
+                  }}
+                  style={{
+                    padding: '12px 20px',
+                    background: 'rgba(250,204,21,0.2)',
+                    border: '1px solid rgba(250,204,21,0.4)',
+                    borderRadius: '10px',
+                    color: '#fcd34d',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ⏹️ 수집 정지
+                </button>
+              )}
+              <button
+                onClick={async () => {
+                  const res = await fetch('/api/tools/youtube-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'download', sessionId: ytViewSession.id })
+                  })
+                  const data = await res.json()
+                  if (data.success) {
+                    const link = document.createElement('a')
+                    link.href = data.downloadUrl
+                    link.download = data.filename
+                    link.click()
+                  }
+                }}
+                style={{
+                  padding: '12px 20px',
+                  background: 'rgba(16,185,129,0.2)',
+                  border: '1px solid rgba(16,185,129,0.4)',
+                  borderRadius: '10px',
+                  color: '#10b981',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                📥 다운로드
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 메모 모달 */}
       {showMemoModal && (
