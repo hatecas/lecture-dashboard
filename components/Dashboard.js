@@ -63,6 +63,15 @@ export default function Dashboard({ onLogout, userName }) {
   const [toolProcessing, setToolProcessing] = useState(false)
   const [toolLog, setToolLog] = useState([])
 
+  // 툴 상태 초기화 함수
+  const resetToolState = () => {
+    setToolFiles1([])
+    setToolFiles2([])
+    setToolResult(null)
+    setToolProcessing(false)
+    setToolLog([])
+  }
+
   // API 호출용 인증 헤더 생성
   const getAuthHeaders = () => {
     const token = localStorage.getItem('authToken')
@@ -994,7 +1003,7 @@ export default function Dashboard({ onLogout, userName }) {
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🏆</span>
             랭킹
           </button>
-          <button onClick={() => { setCurrentTab('compare'); if(isMobile) setMobileMenuOpen(false) }} style={{
+          <button onClick={() => { setCurrentTab('compare'); resetToolState(); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'compare' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -1021,7 +1030,7 @@ export default function Dashboard({ onLogout, userName }) {
           <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '12px 16px' }} />
 
           {/* 툴 메뉴 */}
-          <button onClick={() => { setCurrentTab('tools'); if(isMobile) setMobileMenuOpen(false) }} style={{
+          <button onClick={() => { setCurrentTab('tools'); resetToolState(); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'tools' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -1838,10 +1847,7 @@ export default function Dashboard({ onLogout, userName }) {
                     key={tool.id}
                     onClick={() => {
                       setCurrentTool(tool.id)
-                      setToolFiles1([])
-                      setToolFiles2([])
-                      setToolResult(null)
-                      setToolLog([])
+                      resetToolState()
                     }}
                     style={{
                       padding: '10px 16px',
@@ -2026,25 +2032,41 @@ export default function Dashboard({ onLogout, userName }) {
                           매칭됨: {toolResult.matched}명 / 미매칭: {toolResult.unmatched}명
                         </span>
                       </div>
-                      <button
-                        onClick={() => {
-                          const link = document.createElement('a')
-                          link.href = toolResult.downloadUrl
-                          link.download = 'matched_result.xlsx'
-                          link.click()
-                        }}
-                        style={{
-                          padding: '10px 20px',
-                          background: 'rgba(16,185,129,0.2)',
-                          border: '1px solid rgba(16,185,129,0.4)',
-                          borderRadius: '8px',
-                          color: '#10b981',
-                          fontSize: '13px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        📥 결과 다운로드
-                      </button>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          onClick={() => {
+                            const link = document.createElement('a')
+                            link.href = toolResult.downloadUrl
+                            link.download = 'matched_result.xlsx'
+                            link.click()
+                          }}
+                          style={{
+                            padding: '10px 20px',
+                            background: 'rgba(16,185,129,0.2)',
+                            border: '1px solid rgba(16,185,129,0.4)',
+                            borderRadius: '8px',
+                            color: '#10b981',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          📥 결과 다운로드
+                        </button>
+                        <button
+                          onClick={resetToolState}
+                          style={{
+                            padding: '10px 20px',
+                            background: 'rgba(99,102,241,0.2)',
+                            border: '1px solid rgba(99,102,241,0.4)',
+                            borderRadius: '8px',
+                            color: '#a5b4fc',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔄 초기화
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2178,26 +2200,42 @@ export default function Dashboard({ onLogout, userName }) {
                           <div style={{ fontSize: '11px', color: '#94a3b8' }}>정리 후</div>
                         </div>
                       </div>
-                      <button
-                        onClick={() => {
-                          const link = document.createElement('a')
-                          link.href = toolResult.downloadUrl
-                          link.download = 'cleaned_crm.xlsx'
-                          link.click()
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px 20px',
-                          background: 'rgba(16,185,129,0.2)',
-                          border: '1px solid rgba(16,185,129,0.4)',
-                          borderRadius: '8px',
-                          color: '#10b981',
-                          fontSize: '13px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        📥 정리된 데이터 다운로드
-                      </button>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          onClick={() => {
+                            const link = document.createElement('a')
+                            link.href = toolResult.downloadUrl
+                            link.download = 'cleaned_crm.xlsx'
+                            link.click()
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '10px 20px',
+                            background: 'rgba(16,185,129,0.2)',
+                            border: '1px solid rgba(16,185,129,0.4)',
+                            borderRadius: '8px',
+                            color: '#10b981',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          📥 정리된 데이터 다운로드
+                        </button>
+                        <button
+                          onClick={resetToolState}
+                          style={{
+                            padding: '10px 20px',
+                            background: 'rgba(99,102,241,0.2)',
+                            border: '1px solid rgba(99,102,241,0.4)',
+                            borderRadius: '8px',
+                            color: '#a5b4fc',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔄 초기화
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2374,26 +2412,42 @@ export default function Dashboard({ onLogout, userName }) {
                           <div style={{ fontSize: '11px', color: '#94a3b8' }}>카톡 입장자</div>
                         </div>
                       </div>
-                      <button
-                        onClick={() => {
-                          const link = document.createElement('a')
-                          link.href = toolResult.downloadUrl
-                          link.download = 'kakao_matched.xlsx'
-                          link.click()
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px 20px',
-                          background: 'rgba(16,185,129,0.2)',
-                          border: '1px solid rgba(16,185,129,0.4)',
-                          borderRadius: '8px',
-                          color: '#10b981',
-                          fontSize: '13px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        📥 결과 다운로드
-                      </button>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          onClick={() => {
+                            const link = document.createElement('a')
+                            link.href = toolResult.downloadUrl
+                            link.download = 'kakao_matched.xlsx'
+                            link.click()
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '10px 20px',
+                            background: 'rgba(16,185,129,0.2)',
+                            border: '1px solid rgba(16,185,129,0.4)',
+                            borderRadius: '8px',
+                            color: '#10b981',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          📥 결과 다운로드
+                        </button>
+                        <button
+                          onClick={resetToolState}
+                          style={{
+                            padding: '10px 20px',
+                            background: 'rgba(99,102,241,0.2)',
+                            border: '1px solid rgba(99,102,241,0.4)',
+                            borderRadius: '8px',
+                            color: '#a5b4fc',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔄 초기화
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2546,27 +2600,42 @@ export default function Dashboard({ onLogout, userName }) {
                         </div>
                       )}
 
-                      <button
-                        onClick={() => {
-                          const link = document.createElement('a')
-                          link.href = toolResult.downloadUrl
-                          link.download = 'media_analysis.xlsx'
-                          link.click()
-                        }}
-                        style={{
-                          width: '100%',
-                          marginTop: '16px',
-                          padding: '10px 20px',
-                          background: 'rgba(16,185,129,0.2)',
-                          border: '1px solid rgba(16,185,129,0.4)',
-                          borderRadius: '8px',
-                          color: '#10b981',
-                          fontSize: '13px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        📥 분석 결과 다운로드
-                      </button>
+                      <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                        <button
+                          onClick={() => {
+                            const link = document.createElement('a')
+                            link.href = toolResult.downloadUrl
+                            link.download = 'media_analysis.xlsx'
+                            link.click()
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '10px 20px',
+                            background: 'rgba(16,185,129,0.2)',
+                            border: '1px solid rgba(16,185,129,0.4)',
+                            borderRadius: '8px',
+                            color: '#10b981',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          📥 분석 결과 다운로드
+                        </button>
+                        <button
+                          onClick={resetToolState}
+                          style={{
+                            padding: '10px 20px',
+                            background: 'rgba(99,102,241,0.2)',
+                            border: '1px solid rgba(99,102,241,0.4)',
+                            borderRadius: '8px',
+                            color: '#a5b4fc',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔄 초기화
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
