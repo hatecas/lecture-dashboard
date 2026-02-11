@@ -2752,10 +2752,10 @@ export default function Dashboard({ onLogout, userName }) {
                             setYtSessionId(data.session.id)
                             setYtCollecting(true)
                             setYtMessageCount(0)
-                            setToolLog(prev => [...prev, '✅ 수집 시작됨!', `세션: ${data.session.session_name}`])
+                            setToolLog(prev => [...prev, '✅ 수집 시작됨!', `세션: ${data.session.session_name}`, '📡 첫 번째 폴링 중...'])
 
-                            // 폴링 시작 (60초 간격)
-                            pollingRef.current = setInterval(async () => {
+                            // 폴링 함수
+                            const doPoll = async () => {
                               try {
                                 const pollRes = await fetch('/api/tools/youtube-chat', {
                                   method: 'POST',
@@ -2771,8 +2771,11 @@ export default function Dashboard({ onLogout, userName }) {
                                     setToolLog(prev => [...prev, pollData.message || '수집 종료'])
                                   } else {
                                     setYtMessageCount(pollData.totalMessages)
+                                    const now = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
                                     if (pollData.logs?.length > 0) {
-                                      setToolLog(prev => [...prev, ...pollData.logs])
+                                      setToolLog(prev => [...prev, `📡 [${now}] 새 메시지 ${pollData.newMessages}개 수집`, ...pollData.logs])
+                                    } else {
+                                      setToolLog(prev => [...prev, `📡 [${now}] 폴링 완료 (새 메시지 없음) - 총 ${pollData.totalMessages}개`])
                                     }
                                   }
                                 } else if (pollData.quotaExceeded) {
@@ -2783,8 +2786,15 @@ export default function Dashboard({ onLogout, userName }) {
                                 }
                               } catch (e) {
                                 console.error('Poll error:', e)
+                                setToolLog(prev => [...prev, `⚠️ 폴링 오류: ${e.message}`])
                               }
-                            }, 60000)
+                            }
+
+                            // 즉시 첫 폴링 실행
+                            doPoll()
+
+                            // 이후 60초 간격으로 폴링
+                            pollingRef.current = setInterval(doPoll, 60000)
                           } else {
                             setToolLog(prev => [...prev, '❌ ' + data.error])
                           }
@@ -2815,9 +2825,12 @@ export default function Dashboard({ onLogout, userName }) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <div style={{ width: '10px', height: '10px', background: '#10b981', borderRadius: '50%', animation: 'pulse 2s infinite' }} />
-                          <span style={{ color: '#10b981', fontWeight: '600' }}>수집 중</span>
+                          <span style={{ color: '#10b981', fontWeight: '600' }}>수집 중 (60초 간격 폴링)</span>
                         </div>
-                        <span style={{ color: '#fff', fontSize: '18px', fontWeight: '700' }}>{ytMessageCount}개</span>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ color: '#fff', fontSize: '24px', fontWeight: '700' }}>{ytMessageCount}개</div>
+                          <div style={{ color: '#94a3b8', fontSize: '11px' }}>수집된 채팅</div>
+                        </div>
                       </div>
                       <button
                         onClick={async () => {
