@@ -855,7 +855,7 @@ export default function Dashboard({ onLogout, userName }) {
 
       {/* 사이드바 - 글래스모피즘 */}
       <div style={{
-        width: isMobile ? '240px' : (sidebarCollapsed ? '70px' : '240px'),
+        width: isMobile ? '240px' : (sidebarCollapsed ? '100px' : '240px'),
         background: 'rgba(255,255,255,0.03)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
@@ -921,87 +921,118 @@ export default function Dashboard({ onLogout, userName }) {
         <div style={{ flex: 1 }}>
           <button onClick={() => { setCurrentTab('dashboard'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
-            padding: sidebarCollapsed ? '14px 0' : '14px 20px',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'dashboard' ? 'rgba(99,102,241,0.2)' : 'transparent',
             backdropFilter: currentTab === 'dashboard' ? 'blur(10px)' : 'none',
             border: 'none',
             borderLeft: currentTab === 'dashboard' ? '3px solid #818cf8' : '3px solid transparent',
             color: currentTab === 'dashboard' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: '14px',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
             fontWeight: '500',
             cursor: 'pointer',
-            textAlign: sidebarCollapsed ? 'center' : 'left',
+            textAlign: 'center',
             display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
             alignItems: 'center',
             justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: '10px',
+            gap: sidebarCollapsed ? '4px' : '10px',
             transition: 'all 0.3s ease'
           }} title="대시보드">
-            <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>📈</span>
-            {!sidebarCollapsed && '대시보드'}
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📈</span>
+            대시보드
           </button>
           <button onClick={() => { setCurrentTab('detail'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
-            padding: sidebarCollapsed ? '14px 0' : '14px 20px',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'detail' ? 'rgba(99,102,241,0.2)' : 'transparent',
             backdropFilter: currentTab === 'detail' ? 'blur(10px)' : 'none',
             border: 'none',
             borderLeft: currentTab === 'detail' ? '3px solid #818cf8' : '3px solid transparent',
             color: currentTab === 'detail' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: '14px',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
             fontWeight: '500',
             cursor: 'pointer',
-            textAlign: sidebarCollapsed ? 'center' : 'left',
+            textAlign: 'center',
             display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
             alignItems: 'center',
             justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: '10px',
+            gap: sidebarCollapsed ? '4px' : '10px',
             transition: 'all 0.3s ease'
           }} title="상세 정보">
-            <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>📝</span>
-            {!sidebarCollapsed && '상세 정보'}
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📝</span>
+            상세 정보
           </button>
           <button onClick={() => { setCurrentTab('ranking'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
-            padding: sidebarCollapsed ? '14px 0' : '14px 20px',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'ranking' ? 'rgba(99,102,241,0.2)' : 'transparent',
             backdropFilter: currentTab === 'ranking' ? 'blur(10px)' : 'none',
             border: 'none',
             borderLeft: currentTab === 'ranking' ? '3px solid #818cf8' : '3px solid transparent',
             color: currentTab === 'ranking' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: '14px',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
             fontWeight: '500',
             cursor: 'pointer',
-            textAlign: sidebarCollapsed ? 'center' : 'left',
+            textAlign: 'center',
             display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
             alignItems: 'center',
             justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: '10px',
+            gap: sidebarCollapsed ? '4px' : '10px',
             transition: 'all 0.3s ease'
           }} title="랭킹">
-            <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>🏆</span>
-            {!sidebarCollapsed && '랭킹'}
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🏆</span>
+            랭킹
           </button>
           <button onClick={() => { setCurrentTab('compare'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
-            padding: sidebarCollapsed ? '14px 0' : '14px 20px',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'compare' ? 'rgba(99,102,241,0.2)' : 'transparent',
             backdropFilter: currentTab === 'compare' ? 'blur(10px)' : 'none',
             border: 'none',
             borderLeft: currentTab === 'compare' ? '3px solid #818cf8' : '3px solid transparent',
             color: currentTab === 'compare' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: '14px',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
             fontWeight: '500',
             cursor: 'pointer',
-            textAlign: sidebarCollapsed ? 'center' : 'left',
+            textAlign: 'center',
             display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
             alignItems: 'center',
             justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: '10px',
+            gap: sidebarCollapsed ? '4px' : '10px',
             transition: 'all 0.3s ease'
           }} title="대조">
-            <span style={{ fontSize: sidebarCollapsed ? '20px' : '14px' }}>⚖️</span>
-            {!sidebarCollapsed && '대조'}
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚖️</span>
+            대조
+          </button>
+
+          {/* 구분선 */}
+          <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '12px 16px' }} />
+
+          {/* 툴 메뉴 */}
+          <button onClick={() => { setCurrentTab('tools'); if(isMobile) setMobileMenuOpen(false) }} style={{
+            width: '100%',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+            background: currentTab === 'tools' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'tools' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'tools' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'tools' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
+            alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+            gap: sidebarCollapsed ? '4px' : '10px',
+            transition: 'all 0.3s ease'
+          }} title="툴">
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🛠️</span>
+            툴
           </button>
         </div>
       </div>
@@ -1780,6 +1811,18 @@ export default function Dashboard({ onLogout, userName }) {
               </>
             )
           })()}
+
+          {/* 툴 탭 */}
+          {currentTab === 'tools' && (
+            <div>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>🛠️ 업무 툴</h2>
+              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '40px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🚧</div>
+                <p style={{ color: '#94a3b8', fontSize: '15px' }}>업무 툴이 여기에 추가될 예정입니다</p>
+                <p style={{ color: '#64748b', fontSize: '13px', marginTop: '8px' }}>필요한 툴을 알려주세요!</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 푸터 */}
