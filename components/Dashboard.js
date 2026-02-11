@@ -77,23 +77,126 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const viewPollingRef = useRef(null) // 채팅 보기 자동 새로고침용
 
   // 리소스 허브 상태
-  const [currentResource, setCurrentResource] = useState('weekly') // 현재 선택된 리소스
+  const [currentResource, setCurrentResource] = useState(null) // 현재 선택된 탭 gid
   const [resourceZoom, setResourceZoom] = useState(75) // 줌 레벨 (%) - 기본 75%로 더 많이 보이게
   const [resourceFullscreen, setResourceFullscreen] = useState(false) // 전체화면 모드
-  const [resourceViewMode, setResourceViewMode] = useState('iframe') // 'iframe' or 'api'
+  const [resourceViewMode, setResourceViewMode] = useState('api') // 'iframe' or 'api' - 기본 API 모드 (빠름)
   const [sheetApiData, setSheetApiData] = useState(null) // API로 가져온 시트 데이터
   const [sheetApiLoading, setSheetApiLoading] = useState(false)
   const [iframeLoading, setIframeLoading] = useState(true) // iframe 로딩 상태
 
-  // 리소스 목록 (시트/문서 등)
-  // 같은 스프레드시트의 다른 탭은 gid 값만 다르게 설정하면 됩니다
-  const resourceList = [
-    { id: 'weekly', icon: '📋', label: '운대표2기', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit?gid=0#gid=0' },
-    // 아래는 같은 시트의 다른 탭 예시 - gid 값을 해당 탭의 gid로 변경하세요
-    // 시트 탭의 gid는 해당 탭 클릭 후 URL에서 확인 가능합니다
-    // { id: 'bubusan6', icon: '📊', label: '부부산6기', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit?gid=123456789' },
-    // { id: 'bio6', icon: '📊', label: '비오6기', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit?gid=987654321' },
-  ]
+  // Google Sheets API 설정
+  const [sheetsApiKey, setSheetsApiKey] = useState('') // Google API 키
+  const [sheetsUrl, setSheetsUrl] = useState('https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit') // 스프레드시트 URL
+  const [sheetTabs, setSheetTabs] = useState([]) // 시트 탭 목록
+  const [sheetsLoading, setSheetsLoading] = useState(false)
+  const [showSheetsSettings, setShowSheetsSettings] = useState(false)
+  const [spreadsheetId, setSpreadsheetId] = useState('')
+  const [spreadsheetTitle, setSpreadsheetTitle] = useState('')
+
+  // localStorage에서 API 키 로드
+  useEffect(() => {
+    const savedApiKey = localStorage.getItem('googleSheetsApiKey')
+    const savedUrl = localStorage.getItem('googleSheetsUrl')
+    if (savedApiKey) setSheetsApiKey(savedApiKey)
+    if (savedUrl) setSheetsUrl(savedUrl)
+  }, [])
+
+  // 시트 탭 목록 가져오기
+  const fetchSheetTabs = async () => {
+    if (!sheetsApiKey || !sheetsUrl) {
+      alert('Google API 키와 스프레드시트 URL을 입력하세요.')
+      setShowSheetsSettings(true)
+      return
+    }
+
+    setSheetsLoading(true)
+    try {
+      const response = await fetch('/api/sheets-meta', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ spreadsheetUrl: sheetsUrl, apiKey: sheetsApiKey })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        alert(data.error || '시트 정보를 가져올 수 없습니다.')
+        return
+      }
+
+      setSheetTabs(data.tabs)
+      setSpreadsheetId(data.spreadsheetId)
+      setSpreadsheetTitle(data.spreadsheetTitle)
+
+      // 첫 번째 탭 선택
+      if (data.tabs.length > 0 && !currentResource) {
+        setCurrentResource(data.tabs[0].gid)
+        // API 모드면 데이터도 가져오기
+        if (resourceViewMode === 'api') {
+          fetchSheetDataByApi(data.spreadsheetId, data.tabs[0].title)
+        }
+      }
+
+      // 설정 저장
+      localStorage.setItem('googleSheetsApiKey', sheetsApiKey)
+      localStorage.setItem('googleSheetsUrl', sheetsUrl)
+      setShowSheetsSettings(false)
+
+    } catch (error) {
+      console.error('Fetch tabs error:', error)
+      alert('시트 정보를 가져오는 중 오류가 발생했습니다.')
+    } finally {
+      setSheetsLoading(false)
+    }
+  }
+
+  // API로 시트 데이터 가져오기
+  const fetchSheetDataByApi = async (sheetId, sheetName) => {
+    if (!sheetsApiKey) return
+
+    setSheetApiLoading(true)
+    setSheetApiData(null)
+    try {
+      const params = new URLSearchParams({
+        spreadsheetId: sheetId || spreadsheetId,
+        apiKey: sheetsApiKey,
+        sheetName: sheetName
+      })
+
+      const response = await fetch(`/api/sheets-meta?${params}`, {
+        headers: getAuthHeaders()
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        console.error('Sheet data error:', data.error)
+        return
+      }
+
+      setSheetApiData(data.values)
+    } catch (error) {
+      console.error('Fetch sheet data error:', error)
+    } finally {
+      setSheetApiLoading(false)
+    }
+  }
+
+  // 현재 선택된 탭 정보
+  const currentTab = sheetTabs.find(t => t.gid === currentResource)
+
+  // 현재 탭의 URL 생성
+  const getCurrentTabUrl = () => {
+    if (!spreadsheetId || currentResource === null) return ''
+    return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${currentResource}`
+  }
+
+  // 현재 탭의 임베드 URL 생성
+  const getCurrentEmbedUrl = () => {
+    if (!spreadsheetId || currentResource === null) return ''
+    return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/htmlembed?gid=${currentResource}`
+  }
 
   // 구글 시트 URL을 임베드 URL로 변환
   const getEmbedUrl = (url) => {
@@ -3074,126 +3177,157 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           {/* 리소스 탭 */}
           {currentTab === 'resources' && (
             <div>
-              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>📁 리소스</h2>
-
-              {/* 리소스 탭 버튼들 */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                {resourceList.map(resource => (
-                  <button
-                    key={resource.id}
-                    onClick={() => {
-                      setCurrentResource(resource.id)
-                      setSheetApiData(null)
-                      setIframeLoading(true)
-                    }}
-                    style={{
-                      padding: '10px 16px',
-                      background: currentResource === resource.id ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
-                      border: currentResource === resource.id ? 'none' : '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '10px',
-                      color: '#fff',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <span>{resource.icon}</span>
-                    {resource.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* 컨트롤 바 */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-                {/* 뷰 모드 토글 */}
-                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '2px' }}>
-                  <button
-                    onClick={() => setResourceViewMode('iframe')}
-                    style={{
-                      padding: '6px 12px',
-                      background: resourceViewMode === 'iframe' ? 'rgba(99,102,241,0.3)' : 'transparent',
-                      border: 'none',
-                      borderRadius: '6px',
-                      color: resourceViewMode === 'iframe' ? '#a5b4fc' : '#64748b',
-                      fontSize: '12px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    📄 임베드
-                  </button>
-                  <button
-                    onClick={() => {
-                      setResourceViewMode('api')
-                      const selected = resourceList.find(r => r.id === currentResource)
-                      if (selected && !sheetApiData) fetchSheetData(selected.url)
-                    }}
-                    style={{
-                      padding: '6px 12px',
-                      background: resourceViewMode === 'api' ? 'rgba(99,102,241,0.3)' : 'transparent',
-                      border: 'none',
-                      borderRadius: '6px',
-                      color: resourceViewMode === 'api' ? '#a5b4fc' : '#64748b',
-                      fontSize: '12px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    📊 테이블
-                  </button>
-                </div>
-
-                {/* 줌 컨트롤 (임베드 모드에서만) */}
-                {resourceViewMode === 'iframe' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '4px 8px' }}>
-                    <button
-                      onClick={() => setResourceZoom(Math.max(40, resourceZoom - 10))}
-                      style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
-                    >
-                      −
-                    </button>
-                    <span style={{ color: '#94a3b8', fontSize: '12px', minWidth: '45px', textAlign: 'center' }}>{resourceZoom}%</span>
-                    <button
-                      onClick={() => setResourceZoom(Math.min(120, resourceZoom + 10))}
-                      style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
-                    >
-                      +
-                    </button>
-                    <button
-                      onClick={() => setResourceZoom(100)}
-                      style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#64748b', fontSize: '11px', cursor: 'pointer' }}
-                    >
-                      리셋
-                    </button>
-                  </div>
-                )}
-
-                {/* 전체화면 버튼 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 리소스 {spreadsheetTitle && `- ${spreadsheetTitle}`}</h2>
                 <button
-                  onClick={() => setResourceFullscreen(true)}
+                  onClick={() => setShowSheetsSettings(true)}
                   style={{
-                    padding: '6px 12px',
-                    background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    padding: '8px 16px',
+                    background: 'rgba(99,102,241,0.2)',
+                    border: '1px solid rgba(99,102,241,0.3)',
                     borderRadius: '8px',
-                    color: '#94a3b8',
+                    color: '#a5b4fc',
                     fontSize: '12px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
+                    cursor: 'pointer'
                   }}
                 >
-                  ⛶ 전체화면
+                  ⚙️ 설정
                 </button>
+              </div>
 
-                {/* 새로고침 버튼 (API 모드) */}
-                {resourceViewMode === 'api' && (
+              {/* 시트 탭 버튼들 */}
+              {sheetTabs.length > 0 ? (
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap', maxHeight: '80px', overflowY: 'auto', padding: '4px 0' }}>
+                  {sheetTabs.map(tab => (
+                    <button
+                      key={tab.gid}
+                      onClick={() => {
+                        setCurrentResource(tab.gid)
+                        setSheetApiData(null)
+                        setIframeLoading(true)
+                        if (resourceViewMode === 'api') {
+                          fetchSheetDataByApi(spreadsheetId, tab.title)
+                        }
+                      }}
+                      style={{
+                        padding: '8px 14px',
+                        background: currentResource === tab.gid ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
+                        border: currentResource === tab.gid ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '8px',
+                        color: '#fff',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {tab.title}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ marginBottom: '16px', padding: '20px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', textAlign: 'center' }}>
+                  <p style={{ color: '#64748b', marginBottom: '12px' }}>시트 탭을 불러오려면 설정에서 API 키를 입력하세요.</p>
+                  <button
+                    onClick={() => setShowSheetsSettings(true)}
+                    style={{
+                      padding: '10px 20px',
+                      background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      border: 'none',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      fontSize: '13px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🔑 API 키 설정하기
+                  </button>
+                </div>
+              )}
+
+              {/* 컨트롤 바 */}
+              {sheetTabs.length > 0 && (
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {/* 뷰 모드 토글 */}
+                  <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '2px' }}>
+                    <button
+                      onClick={() => setResourceViewMode('iframe')}
+                      style={{
+                        padding: '6px 12px',
+                        background: resourceViewMode === 'iframe' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '6px',
+                        color: resourceViewMode === 'iframe' ? '#a5b4fc' : '#64748b',
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📄 임베드
+                    </button>
+                    <button
+                      onClick={() => {
+                        setResourceViewMode('api')
+                        if (currentTab && !sheetApiData) {
+                          fetchSheetDataByApi(spreadsheetId, currentTab.title)
+                        }
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        background: resourceViewMode === 'api' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '6px',
+                        color: resourceViewMode === 'api' ? '#a5b4fc' : '#64748b',
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📊 테이블 (빠름)
+                    </button>
+                  </div>
+
+                  {/* 줌 컨트롤 (임베드 모드에서만) */}
+                  {resourceViewMode === 'iframe' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '4px 8px' }}>
+                      <button
+                        onClick={() => setResourceZoom(Math.max(40, resourceZoom - 10))}
+                        style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
+                      >
+                        −
+                      </button>
+                      <span style={{ color: '#94a3b8', fontSize: '12px', minWidth: '45px', textAlign: 'center' }}>{resourceZoom}%</span>
+                      <button
+                        onClick={() => setResourceZoom(Math.min(120, resourceZoom + 10))}
+                        style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+
+                  {/* 전체화면 버튼 */}
+                  <button
+                    onClick={() => setResourceFullscreen(true)}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#94a3b8',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ⛶ 전체화면
+                  </button>
+
+                  {/* 새로고침 버튼 */}
                   <button
                     onClick={() => {
-                      const selected = resourceList.find(r => r.id === currentResource)
-                      if (selected) fetchSheetData(selected.url)
+                      if (resourceViewMode === 'api' && currentTab) {
+                        fetchSheetDataByApi(spreadsheetId, currentTab.title)
+                      } else {
+                        setIframeLoading(true)
+                      }
                     }}
                     disabled={sheetApiLoading}
                     style={{
@@ -3209,40 +3343,39 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   >
                     {sheetApiLoading ? '⏳ 로딩...' : '🔄 새로고침'}
                   </button>
-                )}
 
-                {/* 새 탭에서 열기 */}
-                {resourceList.find(r => r.id === currentResource) && (
-                  <a
-                    href={resourceList.find(r => r.id === currentResource)?.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      padding: '6px 12px',
-                      background: 'rgba(16,185,129,0.15)',
-                      border: '1px solid rgba(16,185,129,0.3)',
-                      borderRadius: '8px',
-                      color: '#34d399',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      textDecoration: 'none',
-                      marginLeft: 'auto'
-                    }}
-                  >
-                    🔗 새 탭에서 열기
-                  </a>
-                )}
-              </div>
+                  {/* 새 탭에서 열기 */}
+                  {getCurrentTabUrl() && (
+                    <a
+                      href={getCurrentTabUrl()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        padding: '6px 12px',
+                        background: 'rgba(16,185,129,0.15)',
+                        border: '1px solid rgba(16,185,129,0.3)',
+                        borderRadius: '8px',
+                        color: '#34d399',
+                        fontSize: '12px',
+                        textDecoration: 'none',
+                        marginLeft: 'auto'
+                      }}
+                    >
+                      🔗 새 탭에서 열기
+                    </a>
+                  )}
+                </div>
+              )}
 
               {/* 시트 표시 영역 */}
-              {resourceList.length > 0 ? (
+              {sheetTabs.length > 0 && currentResource !== null ? (
                 <div style={{
                   background: '#fff',
                   borderRadius: '12px',
                   border: '1px solid rgba(255,255,255,0.1)',
                   overflow: 'hidden',
-                  height: 'calc(100vh - 240px)',
-                  minHeight: '600px',
+                  height: 'calc(100vh - 280px)',
+                  minHeight: '500px',
                   position: 'relative'
                 }}>
                   {resourceViewMode === 'iframe' ? (
@@ -3269,26 +3402,22 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           </div>
                         </div>
                       )}
-                      {(() => {
-                        const selected = resourceList.find(r => r.id === currentResource)
-                        if (!selected) return null
-                        return (
-                          <iframe
-                            src={getEmbedUrl(selected.url)}
-                            onLoad={() => setIframeLoading(false)}
-                            style={{
-                              width: `${10000 / resourceZoom}%`,
-                              height: `${10000 / resourceZoom}%`,
-                              border: 'none',
-                              transform: `scale(${resourceZoom / 100})`,
-                              transformOrigin: 'top left',
-                              opacity: iframeLoading ? 0 : 1,
-                              transition: 'opacity 0.3s ease'
-                            }}
-                            title={selected.label}
-                          />
-                        )
-                      })()}
+                      {getCurrentEmbedUrl() && (
+                        <iframe
+                          src={getCurrentEmbedUrl()}
+                          onLoad={() => setIframeLoading(false)}
+                          style={{
+                            width: `${10000 / resourceZoom}%`,
+                            height: `${10000 / resourceZoom}%`,
+                            border: 'none',
+                            transform: `scale(${resourceZoom / 100})`,
+                            transformOrigin: 'top left',
+                            opacity: iframeLoading ? 0 : 1,
+                            transition: 'opacity 0.3s ease'
+                          }}
+                          title={currentTab?.title || '시트'}
+                        />
+                      )}
                     </div>
                   ) : (
                     // API 테이블 모드 - 밝은 배경 스타일
@@ -3387,6 +3516,128 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   </p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Google Sheets API 설정 모달 */}
+          {showSheetsSettings && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0,0,0,0.8)',
+              zIndex: 10000,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center'
+            }}>
+              <div style={{
+                background: '#1a1a2e',
+                borderRadius: '16px',
+                padding: '24px',
+                width: '90%',
+                maxWidth: '500px',
+                border: '1px solid rgba(255,255,255,0.1)'
+              }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '20px', color: '#fff' }}>
+                  🔑 Google Sheets API 설정
+                </h3>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                    Google API 키
+                  </label>
+                  <input
+                    type="password"
+                    value={sheetsApiKey}
+                    onChange={(e) => setSheetsApiKey(e.target.value)}
+                    placeholder="AIzaSy..."
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      fontSize: '14px'
+                    }}
+                  />
+                  <p style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                    Google Cloud Console에서 Sheets API를 활성화하고 API 키를 발급받으세요.
+                  </p>
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                    스프레드시트 URL
+                  </label>
+                  <input
+                    type="text"
+                    value={sheetsUrl}
+                    onChange={(e) => setSheetsUrl(e.target.value)}
+                    placeholder="https://docs.google.com/spreadsheets/d/..."
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      fontSize: '14px'
+                    }}
+                  />
+                  <p style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+                    시트가 "링크가 있는 모든 사용자"에게 공유되어 있어야 합니다.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setShowSheetsSettings(false)}
+                    style={{
+                      padding: '10px 20px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#94a3b8',
+                      fontSize: '13px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={fetchSheetTabs}
+                    disabled={sheetsLoading}
+                    style={{
+                      padding: '10px 20px',
+                      background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      border: 'none',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      fontSize: '13px',
+                      cursor: sheetsLoading ? 'not-allowed' : 'pointer',
+                      opacity: sheetsLoading ? 0.7 : 1
+                    }}
+                  >
+                    {sheetsLoading ? '불러오는 중...' : '시트 탭 불러오기'}
+                  </button>
+                </div>
+
+                <div style={{ marginTop: '20px', padding: '12px', background: 'rgba(99,102,241,0.1)', borderRadius: '8px' }}>
+                  <p style={{ fontSize: '12px', color: '#a5b4fc', marginBottom: '8px', fontWeight: '500' }}>
+                    💡 API 키 발급 방법
+                  </p>
+                  <ol style={{ fontSize: '11px', color: '#94a3b8', paddingLeft: '16px', margin: 0, lineHeight: '1.6' }}>
+                    <li>Google Cloud Console 접속</li>
+                    <li>새 프로젝트 생성 또는 기존 프로젝트 선택</li>
+                    <li>API 및 서비스 → 라이브러리 → "Google Sheets API" 검색 후 활성화</li>
+                    <li>API 및 서비스 → 사용자 인증 정보 → API 키 만들기</li>
+                  </ol>
+                </div>
+              </div>
             </div>
           )}
 
