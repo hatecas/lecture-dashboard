@@ -89,11 +89,12 @@ export default function Dashboard({ onLogout, userName }) {
   }, [])
 
   useEffect(() => {
-    if (instructors.length >= 0 && sessions.length >= 0 && !synced) {
+    // 데이터 로드 완료 후 한번만 동기화 (instructors가 로드되면)
+    if (instructors.length > 0 && !synced) {
       setSynced(true)
       syncFromSheet()
     }
-  }, [instructors, sessions])
+  }, [instructors])
 
   useEffect(() => {
     if (selectedSessionId) {

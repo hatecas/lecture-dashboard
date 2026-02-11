@@ -81,14 +81,30 @@ export async function POST(request) {
     }
 
     logs.push(`총 결제자: ${allPayersData.length}명`)
+
+    // 환불 제외 (결제금액 0 이하)
+    let refundCount = 0
+    const validPayers = allPayersData.filter(payer => {
+      const 결제금액 = getColumnValue(payer, 6) // G열
+      const amount = parseFloat(String(결제금액).replace(/[^0-9.-]/g, '')) || 0
+      if (amount <= 0) {
+        refundCount++
+        return false
+      }
+      return true
+    })
+
+    logs.push(`환불 제외: ${refundCount}명`)
+    logs.push(`유효 결제자: ${validPayers.length}명`)
     logs.push('매칭 시작...')
 
     // 결제자와 매칭하여 새로운 형식으로 출력
     const results = []
+    const unmatchedList = []
     let matched = 0
     let unmatched = 0
 
-    for (const payer of allPayersData) {
+    for (const payer of validPayers) {
       // 결제자 데이터에서 필요한 컬럼 추출
       const 구매자 = getColumnValue(payer, 2)      // C열
       const 전화번호Raw = getColumnValue(payer, 3)  // D열
@@ -109,30 +125,34 @@ export async function POST(request) {
         })
         matched++
       } else {
-        results.push({
+        // 미매칭은 별도 리스트에 저장
+        unmatchedList.push({
           구매자: 구매자,
           전화번호: 전화번호Raw,
           결제금액: 결제금액,
           결제일: 결제일,
           신청일: '',
-          유입경로: ''
+          유입경로: '(직접구매)'
         })
         unmatched++
       }
     }
 
-    logs.push(`매칭 완료: ${matched}명 매칭됨, ${unmatched}명 미매칭`)
+    logs.push(`매칭 완료: ${matched}명 매칭됨, ${unmatched}명 미매칭(직접구매)`)
 
-    // 결과 Excel 생성
+    // 새 Excel 파일 생성
     const wb = XLSX.utils.book_new()
-    const ws = XLSX.utils.json_to_sheet(results)
-    XLSX.utils.book_append_sheet(wb, ws, '매칭결과')
 
-    // 미매칭만 따로 시트 추가
-    const unmatchedResults = results.filter(r => !r.유입경로)
-    if (unmatchedResults.length > 0) {
-      const unmatchedWs = XLSX.utils.json_to_sheet(unmatchedResults)
-      XLSX.utils.book_append_sheet(wb, unmatchedWs, '미매칭')
+    // 매칭된 결과 시트
+    if (results.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(results)
+      XLSX.utils.book_append_sheet(wb, ws, '매칭결과')
+    }
+
+    // 미매칭(직접구매) 시트
+    if (unmatchedList.length > 0) {
+      const unmatchedWs = XLSX.utils.json_to_sheet(unmatchedList)
+      XLSX.utils.book_append_sheet(wb, unmatchedWs, '직접구매')
     }
 
     // Excel 파일을 base64로 변환
