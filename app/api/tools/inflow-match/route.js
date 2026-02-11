@@ -24,6 +24,39 @@ function getColumnValue(row, colIndex) {
   return ''
 }
 
+// 날짜 문자열을 비교 가능한 형태로 변환
+function parseDate(dateStr) {
+  if (!dateStr) return null
+  const str = String(dateStr).trim()
+
+  // Excel 시리얼 넘버 처리 (숫자인 경우)
+  if (!isNaN(str) && str !== '') {
+    const excelDate = parseFloat(str)
+    // Excel 날짜는 1900-01-01부터 시작 (단, 1900년 2월 29일 버그 보정)
+    const jsDate = new Date((excelDate - 25569) * 86400 * 1000)
+    return jsDate.getTime()
+  }
+
+  // 다양한 한국어 날짜 형식 파싱
+  // "1월 13일 오후 8시 9분" 형식
+  const koreanMatch = str.match(/(\d+)월\s*(\d+)일\s*(오전|오후)?\s*(\d+)시\s*(\d+)분?/)
+  if (koreanMatch) {
+    const [, month, day, ampm, hour, minute] = koreanMatch
+    let h = parseInt(hour)
+    if (ampm === '오후' && h < 12) h += 12
+    if (ampm === '오전' && h === 12) h = 0
+    // 연도는 현재 연도로 가정
+    const year = new Date().getFullYear()
+    return new Date(year, parseInt(month) - 1, parseInt(day), h, parseInt(minute) || 0).getTime()
+  }
+
+  // 일반적인 날짜 형식 시도
+  const parsed = Date.parse(str)
+  if (!isNaN(parsed)) return parsed
+
+  return null
+}
+
 export async function POST(request) {
   try {
     const formData = await request.formData()
@@ -52,14 +85,28 @@ export async function POST(request) {
         // D열(인덱스 3) = 전화번호
         const phone = normalizePhone(getColumnValue(row, 3))
 
-        if (phone && !applicantMap.has(phone)) {
+        if (phone) {
           // E열(인덱스 4) = 신청일
           const applyDate = getColumnValue(row, 4)
+          const applyTimestamp = parseDate(applyDate)
 
-          applicantMap.set(phone, {
-            신청일: applyDate,
-            유입경로: fileName
-          })
+          const existing = applicantMap.get(phone)
+
+          // 기존 데이터가 없거나, 현재 데이터가 더 빠른 날짜인 경우 업데이트
+          if (!existing) {
+            applicantMap.set(phone, {
+              신청일: applyDate,
+              유입경로: fileName,
+              _timestamp: applyTimestamp
+            })
+          } else if (applyTimestamp && existing._timestamp && applyTimestamp < existing._timestamp) {
+            // 현재 신청일이 더 빠른 경우 교체
+            applicantMap.set(phone, {
+              신청일: applyDate,
+              유입경로: fileName,
+              _timestamp: applyTimestamp
+            })
+          }
         }
       }
 
