@@ -54,6 +54,8 @@ export async function POST(request) {
         return handleList()
       case 'delete':
         return handleDelete(body)
+      case 'messages':
+        return handleMessages(body)
       default:
         return NextResponse.json({ success: false, error: '알 수 없는 액션' })
     }
@@ -363,5 +365,39 @@ async function handleDownload({ sessionId }) {
     downloadUrl,
     filename: `${session.session_name || 'chat'}_${messages.length}건.xlsx`,
     messageCount: messages.length
+  })
+}
+
+// 메시지 조회 (페이지네이션)
+async function handleMessages({ sessionId, limit = 100, offset = 0 }) {
+  // 세션 조회
+  const { data: session } = await supabase
+    .from('youtube_chat_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .single()
+
+  if (!session) {
+    return NextResponse.json({ success: false, error: '세션을 찾을 수 없습니다.' })
+  }
+
+  // 메시지 조회 (최신순)
+  const { data: messages, error, count } = await supabase
+    .from('youtube_chat_messages')
+    .select('author, message, time_kst, published_at', { count: 'exact' })
+    .eq('session_id', sessionId)
+    .order('published_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (error) {
+    return NextResponse.json({ success: false, error: error.message })
+  }
+
+  return NextResponse.json({
+    success: true,
+    session,
+    messages: messages.reverse(), // 시간순으로 다시 뒤집기
+    totalCount: count,
+    hasMore: offset + limit < count
   })
 }
