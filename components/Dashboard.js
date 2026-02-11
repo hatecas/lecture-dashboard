@@ -55,6 +55,14 @@ export default function Dashboard({ onLogout, userName }) {
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
 
+  // 툴 관련 상태
+  const [currentTool, setCurrentTool] = useState('inflow') // inflow, crm, kakao, media
+  const [toolFile1, setToolFile1] = useState(null)
+  const [toolFile2, setToolFile2] = useState(null)
+  const [toolResult, setToolResult] = useState(null)
+  const [toolProcessing, setToolProcessing] = useState(false)
+  const [toolLog, setToolLog] = useState([])
+
   // API 호출용 인증 헤더 생성
   const getAuthHeaders = () => {
     const token = localStorage.getItem('authToken')
@@ -1816,11 +1824,734 @@ export default function Dashboard({ onLogout, userName }) {
           {currentTab === 'tools' && (
             <div>
               <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>🛠️ 업무 툴</h2>
-              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '40px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.1)' }}>
-                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🚧</div>
-                <p style={{ color: '#94a3b8', fontSize: '15px' }}>업무 툴이 여기에 추가될 예정입니다</p>
-                <p style={{ color: '#64748b', fontSize: '13px', marginTop: '8px' }}>필요한 툴을 알려주세요!</p>
+
+              {/* 툴 서브탭 */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                {[
+                  { id: 'inflow', icon: '🔀', label: '유입경로 매칭' },
+                  { id: 'crm', icon: '📋', label: 'CRM 정리' },
+                  { id: 'kakao', icon: '💬', label: '카톡 매칭' },
+                  { id: 'media', icon: '📺', label: '미디어 분석' }
+                ].map(tool => (
+                  <button
+                    key={tool.id}
+                    onClick={() => {
+                      setCurrentTool(tool.id)
+                      setToolFile1(null)
+                      setToolFile2(null)
+                      setToolResult(null)
+                      setToolLog([])
+                    }}
+                    style={{
+                      padding: '10px 16px',
+                      background: currentTool === tool.id ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
+                      border: currentTool === tool.id ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '10px',
+                      color: '#fff',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <span>{tool.icon}</span>
+                    {tool.label}
+                  </button>
+                ))}
               </div>
+
+              {/* 유입경로 매칭 툴 */}
+              {currentTool === 'inflow' && (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>🔀 신청자-결제자 유입경로 매칭</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>무료특강 신청자와 결제자 데이터를 비교하여 유입경로를 매칭합니다.</p>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                    {/* 신청자 파일 */}
+                    <div style={{
+                      padding: '20px',
+                      background: 'rgba(99,102,241,0.1)',
+                      borderRadius: '12px',
+                      border: '2px dashed rgba(99,102,241,0.3)',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>📥</div>
+                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>신청자 데이터</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>연락처, 유입경로 포함 (Excel/CSV)</p>
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={(e) => setToolFile1(e.target.files[0])}
+                        style={{ display: 'none' }}
+                        id="tool-file1"
+                      />
+                      <label
+                        htmlFor="tool-file1"
+                        style={{
+                          display: 'inline-block',
+                          padding: '8px 16px',
+                          background: 'rgba(99,102,241,0.3)',
+                          borderRadius: '8px',
+                          color: '#a5b4fc',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        파일 선택
+                      </label>
+                      {toolFile1 && (
+                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile1.name}</p>
+                      )}
+                    </div>
+
+                    {/* 결제자 파일 */}
+                    <div style={{
+                      padding: '20px',
+                      background: 'rgba(168,85,247,0.1)',
+                      borderRadius: '12px',
+                      border: '2px dashed rgba(168,85,247,0.3)',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>💳</div>
+                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>결제자 데이터</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>결제자 연락처 포함 (Excel/CSV)</p>
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={(e) => setToolFile2(e.target.files[0])}
+                        style={{ display: 'none' }}
+                        id="tool-file2"
+                      />
+                      <label
+                        htmlFor="tool-file2"
+                        style={{
+                          display: 'inline-block',
+                          padding: '8px 16px',
+                          background: 'rgba(168,85,247,0.3)',
+                          borderRadius: '8px',
+                          color: '#c4b5fd',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        파일 선택
+                      </label>
+                      {toolFile2 && (
+                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile2.name}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      if (!toolFile1 || !toolFile2) {
+                        alert('두 파일을 모두 선택해주세요.')
+                        return
+                      }
+                      setToolProcessing(true)
+                      setToolLog(['처리 시작...'])
+
+                      const formData = new FormData()
+                      formData.append('applicants', toolFile1)
+                      formData.append('payers', toolFile2)
+
+                      try {
+                        const res = await fetch('/api/tools/inflow-match', {
+                          method: 'POST',
+                          body: formData
+                        })
+                        const data = await res.json()
+                        if (data.success) {
+                          setToolResult(data)
+                          setToolLog(data.logs || ['처리 완료'])
+                        } else {
+                          setToolLog(['오류: ' + data.error])
+                        }
+                      } catch (err) {
+                        setToolLog(['오류: ' + err.message])
+                      }
+                      setToolProcessing(false)
+                    }}
+                    disabled={toolProcessing || !toolFile1 || !toolFile2}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      background: toolProcessing ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      border: 'none',
+                      borderRadius: '10px',
+                      color: '#fff',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: toolProcessing ? 'wait' : 'pointer'
+                    }}
+                  >
+                    {toolProcessing ? '처리 중...' : '🔄 매칭 시작'}
+                  </button>
+
+                  {/* 로그 출력 */}
+                  {toolLog.length > 0 && (
+                    <div style={{
+                      marginTop: '16px',
+                      padding: '12px',
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '8px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      fontFamily: 'monospace',
+                      fontSize: '12px'
+                    }}>
+                      {toolLog.map((log, i) => (
+                        <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '4px' }}>{log}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 결과 */}
+                  {toolResult && toolResult.success && (
+                    <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.3)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <span style={{ color: '#10b981', fontWeight: '600' }}>✓ 매칭 완료</span>
+                        <span style={{ color: '#94a3b8', fontSize: '13px' }}>
+                          매칭됨: {toolResult.matched}명 / 미매칭: {toolResult.unmatched}명
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const link = document.createElement('a')
+                          link.href = toolResult.downloadUrl
+                          link.download = 'matched_result.xlsx'
+                          link.click()
+                        }}
+                        style={{
+                          padding: '10px 20px',
+                          background: 'rgba(16,185,129,0.2)',
+                          border: '1px solid rgba(16,185,129,0.4)',
+                          borderRadius: '8px',
+                          color: '#10b981',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📥 결과 다운로드
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* CRM 정리 툴 */}
+              {currentTool === 'crm' && (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>📋 CRM 데이터 정리</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>CRM 데이터의 중복을 제거하고 연락처 형식을 통일합니다.</p>
+                  </div>
+
+                  <div style={{
+                    padding: '20px',
+                    background: 'rgba(99,102,241,0.1)',
+                    borderRadius: '12px',
+                    border: '2px dashed rgba(99,102,241,0.3)',
+                    textAlign: 'center',
+                    marginBottom: '20px'
+                  }}>
+                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📊</div>
+                    <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>CRM 데이터</p>
+                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>정리할 CRM 데이터 (Excel/CSV)</p>
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={(e) => setToolFile1(e.target.files[0])}
+                      style={{ display: 'none' }}
+                      id="crm-file"
+                    />
+                    <label
+                      htmlFor="crm-file"
+                      style={{
+                        display: 'inline-block',
+                        padding: '8px 16px',
+                        background: 'rgba(99,102,241,0.3)',
+                        borderRadius: '8px',
+                        color: '#a5b4fc',
+                        fontSize: '13px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      파일 선택
+                    </label>
+                    {toolFile1 && (
+                      <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile1.name}</p>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      if (!toolFile1) {
+                        alert('파일을 선택해주세요.')
+                        return
+                      }
+                      setToolProcessing(true)
+                      setToolLog(['처리 시작...'])
+
+                      const formData = new FormData()
+                      formData.append('file', toolFile1)
+
+                      try {
+                        const res = await fetch('/api/tools/crm-cleanup', {
+                          method: 'POST',
+                          body: formData
+                        })
+                        const data = await res.json()
+                        if (data.success) {
+                          setToolResult(data)
+                          setToolLog(data.logs || ['처리 완료'])
+                        } else {
+                          setToolLog(['오류: ' + data.error])
+                        }
+                      } catch (err) {
+                        setToolLog(['오류: ' + err.message])
+                      }
+                      setToolProcessing(false)
+                    }}
+                    disabled={toolProcessing || !toolFile1}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      background: toolProcessing ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      border: 'none',
+                      borderRadius: '10px',
+                      color: '#fff',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: toolProcessing ? 'wait' : 'pointer'
+                    }}
+                  >
+                    {toolProcessing ? '처리 중...' : '🧹 정리 시작'}
+                  </button>
+
+                  {/* 로그 출력 */}
+                  {toolLog.length > 0 && (
+                    <div style={{
+                      marginTop: '16px',
+                      padding: '12px',
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '8px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      fontFamily: 'monospace',
+                      fontSize: '12px'
+                    }}>
+                      {toolLog.map((log, i) => (
+                        <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '4px' }}>{log}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 결과 */}
+                  {toolResult && toolResult.success && (
+                    <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.3)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#fff' }}>{toolResult.originalCount}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>원본 레코드</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#f87171' }}>{toolResult.duplicatesRemoved}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>중복 제거</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#10b981' }}>{toolResult.cleanedCount}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>정리 후</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const link = document.createElement('a')
+                          link.href = toolResult.downloadUrl
+                          link.download = 'cleaned_crm.xlsx'
+                          link.click()
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '10px 20px',
+                          background: 'rgba(16,185,129,0.2)',
+                          border: '1px solid rgba(16,185,129,0.4)',
+                          borderRadius: '8px',
+                          color: '#10b981',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📥 정리된 데이터 다운로드
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 카톡 매칭 툴 */}
+              {currentTool === 'kakao' && (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>💬 카카오톡 입장자 매칭</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>카카오톡 오픈채팅 입장 로그와 결제자 데이터를 매칭합니다.</p>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                    {/* 카톡 로그 파일 */}
+                    <div style={{
+                      padding: '20px',
+                      background: 'rgba(250,204,21,0.1)',
+                      borderRadius: '12px',
+                      border: '2px dashed rgba(250,204,21,0.3)',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>💬</div>
+                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>카톡 입장 로그</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>오픈채팅 입장 내역 (TXT/Excel)</p>
+                      <input
+                        type="file"
+                        accept=".txt,.xlsx,.xls,.csv"
+                        onChange={(e) => setToolFile1(e.target.files[0])}
+                        style={{ display: 'none' }}
+                        id="kakao-file1"
+                      />
+                      <label
+                        htmlFor="kakao-file1"
+                        style={{
+                          display: 'inline-block',
+                          padding: '8px 16px',
+                          background: 'rgba(250,204,21,0.3)',
+                          borderRadius: '8px',
+                          color: '#fcd34d',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        파일 선택
+                      </label>
+                      {toolFile1 && (
+                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile1.name}</p>
+                      )}
+                    </div>
+
+                    {/* 결제자 파일 */}
+                    <div style={{
+                      padding: '20px',
+                      background: 'rgba(168,85,247,0.1)',
+                      borderRadius: '12px',
+                      border: '2px dashed rgba(168,85,247,0.3)',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>💳</div>
+                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>결제자 데이터</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>결제자 이름/연락처 (Excel/CSV)</p>
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={(e) => setToolFile2(e.target.files[0])}
+                        style={{ display: 'none' }}
+                        id="kakao-file2"
+                      />
+                      <label
+                        htmlFor="kakao-file2"
+                        style={{
+                          display: 'inline-block',
+                          padding: '8px 16px',
+                          background: 'rgba(168,85,247,0.3)',
+                          borderRadius: '8px',
+                          color: '#c4b5fd',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        파일 선택
+                      </label>
+                      {toolFile2 && (
+                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile2.name}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      if (!toolFile1 || !toolFile2) {
+                        alert('두 파일을 모두 선택해주세요.')
+                        return
+                      }
+                      setToolProcessing(true)
+                      setToolLog(['처리 시작...'])
+
+                      const formData = new FormData()
+                      formData.append('kakaoLog', toolFile1)
+                      formData.append('payers', toolFile2)
+
+                      try {
+                        const res = await fetch('/api/tools/kakao-match', {
+                          method: 'POST',
+                          body: formData
+                        })
+                        const data = await res.json()
+                        if (data.success) {
+                          setToolResult(data)
+                          setToolLog(data.logs || ['처리 완료'])
+                        } else {
+                          setToolLog(['오류: ' + data.error])
+                        }
+                      } catch (err) {
+                        setToolLog(['오류: ' + err.message])
+                      }
+                      setToolProcessing(false)
+                    }}
+                    disabled={toolProcessing || !toolFile1 || !toolFile2}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      background: toolProcessing ? '#4c4c6d' : 'linear-gradient(135deg, #facc15, #f59e0b)',
+                      border: 'none',
+                      borderRadius: '10px',
+                      color: '#000',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: toolProcessing ? 'wait' : 'pointer'
+                    }}
+                  >
+                    {toolProcessing ? '처리 중...' : '💬 매칭 시작'}
+                  </button>
+
+                  {/* 로그 출력 */}
+                  {toolLog.length > 0 && (
+                    <div style={{
+                      marginTop: '16px',
+                      padding: '12px',
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '8px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      fontFamily: 'monospace',
+                      fontSize: '12px'
+                    }}>
+                      {toolLog.map((log, i) => (
+                        <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '4px' }}>{log}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 결과 */}
+                  {toolResult && toolResult.success && (
+                    <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.3)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#10b981' }}>{toolResult.matched}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>매칭됨</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#f87171' }}>{toolResult.unmatched}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>미매칭</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#fcd34d' }}>{toolResult.totalKakao}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>카톡 입장자</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const link = document.createElement('a')
+                          link.href = toolResult.downloadUrl
+                          link.download = 'kakao_matched.xlsx'
+                          link.click()
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '10px 20px',
+                          background: 'rgba(16,185,129,0.2)',
+                          border: '1px solid rgba(16,185,129,0.4)',
+                          borderRadius: '8px',
+                          color: '#10b981',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📥 결과 다운로드
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 미디어 분석 툴 */}
+              {currentTool === 'media' && (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>📺 미디어 분석</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>YouTube 데이터를 분석하고 AI 인사이트를 제공합니다.</p>
+                  </div>
+
+                  <div style={{
+                    padding: '20px',
+                    background: 'rgba(239,68,68,0.1)',
+                    borderRadius: '12px',
+                    border: '2px dashed rgba(239,68,68,0.3)',
+                    textAlign: 'center',
+                    marginBottom: '20px'
+                  }}>
+                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📊</div>
+                    <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>YouTube 데이터</p>
+                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>조회수, 전환수 등 포함 (Excel/CSV)</p>
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={(e) => setToolFile1(e.target.files[0])}
+                      style={{ display: 'none' }}
+                      id="media-file"
+                    />
+                    <label
+                      htmlFor="media-file"
+                      style={{
+                        display: 'inline-block',
+                        padding: '8px 16px',
+                        background: 'rgba(239,68,68,0.3)',
+                        borderRadius: '8px',
+                        color: '#fca5a5',
+                        fontSize: '13px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      파일 선택
+                    </label>
+                    {toolFile1 && (
+                      <p style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>✓ {toolFile1.name}</p>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      if (!toolFile1) {
+                        alert('파일을 선택해주세요.')
+                        return
+                      }
+                      setToolProcessing(true)
+                      setToolLog(['분석 시작...'])
+
+                      const formData = new FormData()
+                      formData.append('file', toolFile1)
+
+                      try {
+                        const res = await fetch('/api/tools/media-analyze', {
+                          method: 'POST',
+                          body: formData
+                        })
+                        const data = await res.json()
+                        if (data.success) {
+                          setToolResult(data)
+                          setToolLog(data.logs || ['분석 완료'])
+                        } else {
+                          setToolLog(['오류: ' + data.error])
+                        }
+                      } catch (err) {
+                        setToolLog(['오류: ' + err.message])
+                      }
+                      setToolProcessing(false)
+                    }}
+                    disabled={toolProcessing || !toolFile1}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      background: toolProcessing ? '#4c4c6d' : 'linear-gradient(135deg, #ef4444, #f97316)',
+                      border: 'none',
+                      borderRadius: '10px',
+                      color: '#fff',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: toolProcessing ? 'wait' : 'pointer'
+                    }}
+                  >
+                    {toolProcessing ? '분석 중...' : '📊 분석 시작'}
+                  </button>
+
+                  {/* 로그 출력 */}
+                  {toolLog.length > 0 && (
+                    <div style={{
+                      marginTop: '16px',
+                      padding: '12px',
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '8px',
+                      maxHeight: '150px',
+                      overflow: 'auto',
+                      fontFamily: 'monospace',
+                      fontSize: '12px'
+                    }}>
+                      {toolLog.map((log, i) => (
+                        <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '4px' }}>{log}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 결과 */}
+                  {toolResult && toolResult.success && (
+                    <div style={{ marginTop: '16px' }}>
+                      {/* 통계 요약 */}
+                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
+                        <div style={{ padding: '16px', background: 'rgba(239,68,68,0.1)', borderRadius: '10px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#fca5a5' }}>{toolResult.stats?.totalVideos || 0}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>총 영상</div>
+                        </div>
+                        <div style={{ padding: '16px', background: 'rgba(99,102,241,0.1)', borderRadius: '10px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#a5b4fc' }}>{(toolResult.stats?.totalViews || 0).toLocaleString()}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>총 조회수</div>
+                        </div>
+                        <div style={{ padding: '16px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#34d399' }}>{toolResult.stats?.totalConversions || 0}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>총 전환</div>
+                        </div>
+                        <div style={{ padding: '16px', background: 'rgba(250,204,21,0.1)', borderRadius: '10px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#fcd34d' }}>{toolResult.stats?.avgConversionRate?.toFixed(2) || 0}%</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>평균 전환율</div>
+                        </div>
+                      </div>
+
+                      {/* AI 인사이트 */}
+                      {toolResult.aiInsight && (
+                        <div style={{ padding: '16px', background: 'rgba(168,85,247,0.1)', borderRadius: '10px', border: '1px solid rgba(168,85,247,0.3)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                            <span style={{ fontSize: '18px' }}>🤖</span>
+                            <span style={{ fontWeight: '600', color: '#c4b5fd' }}>AI 인사이트</span>
+                          </div>
+                          <p style={{ color: '#e2e8f0', fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                            {toolResult.aiInsight}
+                          </p>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          const link = document.createElement('a')
+                          link.href = toolResult.downloadUrl
+                          link.download = 'media_analysis.xlsx'
+                          link.click()
+                        }}
+                        style={{
+                          width: '100%',
+                          marginTop: '16px',
+                          padding: '10px 20px',
+                          background: 'rgba(16,185,129,0.2)',
+                          border: '1px solid rgba(16,185,129,0.4)',
+                          borderRadius: '8px',
+                          color: '#10b981',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📥 분석 결과 다운로드
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
