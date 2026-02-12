@@ -6,12 +6,10 @@ export default function HelpTooltip({ text, size = 14 }) {
   const [show, setShow] = useState(false)
   const [pos, setPos] = useState('bottom')
   const iconRef = useRef(null)
-  const tooltipRef = useRef(null)
 
   useEffect(() => {
     if (show && iconRef.current) {
       const rect = iconRef.current.getBoundingClientRect()
-      // 화면 아래쪽 공간이 부족하면 위에 표시
       if (rect.bottom + 80 > window.innerHeight) {
         setPos('top')
       } else {
@@ -33,29 +31,32 @@ export default function HelpTooltip({ text, size = 14 }) {
         width: `${size}px`,
         height: `${size}px`,
         borderRadius: '50%',
-        border: '1.5px solid rgba(148,163,184,0.5)',
-        color: 'rgba(148,163,184,0.7)',
+        borderWidth: '1.5px',
+        borderStyle: 'solid',
+        borderColor: show ? 'rgba(99,102,241,0.8)' : 'rgba(148,163,184,0.5)',
+        color: show ? '#818cf8' : 'rgba(148,163,184,0.7)',
+        background: show ? 'rgba(99,102,241,0.1)' : 'transparent',
         fontSize: `${size - 5}px`,
         fontWeight: '700',
         cursor: 'help',
         flexShrink: 0,
         lineHeight: 1,
         userSelect: 'none',
-        transition: 'all 0.2s ease',
-        ...(show ? { borderColor: 'rgba(99,102,241,0.8)', color: '#818cf8', background: 'rgba(99,102,241,0.1)' } : {})
+        transition: 'all 0.2s ease'
       }}
     >
       ?
       {show && (
         <span
-          ref={tooltipRef}
           style={{
             position: 'absolute',
             [pos === 'bottom' ? 'top' : 'bottom']: 'calc(100% + 8px)',
             left: '50%',
             transform: 'translateX(-50%)',
             background: '#1e293b',
-            border: '1px solid rgba(99,102,241,0.3)',
+            borderWidth: '1px',
+            borderStyle: 'solid',
+            borderColor: 'rgba(99,102,241,0.3)',
             borderRadius: '10px',
             padding: '10px 14px',
             color: '#cbd5e1',
@@ -79,13 +80,18 @@ export default function HelpTooltip({ text, size = 14 }) {
             width: '8px',
             height: '8px',
             background: '#1e293b',
-            border: pos === 'bottom'
-              ? '1px solid rgba(99,102,241,0.3) transparent transparent 1px solid rgba(99,102,241,0.3)'
-              : 'transparent 1px solid rgba(99,102,241,0.3) 1px solid rgba(99,102,241,0.3) transparent',
-            borderTop: pos === 'bottom' ? '1px solid rgba(99,102,241,0.3)' : 'none',
-            borderLeft: pos === 'bottom' ? '1px solid rgba(99,102,241,0.3)' : 'none',
-            borderBottom: pos === 'bottom' ? 'none' : '1px solid rgba(99,102,241,0.3)',
-            borderRight: pos === 'bottom' ? 'none' : '1px solid rgba(99,102,241,0.3)',
+            borderTopWidth: '1px',
+            borderTopStyle: 'solid',
+            borderTopColor: pos === 'bottom' ? 'rgba(99,102,241,0.3)' : 'transparent',
+            borderLeftWidth: '1px',
+            borderLeftStyle: 'solid',
+            borderLeftColor: pos === 'bottom' ? 'rgba(99,102,241,0.3)' : 'transparent',
+            borderBottomWidth: '1px',
+            borderBottomStyle: 'solid',
+            borderBottomColor: pos === 'bottom' ? 'transparent' : 'rgba(99,102,241,0.3)',
+            borderRightWidth: '1px',
+            borderRightStyle: 'solid',
+            borderRightColor: pos === 'bottom' ? 'transparent' : 'rgba(99,102,241,0.3)',
           }} />
         </span>
       )}
