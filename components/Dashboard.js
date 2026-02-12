@@ -1329,7 +1329,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             툴
           </button>
 
-          {/* 리소스 메뉴 */}
+          {/* 시트 통합 메뉴 */}
           <button onClick={() => { setCurrentTab('resources'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
@@ -1348,9 +1348,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
             gap: sidebarCollapsed ? '4px' : '10px',
             transition: 'all 0.3s ease'
-          }} title="리소스">
+          }} title="시트 통합">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📁</span>
-            리소스
+            시트 통합
           </button>
         </div>
       </div>
@@ -2141,13 +2141,24 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   { id: 'inflow', icon: '🔀', label: '유입경로 매칭', requiresPermission: 'canUseInflow' },
                   { id: 'crm', icon: '📋', label: 'CRM 정리' },
                   { id: 'kakao', icon: '💬', label: '카톡 매칭' },
-                  { id: 'youtube', icon: '📡', label: 'YT채팅 수집' }
+                  { id: 'youtube', icon: '📡', label: '유튜브 채팅 로그 수집' }
                 ].filter(tool => !tool.requiresPermission || permissions[tool.requiresPermission]).map(tool => (
                   <button
                     key={tool.id}
-                    onClick={() => {
+                    onClick={async () => {
                       setCurrentTool(tool.id)
                       resetToolState()
+                      if (tool.id === 'youtube') {
+                        try {
+                          const res = await fetch('/api/tools/youtube-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'list' })
+                          })
+                          const data = await res.json()
+                          if (data.success) setYtSessions(data.sessions)
+                        } catch {}
+                      }
                     }}
                     style={{
                       padding: '10px 16px',
@@ -3012,7 +3023,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     </div>
 
                     {ytSessions.length === 0 ? (
-                      <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '20px' }}>저장된 세션이 없습니다. 새로고침을 눌러주세요.</p>
+                      <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '20px' }}>저장된 세션이 없습니다.</p>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '300px', overflow: 'auto' }}>
                         {ytSessions.map(session => (
@@ -3211,11 +3222,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             </div>
           )}
 
-          {/* 리소스 탭 */}
+          {/* 시트 통합 탭 */}
           {currentTab === 'resources' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 리소스 {spreadsheetTitle && `- ${spreadsheetTitle}`}</h2>
+                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 시트 통합 {spreadsheetTitle && `- ${spreadsheetTitle}`}</h2>
               </div>
 
               {/* 시트 탭 버튼들 */}
