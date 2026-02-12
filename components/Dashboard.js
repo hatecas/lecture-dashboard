@@ -109,7 +109,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [iframeLoading, setIframeLoading] = useState(true) // iframe 로딩 상태
 
   // Google Sheets 설정
-  const DEFAULT_SHEETS = [{ id: 'default-1', name: '주간 보고 시트', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit' }]
   const [savedSheets, setSavedSheets] = useState([]) // 저장된 시트 목록
   const [selectedSheet, setSelectedSheet] = useState(null) // 현재 선택된 시트
   const [showAddSheet, setShowAddSheet] = useState(false) // 시트 추가 모달
@@ -137,10 +136,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
         name: s.name,
         url: s.url
       }))
-      // 기본 시트 + 서버 저장 시트
-      return [...DEFAULT_SHEETS, ...serverSheets]
+      return serverSheets
     } catch {
-      return DEFAULT_SHEETS
+      return []
     }
   }
 
@@ -244,8 +242,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
   // 시트 삭제 (서버)
   const removeSheets = async (sheetIds) => {
-    // 기본 시트(id '1')는 삭제 불가
-    const serverIds = sheetIds.filter(id => id !== '1').map(id => parseInt(id))
+    const serverIds = sheetIds.map(id => parseInt(id))
     if (serverIds.length === 0) return
 
     setDeleteSheetLoading(true)
@@ -260,9 +257,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
         alert(err.error || '시트 삭제에 실패했습니다.')
         return
       }
-      const deletedStringIds = sheetIds.filter(id => id !== '1')
-      setSavedSheets(prev => prev.filter(s => !deletedStringIds.includes(s.id)))
-      if (selectedSheet && deletedStringIds.includes(selectedSheet.id)) {
+      setSavedSheets(prev => prev.filter(s => !sheetIds.includes(s.id)))
+      if (selectedSheet && sheetIds.includes(selectedSheet.id)) {
         setSelectedSheet(null)
         setSheetTabs([])
         setSheetApiData(null)
@@ -3367,7 +3363,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 시트 통합</h2>
-                {savedSheets.filter(s => s.id !== 'default-1').length > 0 && (
+                {savedSheets.length > 0 && (
                   <button
                     onClick={() => { setShowDeleteSheet(true); setDeleteSheetIds([]) }}
                     style={{
@@ -3507,12 +3503,12 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     width: '480px', maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.1)'
                   }}>
                     <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>시트 삭제</h3>
-                    <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '20px' }}>삭제할 시트를 선택하세요. (주간 보고 시트는 기본 시트로 삭제할 수 없습니다)</p>
+                    <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '20px' }}>삭제할 시트를 선택하세요.</p>
                     <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '20px' }}>
-                      {savedSheets.filter(s => s.id !== 'default-1').length === 0 ? (
+                      {savedSheets.length === 0 ? (
                         <p style={{ color: '#64748b', textAlign: 'center', padding: '20px' }}>삭제할 수 있는 시트가 없습니다.</p>
                       ) : (
-                        savedSheets.filter(s => s.id !== 'default-1').map(sheet => (
+                        savedSheets.map(sheet => (
                           <label
                             key={sheet.id}
                             style={{
