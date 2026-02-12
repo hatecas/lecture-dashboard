@@ -75,7 +75,10 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('Sheets API error:', error)
-    return NextResponse.json({ error: '서버 오류가 발생했습니다.' }, { status: 500 })
+    const msg = error.message?.includes('환경변수')
+      ? error.message
+      : '서버 오류가 발생했습니다.'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
 
@@ -112,6 +115,9 @@ export async function GET(request) {
 
   } catch (error) {
     console.error('Sheets data fetch error:', error)
-    return NextResponse.json({ error: '서버 오류가 발생했습니다.' }, { status: 500 })
+    const msg = error.message?.includes('환경변수')
+      ? error.message
+      : '서버 오류가 발생했습니다.'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
