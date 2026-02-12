@@ -76,6 +76,29 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const pollingRef = useRef(null)
   const viewPollingRef = useRef(null) // 채팅 보기 자동 새로고침용
 
+  // 업데이트 공지 모달
+  const [showUpdateModal, setShowUpdateModal] = useState(false)
+  const UPDATE_VERSION = '2025-02-12' // 업데이트 날짜 키
+  const UPDATE_NOTES = [
+    { icon: '📊', title: '시트 통합 다중 시트 지원', desc: '여러 Google Sheets를 추가/전환할 수 있습니다. 시트 추가 버튼으로 URL만 넣으면 자동 등록됩니다.' },
+    { icon: '🎬', title: '유튜브 세션 자동 로드', desc: '유튜브 채팅 수집 탭 진입 시 세션 목록이 자동으로 로드됩니다.' },
+    { icon: '🐛', title: '모달 버그 수정', desc: '모달 닫은 후 다시 열리는 버그를 수정했습니다.' },
+    { icon: '⚡', title: '성능 개선', desc: '모달 로딩 속도 개선 및 좀비 세션 자동 정리 기능이 추가되었습니다.' },
+  ]
+
+  useEffect(() => {
+    const dismissed = localStorage.getItem(`update_dismissed_${UPDATE_VERSION}`)
+    if (!dismissed) {
+      setShowUpdateModal(true)
+    }
+  }, [])
+
+  const dismissUpdateToday = () => {
+    const today = new Date().toISOString().split('T')[0]
+    localStorage.setItem(`update_dismissed_${UPDATE_VERSION}`, today)
+    setShowUpdateModal(false)
+  }
+
   // 리소스 허브 상태
   const [currentResource, setCurrentResource] = useState(null) // 현재 선택된 탭 gid
   const [resourceZoom, setResourceZoom] = useState(75) // 줌 레벨 (%) - 기본 75%로 더 많이 보이게
@@ -4318,6 +4341,75 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             {/* 현재 파일명 */}
             <div style={{ fontSize: '13px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 20px' }}>
               {uploadProgress.fileName}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 업데이트 공지 모달 */}
+      {showUpdateModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', zIndex: 50000,
+          display: 'flex', justifyContent: 'center', alignItems: 'center'
+        }} onClick={() => setShowUpdateModal(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(135deg, #1e293b 0%, #1a1f35 100%)',
+            borderRadius: '16px', padding: '0', width: '420px', maxWidth: '90vw',
+            border: '1px solid rgba(255,255,255,0.1)',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+            overflow: 'hidden'
+          }}>
+            {/* 헤더 */}
+            <div style={{
+              padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', position: 'relative'
+            }}>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>업데이트 안내</div>
+                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginTop: '2px' }}>2025.02.12</div>
+              </div>
+              <button
+                onClick={() => setShowUpdateModal(false)}
+                style={{
+                  background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%',
+                  width: '28px', height: '28px', color: '#fff', fontSize: '16px',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            {/* 내용 */}
+            <div style={{ padding: '20px 24px' }}>
+              {UPDATE_NOTES.map((note, i) => (
+                <div key={i} style={{
+                  display: 'flex', gap: '12px', padding: '12px 0',
+                  borderBottom: i < UPDATE_NOTES.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
+                }}>
+                  <div style={{ fontSize: '22px', flexShrink: 0, marginTop: '2px' }}>{note.icon}</div>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0', marginBottom: '4px' }}>{note.title}</div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5' }}>{note.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* 하단 */}
+            <div style={{
+              padding: '14px 24px', borderTop: '1px solid rgba(255,255,255,0.06)',
+              display: 'flex', justifyContent: 'center'
+            }}>
+              <button
+                onClick={dismissUpdateToday}
+                style={{
+                  background: 'transparent', border: 'none',
+                  color: '#64748b', fontSize: '13px', cursor: 'pointer',
+                  padding: '6px 12px', borderRadius: '6px'
+                }}
+              >
+                오늘 하루 보지 않기
+              </button>
             </div>
           </div>
         </div>
