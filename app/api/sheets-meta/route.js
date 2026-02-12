@@ -33,10 +33,12 @@ export async function POST(request) {
     const response = await fetch(url)
 
     if (!response.ok) {
-      const error = await response.json()
+      const errorData = await response.json()
+      const googleMsg = errorData.error?.message || ''
+      console.error('Google Sheets API error:', response.status, googleMsg)
       if (response.status === 403) {
         return NextResponse.json({
-          error: 'API 키가 유효하지 않거나 Google Sheets API가 활성화되지 않았습니다.'
+          error: `Google API 접근 거부 (403): ${googleMsg || 'API 키 또는 스프레드시트 공유 설정을 확인하세요.'}`
         }, { status: 403 })
       }
       if (response.status === 404) {
@@ -44,7 +46,7 @@ export async function POST(request) {
           error: '스프레드시트를 찾을 수 없습니다. URL을 확인하거나 "링크가 있는 모든 사용자" 공유 설정을 확인하세요.'
         }, { status: 404 })
       }
-      return NextResponse.json({ error: error.error?.message || '알 수 없는 오류' }, { status: response.status })
+      return NextResponse.json({ error: googleMsg || '알 수 없는 오류', status: response.status })
     }
 
     const data = await response.json()
