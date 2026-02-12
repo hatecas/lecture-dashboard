@@ -121,14 +121,28 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sheetsLoading, setSheetsLoading] = useState(false)
   const [spreadsheetId, setSpreadsheetId] = useState('')
   const [spreadsheetTitle, setSpreadsheetTitle] = useState('')
+  const [showDeleteSheet, setShowDeleteSheet] = useState(false) // 시트 삭제 모달
+  const [deleteSheetIds, setDeleteSheetIds] = useState([]) // 삭제 선택된 시트 ID들
+  const [deleteSheetLoading, setDeleteSheetLoading] = useState(false)
 
-  // localStorage에서 시트 목록 로드
-  const loadSavedSheets = () => {
+  // 서버에서 시트 목록 로드
+  const loadSavedSheets = async () => {
     try {
-      const saved = localStorage.getItem('dashboard_saved_sheets')
-      if (saved) return JSON.parse(saved)
-    } catch {}
-    return DEFAULT_SHEETS
+      const response = await fetch('/api/saved-sheets', {
+        headers: getAuthHeaders()
+      })
+      if (!response.ok) throw new Error('Failed to load')
+      const result = await response.json()
+      const serverSheets = (result.sheets || []).map(s => ({
+        id: s.id.toString(),
+        name: s.name,
+        url: s.url
+      }))
+      // 기본 시트 + 서버 저장 시트
+      return [...DEFAULT_SHEETS, ...serverSheets]
+    } catch {
+      return DEFAULT_SHEETS
+    }
   }
 
   // 시트 탭 목록 가져오기
@@ -204,10 +218,20 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
         return
       }
       const name = addSheetName.trim() || data.spreadsheetTitle || '새 시트'
-      const newSheet = { id: Date.now().toString(), name, url: addSheetUrl }
-      const updated = [...savedSheets, newSheet]
-      setSavedSheets(updated)
-      localStorage.setItem('dashboard_saved_sheets', JSON.stringify(updated))
+      // 서버에 저장
+      const saveResponse = await fetch('/api/saved-sheets', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ name, url: addSheetUrl })
+      })
+      if (!saveResponse.ok) {
+        const saveErr = await saveResponse.json()
+        alert(saveErr.error || '시트 저장에 실패했습니다.')
+        return
+      }
+      const saveResult = await saveResponse.json()
+      const newSheet = { id: saveResult.sheet.id.toString(), name, url: addSheetUrl }
+      setSavedSheets(prev => [...prev, newSheet])
       setShowAddSheet(false)
       setAddSheetUrl('')
       setAddSheetName('')
@@ -219,17 +243,38 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     }
   }
 
-  // 시트 삭제
-  const removeSheet = (sheetId) => {
-    if (!confirm('이 시트를 목록에서 제거하시겠습니까?')) return
-    const updated = savedSheets.filter(s => s.id !== sheetId)
-    setSavedSheets(updated)
-    localStorage.setItem('dashboard_saved_sheets', JSON.stringify(updated))
-    if (selectedSheet?.id === sheetId) {
-      setSelectedSheet(null)
-      setSheetTabs([])
-      setSheetApiData(null)
-      setCurrentResource(null)
+  // 시트 삭제 (서버)
+  const removeSheets = async (sheetIds) => {
+    // 기본 시트(id '1')는 삭제 불가
+    const serverIds = sheetIds.filter(id => id !== '1').map(id => parseInt(id))
+    if (serverIds.length === 0) return
+
+    setDeleteSheetLoading(true)
+    try {
+      const response = await fetch('/api/saved-sheets', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ ids: serverIds })
+      })
+      if (!response.ok) {
+        const err = await response.json()
+        alert(err.error || '시트 삭제에 실패했습니다.')
+        return
+      }
+      const deletedStringIds = sheetIds.filter(id => id !== '1')
+      setSavedSheets(prev => prev.filter(s => !deletedStringIds.includes(s.id)))
+      if (selectedSheet && deletedStringIds.includes(selectedSheet.id)) {
+        setSelectedSheet(null)
+        setSheetTabs([])
+        setSheetApiData(null)
+        setCurrentResource(null)
+      }
+      setShowDeleteSheet(false)
+      setDeleteSheetIds([])
+    } catch {
+      alert('시트 삭제 중 오류가 발생했습니다.')
+    } finally {
+      setDeleteSheetLoading(false)
     }
   }
 
@@ -450,7 +495,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   // 시트 통합 탭 진입 시 저장된 시트 목록 로드
   useEffect(() => {
     if (currentTab === 'resources' && savedSheets.length === 0) {
-      setSavedSheets(loadSavedSheets())
+      loadSavedSheets().then(sheets => setSavedSheets(sheets))
     }
   }, [currentTab])
 
@@ -3324,54 +3369,47 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 시트 통합</h2>
+                {savedSheets.filter(s => s.id !== '1').length > 0 && (
+                  <button
+                    onClick={() => { setShowDeleteSheet(true); setDeleteSheetIds([]) }}
+                    style={{
+                      padding: '8px 16px',
+                      background: 'rgba(239,68,68,0.15)',
+                      border: '1px solid rgba(239,68,68,0.3)',
+                      borderRadius: '8px',
+                      color: '#f87171',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    🗑️ 시트 삭제
+                  </button>
+                )}
               </div>
 
               {/* 시트 선택 버튼들 */}
               <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
                 {savedSheets.map(sheet => (
-                  <div key={sheet.id} style={{ position: 'relative' }}>
-                    <button
-                      onClick={() => selectSheet(sheet)}
-                      style={{
-                        padding: '14px 24px',
-                        background: selectedSheet?.id === sheet.id ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
-                        border: selectedSheet?.id === sheet.id ? '2px solid #818cf8' : '2px solid rgba(255,255,255,0.1)',
-                        borderRadius: '12px',
-                        color: '#fff',
-                        fontSize: '15px',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease',
-                        minWidth: '160px'
-                      }}
-                    >
-                      📊 {sheet.name}
-                    </button>
-                    {sheet.id !== '1' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); removeSheet(sheet.id) }}
-                        style={{
-                          position: 'absolute',
-                          top: '-6px',
-                          right: '-6px',
-                          width: '20px',
-                          height: '20px',
-                          borderRadius: '50%',
-                          background: 'rgba(239,68,68,0.8)',
-                          border: 'none',
-                          color: '#fff',
-                          fontSize: '11px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          lineHeight: 1
-                        }}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
+                  <button
+                    key={sheet.id}
+                    onClick={() => selectSheet(sheet)}
+                    style={{
+                      padding: '14px 24px',
+                      background: selectedSheet?.id === sheet.id ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
+                      border: selectedSheet?.id === sheet.id ? '2px solid #818cf8' : '2px solid rgba(255,255,255,0.1)',
+                      borderRadius: '12px',
+                      color: '#fff',
+                      fontSize: '15px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      minWidth: '160px'
+                    }}
+                  >
+                    📊 {sheet.name}
+                  </button>
                 ))}
                 <button
                   onClick={() => setShowAddSheet(true)}
@@ -3453,6 +3491,81 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                         }}
                       >
                         {addSheetLoading ? '확인 중...' : '추가'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 시트 삭제 모달 */}
+              {showDeleteSheet && (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0,0,0,0.6)', zIndex: 10000,
+                  display: 'flex', justifyContent: 'center', alignItems: 'center'
+                }} onClick={() => { setShowDeleteSheet(false); setDeleteSheetIds([]) }}>
+                  <div onClick={e => e.stopPropagation()} style={{
+                    background: '#1e293b', borderRadius: '16px', padding: '30px',
+                    width: '480px', maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>시트 삭제</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '20px' }}>삭제할 시트를 선택하세요. (주간 보고 시트는 기본 시트로 삭제할 수 없습니다)</p>
+                    <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '20px' }}>
+                      {savedSheets.filter(s => s.id !== '1').length === 0 ? (
+                        <p style={{ color: '#64748b', textAlign: 'center', padding: '20px' }}>삭제할 수 있는 시트가 없습니다.</p>
+                      ) : (
+                        savedSheets.filter(s => s.id !== '1').map(sheet => (
+                          <label
+                            key={sheet.id}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: '12px',
+                              padding: '12px 16px', marginBottom: '8px',
+                              background: deleteSheetIds.includes(sheet.id) ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.03)',
+                              border: deleteSheetIds.includes(sheet.id) ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(255,255,255,0.08)',
+                              borderRadius: '10px', cursor: 'pointer', transition: 'all 0.2s ease'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={deleteSheetIds.includes(sheet.id)}
+                              onChange={() => {
+                                setDeleteSheetIds(prev =>
+                                  prev.includes(sheet.id) ? prev.filter(id => id !== sheet.id) : [...prev, sheet.id]
+                                )
+                              }}
+                              style={{ width: '18px', height: '18px', accentColor: '#ef4444', cursor: 'pointer' }}
+                            />
+                            <div>
+                              <div style={{ color: '#fff', fontSize: '14px', fontWeight: '600' }}>📊 {sheet.name}</div>
+                              <div style={{ color: '#64748b', fontSize: '11px', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '350px' }}>{sheet.url}</div>
+                            </div>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => { setShowDeleteSheet(false); setDeleteSheetIds([]) }}
+                        style={{
+                          padding: '10px 20px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                          color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                        }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={() => removeSheets(deleteSheetIds)}
+                        disabled={deleteSheetIds.length === 0 || deleteSheetLoading}
+                        style={{
+                          padding: '10px 20px',
+                          background: deleteSheetIds.length > 0 && !deleteSheetLoading ? 'rgba(239,68,68,0.8)' : 'rgba(239,68,68,0.2)',
+                          border: 'none', borderRadius: '8px',
+                          color: '#fff', fontSize: '14px', fontWeight: '600',
+                          cursor: deleteSheetIds.length > 0 && !deleteSheetLoading ? 'pointer' : 'not-allowed'
+                        }}
+                      >
+                        {deleteSheetLoading ? '삭제 중...' : `삭제 (${deleteSheetIds.length})`}
                       </button>
                     </div>
                   </div>
