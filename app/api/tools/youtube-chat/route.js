@@ -288,6 +288,14 @@ async function handleStatus({ sessionId }) {
 
 // 세션 목록
 async function handleList() {
+  // 좀비 세션 정리: 2분 이상 업데이트 안 된 'collecting' 세션을 자동 중지
+  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+  await supabase
+    .from('youtube_chat_sessions')
+    .update({ status: 'stopped', error_message: '브라우저 종료로 자동 중지됨' })
+    .eq('status', 'collecting')
+    .lt('updated_at', twoMinAgo)
+
   const { data: sessions, error } = await supabase
     .from('youtube_chat_sessions')
     .select('*')
