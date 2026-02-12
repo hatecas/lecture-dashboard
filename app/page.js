@@ -161,8 +161,8 @@ export default function Home() {
 
     checkSession()
 
-    // 30초마다 세션 유효성 체크
-    const interval = setInterval(checkSession, 30000)
+    // 5분마다 세션 유효성 체크
+    const interval = setInterval(checkSession, 5 * 60 * 1000)
     return () => {
       clearInterval(interval)
       if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current)
