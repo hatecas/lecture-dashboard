@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
+import HelpTooltip from './HelpTooltip'
 
 export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sessions, setSessions] = useState([])
@@ -1621,6 +1622,10 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           {currentTab === 'dashboard' && (
             <>
               {/* 지표 카드 - 글래스모피즘 + 그라데이션 테두리 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '15px', fontWeight: '600', color: 'rgba(255,255,255,0.7)' }}>핵심 지표</span>
+                <HelpTooltip text={"선택한 강사/기수의 핵심 성과지표입니다.\n시트 동기화 데이터 또는 직접 입력한 데이터를 표시합니다."} />
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px', marginBottom: '24px' }}>
                 <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(96,165,250,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(167,139,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
                   <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
@@ -1661,7 +1666,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
                 <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이 <HelpTooltip text={"무료특강 종료 후 시간대별 구매 건수를\n차트로 보여줍니다.\n우측 드롭다운으로 시간 간격(5~30분)을\n조절할 수 있습니다."} /></span>
                     <select
                       value={timelineInterval}
                       onChange={(e) => setTimelineInterval(parseInt(e.target.value))}
@@ -1733,7 +1738,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   )}
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>💵 영업이익 현황</div>
+                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>💵 영업이익 현황 <HelpTooltip text={"매출에서 광고비, 강사료 등 비용을\n차감한 최종 영업이익과 이익률입니다.\n프로그레스 바로 수익성을 한눈에\n확인할 수 있습니다."} /></div>
                   {(sheetData?.revenue || currentSession.revenue > 0) ? (() => {
                     const profit = sheetData?.operatingProfit || currentSession.operating_profit || 0
                     const margin = sheetData?.profitMargin ?? currentSession.profit_margin ?? 0
@@ -1769,7 +1774,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 const revenuePerPurchase = sheetData.totalPurchases > 0 ? Math.round(sheetData.revenue / sheetData.totalPurchases) : 0
                 return (
                   <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)', marginBottom: '24px' }}>
-                    <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px', color: 'rgba(255,255,255,0.8)' }}>📈 광고 성과</div>
+                    <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px', color: 'rgba(255,255,255,0.8)', display: 'flex', alignItems: 'center', gap: '8px' }}>📈 광고 성과 <HelpTooltip text={"ROAS, GDN/메타 전환단가, 총 광고비 등\n광고 효율을 한눈에 파악할 수 있습니다.\nROAS = 매출 ÷ 광고비 (높을수록 좋음)\n전환단가 = 광고비 ÷ 결제건수 (낮을수록 좋음)"} /></div>
                     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '12px' }}>
                       <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
                         <div style={{ fontSize: '12px', color: '#60a5fa', marginBottom: '6px', fontWeight: '500' }}>ROAS (광고수익률)</div>
@@ -1807,7 +1812,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {/* 유튜브 성과 */}
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600' }}>📺 유튜브 출연 성과</div>
+                  <div style={{ fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>📺 유튜브 출연 성과 <HelpTooltip text={"유튜브 채널 출연 영상의 조회수와\n전환(구매) 건수를 관리합니다.\n+ 추가 버튼으로 유튜브 링크를 등록하면\n조회수를 자동으로 가져옵니다."} /></div>
                   <button onClick={() => setShowYoutubeModal(true)} style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: '8px', padding: '8px 14px', color: '#fb7185', fontSize: '13px', cursor: 'pointer' }}>+ 추가</button>
                 </div>
                 {youtubeLinks.length > 0 ? (
@@ -1841,9 +1846,12 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               </div>
 
               {/* AI 분석 */}
-              <button onClick={() => runAiAnalysis('dashboard')} disabled={analyzing} style={{ background: analyzing ? '#4c4c6d' : 'linear-gradient(135deg, #ec4899, #f43f5e)', border: 'none', borderRadius: '12px', padding: '14px 28px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: analyzing ? 'wait' : 'pointer', marginBottom: '24px' }}>
-                {analyzing ? '✨ AI 분석 중...' : '✨ AI 분석 실행'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
+                <button onClick={() => runAiAnalysis('dashboard')} disabled={analyzing} style={{ background: analyzing ? '#4c4c6d' : 'linear-gradient(135deg, #ec4899, #f43f5e)', border: 'none', borderRadius: '12px', padding: '14px 28px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: analyzing ? 'wait' : 'pointer' }}>
+                  {analyzing ? '✨ AI 분석 중...' : '✨ AI 분석 실행'}
+                </button>
+                <HelpTooltip text={"현재 기수의 모든 지표를 AI가 분석하여\n강점, 개선점, 추천 액션을 제공합니다.\n시트 데이터가 연동된 상태에서\n더 정확한 분석이 가능합니다."} />
+              </div>
 
               {aiAnalysis && (
                 <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(99,102,241,0.3)' }}>
@@ -1878,7 +1886,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {/* 강사 메모 */}
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600' }}>📝 강사 메모</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>📝 강사 메모 <HelpTooltip text={"각 기수별 강사 메모를 기록합니다.\n특이사항, 피드백, 개선점 등을\n자유롭게 작성하세요."} /></div>
                   <button onClick={() => setShowMemoModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}>메모 추가</button>
                 </div>
                 {memos.length > 0 ? (
@@ -1910,7 +1918,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 onDrop={handleDrop}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600' }}>📎 첨부파일 & 링크</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>📎 첨부파일 & 링크 <HelpTooltip text={"기수별 관련 파일과 링크를 관리합니다.\n파일 업로드, 폴더 업로드, 드래그&드롭을\n모두 지원합니다.\n링크는 URL, 제목, 설명을 입력할 수 있습니다."} /></div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <input
                       type="file"
@@ -2054,7 +2062,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             return (
               <>
                 <div style={{ marginBottom: '24px' }}>
-                  <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>🏆 랭킹</h2>
+                  <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>🏆 랭킹 <HelpTooltip text={"모든 기수의 성과를 지표별로 비교합니다.\n원하는 지표 버튼을 클릭하고\n오름차순/내림차순을 선택하세요.\n시트 동기화된 데이터 기준으로 표시됩니다."} /></h2>
                   <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
                     {METRICS.map(m => (
                       <button key={m.key} onClick={() => setRankingMetric(m.key)} style={{ padding: '8px 16px', background: rankingMetric === m.key ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)', border: rankingMetric === m.key ? 'none' : '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer', fontWeight: rankingMetric === m.key ? '600' : '400' }}>{m.label}</button>
@@ -2161,7 +2169,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
             return (
               <>
-                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>⚖️ 대조</h2>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>⚖️ 대조 <HelpTooltip text={"두 기수의 성과를 나란히 비교합니다.\n좌/우측에서 각각 강사와 기수를 선택하면\n13개 지표를 한눈에 비교할 수 있습니다.\n초록색이 더 좋은 쪽을 의미합니다."} /></h2>
                 <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center' }}>
                   {/* 좌측 선택 */}
                   <div style={{ flex: 1, display: 'flex', gap: '8px' }}>
@@ -2272,7 +2280,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           {/* 툴 탭 */}
           {currentTab === 'tools' && (
             <div>
-              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>🛠️ 업무 툴</h2>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>🛠️ 업무 툴 <HelpTooltip text={"데이터 처리 자동화 도구 모음입니다.\n각 도구 버튼을 클릭하여 사용하세요.\nExcel/CSV 파일을 업로드하면\n자동으로 매칭/정리가 진행됩니다."} /></h2>
 
               {/* 툴 서브탭 */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
@@ -2323,7 +2331,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {currentTool === 'inflow' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>🔀 신청자-결제자 유입경로 매칭</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>🔀 신청자-결제자 유입경로 매칭 <HelpTooltip text={"무료특강 신청자 명단과 결제자 명단을\n연락처 기준으로 매칭합니다.\n좌측에 신청자, 우측에 결제자 파일을\n업로드 후 매칭 시작을 누르세요.\n결과를 Excel로 다운로드할 수 있습니다."} /></h3>
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>무료특강 신청자와 결제자 데이터를 비교하여 유입경로를 매칭합니다.</p>
                   </div>
 
@@ -2526,7 +2534,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {currentTool === 'crm' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>📋 CRM 데이터 정리</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>📋 CRM 데이터 정리 <HelpTooltip text={"CRM 데이터에서 중복을 자동 제거하고\n연락처 형식(010-XXXX-XXXX)을\n통일합니다.\n여러 파일을 한번에 업로드할 수 있으며\n정리된 결과를 Excel로 다운로드합니다."} /></h3>
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>CRM 데이터의 중복을 제거하고 연락처 형식을 통일합니다.</p>
                   </div>
 
@@ -2695,7 +2703,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {currentTool === 'kakao' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>💬 카카오톡 입장자 매칭</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>💬 카카오톡 입장자 매칭 <HelpTooltip text={"카카오톡 오픈채팅 입장 로그와\n결제자 데이터를 이름 기준으로 매칭합니다.\n좌측에 카톡 로그(TXT), 우측에 결제자\n파일을 업로드하세요.\n매칭/미매칭 결과를 확인하고\nExcel로 다운로드할 수 있습니다."} /></h3>
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>카카오톡 오픈채팅 입장 로그와 결제자 데이터를 매칭합니다.</p>
                   </div>
 
@@ -2907,7 +2915,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {currentTool === 'youtube' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>📡 유튜브 라이브 채팅 수집기</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>📡 유튜브 라이브 채팅 수집기 <HelpTooltip text={"유튜브 라이브 방송의 채팅을\n실시간으로 수집합니다.\n비디오 ID를 입력하고 수집을 시작하세요.\n특정 사용자만 필터링하거나\n세션별로 저장/다운로드할 수 있습니다."} /></h3>
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>유튜브 라이브 채팅을 실시간으로 수집하고 저장합니다.</p>
                   </div>
 
@@ -3365,7 +3373,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           {currentTab === 'resources' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 시트 통합</h2>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>📁 시트 통합 <HelpTooltip text={"구글 스프레드시트를 연동하여\n대시보드에서 바로 확인할 수 있습니다.\n+ 시트 추가로 URL을 등록하고\n탭을 클릭하여 데이터를 확인하세요.\n임베드/테이블 두 가지 뷰 모드를 지원합니다."} /></h2>
                 {savedSheets.length > 0 && (
                   <button
                     onClick={() => { setShowDeleteSheet(true); setDeleteSheetIds([]) }}
@@ -3677,6 +3685,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {sheetTabs.length > 0 && (
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
                   {/* 뷰 모드 토글 */}
+                  <HelpTooltip text={"임베드: 구글 시트 원본을 그대로 표시\n(스타일 유지, 로딩 느림)\n\n테이블: API로 데이터만 가져와 표시\n(빠른 로딩, 정렬 가능)"} size={13} />
                   <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '2px' }}>
                     <button
                       onClick={() => setResourceViewMode('iframe')}
