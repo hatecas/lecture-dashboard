@@ -3029,15 +3029,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                             <div
                               style={{ cursor: 'pointer', flex: 1 }}
                               onClick={async () => {
-                                // 세션 클릭 시 채팅 보기
-                                // 수집 중인 세션이면 먼저 poll 실행
-                                if (session.status === 'collecting') {
-                                  await fetch('/api/tools/youtube-chat', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ action: 'poll', sessionId: session.id })
-                                  })
-                                }
+                                // 세션 클릭 시 즉시 모달 열기 (로딩 상태로)
+                                setYtViewSession(session)
+                                setYtViewMessages([])
+
+                                // DB에서 메시지 먼저 빠르게 가져오기
                                 const res = await fetch('/api/tools/youtube-chat', {
                                   method: 'POST',
                                   headers: { 'Content-Type': 'application/json' },
@@ -3047,16 +3043,36 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                 if (data.success) {
                                   setYtViewSession(data.session)
                                   setYtViewMessages(data.messages)
-                                  // 수집 중인 세션이면 자동 새로고침 시작 (poll 포함)
-                                  if (data.session.status === 'collecting') {
-                                    viewPollingRef.current = setInterval(async () => {
-                                      // 먼저 poll 실행하여 YouTube에서 새 채팅 수집
+                                }
+
+                                // 수집 중인 세션이면 백그라운드에서 poll + 자동 새로고침
+                                if (session.status === 'collecting') {
+                                  // 첫 poll은 백그라운드로 (모달 로딩 안 막음)
+                                  fetch('/api/tools/youtube-chat', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ action: 'poll', sessionId: session.id })
+                                  }).then(() => {
+                                    // poll 완료 후 최신 메시지 반영
+                                    fetch('/api/tools/youtube-chat', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
+                                    }).then(r => r.json()).then(d => {
+                                      if (d.success) {
+                                        setYtViewSession(d.session)
+                                        setYtViewMessages(d.messages)
+                                      }
+                                    })
+                                  }).catch(() => {})
+
+                                  viewPollingRef.current = setInterval(async () => {
+                                    try {
                                       await fetch('/api/tools/youtube-chat', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ action: 'poll', sessionId: session.id })
                                       })
-                                      // 그 다음 messages 조회
                                       const r = await fetch('/api/tools/youtube-chat', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
@@ -3064,7 +3080,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                       })
                                       const d = await r.json()
                                       if (d.success) {
-                                        // 세션이 더 이상 수집 중이 아니면 자동 새로고침 중지
                                         if (d.session.status !== 'collecting') {
                                           clearInterval(viewPollingRef.current)
                                           viewPollingRef.current = null
@@ -3072,8 +3087,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                         setYtViewSession(d.session)
                                         setYtViewMessages(d.messages)
                                       }
-                                    }, 10000)
-                                  }
+                                    } catch {}
+                                  }, 10000)
                                 }
                               }}
                             >
@@ -3783,7 +3798,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               padding: '16px'
             }}>
               {ytViewMessages.length === 0 ? (
-                <p style={{ color: '#64748b', textAlign: 'center', padding: '40px' }}>수집된 채팅이 없습니다.</p>
+                <p style={{ color: '#64748b', textAlign: 'center', padding: '40px' }}>
+                  {ytViewSession?.message_count > 0 ? '채팅 불러오는 중...' : '수집된 채팅이 없습니다.'}
+                </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {ytViewMessages.map((msg, i) => (
