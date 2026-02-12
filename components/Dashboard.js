@@ -3053,13 +3053,14 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ action: 'poll', sessionId: session.id })
                                   }).then(() => {
-                                    // poll 완료 후 최신 메시지 반영
+                                    // 모달이 이미 닫혔으면 무시
+                                    if (!viewPollingRef.current) return
                                     fetch('/api/tools/youtube-chat', {
                                       method: 'POST',
                                       headers: { 'Content-Type': 'application/json' },
                                       body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
                                     }).then(r => r.json()).then(d => {
-                                      if (d.success) {
+                                      if (d.success && viewPollingRef.current) {
                                         setYtViewSession(d.session)
                                         setYtViewMessages(d.messages)
                                       }
@@ -3067,19 +3068,21 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                   }).catch(() => {})
 
                                   viewPollingRef.current = setInterval(async () => {
+                                    if (!viewPollingRef.current) return
                                     try {
                                       await fetch('/api/tools/youtube-chat', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ action: 'poll', sessionId: session.id })
                                       })
+                                      if (!viewPollingRef.current) return
                                       const r = await fetch('/api/tools/youtube-chat', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
                                       })
                                       const d = await r.json()
-                                      if (d.success) {
+                                      if (d.success && viewPollingRef.current) {
                                         if (d.session.status !== 'collecting') {
                                           clearInterval(viewPollingRef.current)
                                           viewPollingRef.current = null
