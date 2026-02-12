@@ -85,28 +85,42 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sheetApiLoading, setSheetApiLoading] = useState(false)
   const [iframeLoading, setIframeLoading] = useState(true) // iframe 로딩 상태
 
-  // Google Sheets API 설정 (하드코딩)
+  // Google Sheets API 설정
   const SHEETS_API_KEY = 'AIzaSyB0EjAxzu3JxwqZYf0cfB4sN5DNbZFSpbA'
-  const SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit'
+  const DEFAULT_SHEETS = [{ id: '1', name: '주간 보고 시트', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit' }]
+  const [savedSheets, setSavedSheets] = useState([]) // 저장된 시트 목록
+  const [selectedSheet, setSelectedSheet] = useState(null) // 현재 선택된 시트
+  const [showAddSheet, setShowAddSheet] = useState(false) // 시트 추가 모달
+  const [addSheetUrl, setAddSheetUrl] = useState('')
+  const [addSheetName, setAddSheetName] = useState('')
+  const [addSheetLoading, setAddSheetLoading] = useState(false)
   const [sheetTabs, setSheetTabs] = useState([]) // 시트 탭 목록
   const [sheetsLoading, setSheetsLoading] = useState(false)
   const [spreadsheetId, setSpreadsheetId] = useState('')
   const [spreadsheetTitle, setSpreadsheetTitle] = useState('')
 
+  // localStorage에서 시트 목록 로드
+  const loadSavedSheets = () => {
+    try {
+      const saved = localStorage.getItem('dashboard_saved_sheets')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return DEFAULT_SHEETS
+  }
+
   // 시트 탭 목록 가져오기
-  const fetchSheetTabs = async () => {
+  const fetchSheetTabs = async (sheetUrl) => {
     setSheetsLoading(true)
     try {
       const response = await fetch('/api/sheets-meta', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ spreadsheetUrl: SHEETS_URL, apiKey: SHEETS_API_KEY })
+        body: JSON.stringify({ spreadsheetUrl: sheetUrl, apiKey: SHEETS_API_KEY })
       })
 
       const data = await response.json()
 
       if (!response.ok) {
-        // API 할당량 초과 체크
         if (response.status === 429 || (data.error && data.error.includes('quota'))) {
           alert('Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.')
         } else {
@@ -120,9 +134,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       setSpreadsheetTitle(data.spreadsheetTitle)
 
       // 첫 번째 탭 선택
-      if (data.tabs.length > 0 && !currentResource) {
+      if (data.tabs.length > 0) {
         setCurrentResource(data.tabs[0].gid)
-        // API 모드면 데이터도 가져오기
         if (resourceViewMode === 'api') {
           fetchSheetDataByApi(data.spreadsheetId, data.tabs[0].title)
         }
@@ -133,6 +146,67 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       alert('시트 정보를 가져오는 중 오류가 발생했습니다.')
     } finally {
       setSheetsLoading(false)
+    }
+  }
+
+  // 시트 선택 핸들러
+  const selectSheet = (sheet) => {
+    setSelectedSheet(sheet)
+    setSheetTabs([])
+    setSheetApiData(null)
+    setCurrentResource(null)
+    setSpreadsheetId('')
+    setSpreadsheetTitle('')
+    fetchSheetTabs(sheet.url)
+  }
+
+  // 시트 추가
+  const addNewSheet = async () => {
+    if (!addSheetUrl) return
+    const urlMatch = addSheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)
+    if (!urlMatch) {
+      alert('올바른 Google Sheets URL이 아닙니다.')
+      return
+    }
+    setAddSheetLoading(true)
+    try {
+      const response = await fetch('/api/sheets-meta', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ spreadsheetUrl: addSheetUrl, apiKey: SHEETS_API_KEY })
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        alert(data.error || '시트 정보를 가져올 수 없습니다.')
+        return
+      }
+      const name = addSheetName.trim() || data.spreadsheetTitle || '새 시트'
+      const newSheet = { id: Date.now().toString(), name, url: addSheetUrl }
+      const updated = [...savedSheets, newSheet]
+      setSavedSheets(updated)
+      localStorage.setItem('dashboard_saved_sheets', JSON.stringify(updated))
+      setShowAddSheet(false)
+      setAddSheetUrl('')
+      setAddSheetName('')
+      selectSheet(newSheet)
+    } catch (error) {
+      alert('시트 정보를 가져오는 중 오류가 발생했습니다.')
+    } finally {
+      setAddSheetLoading(false)
+    }
+  }
+
+  // 시트 삭제
+  const removeSheet = (sheetId) => {
+    if (!confirm('이 시트를 목록에서 제거하시겠습니까?')) return
+    const updated = savedSheets.filter(s => s.id !== sheetId)
+    setSavedSheets(updated)
+    localStorage.setItem('dashboard_saved_sheets', JSON.stringify(updated))
+    if (selectedSheet?.id === sheetId) {
+      setSelectedSheet(null)
+      setSheetTabs([])
+      setSheetApiData(null)
+      setCurrentResource(null)
     }
   }
 
@@ -350,10 +424,10 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [ytCollecting])
 
-  // 리소스 탭 진입 시 시트 탭 자동 로드
+  // 시트 통합 탭 진입 시 저장된 시트 목록 로드
   useEffect(() => {
-    if (currentTab === 'resources' && sheetTabs.length === 0 && !sheetsLoading) {
-      fetchSheetTabs()
+    if (currentTab === 'resources' && savedSheets.length === 0) {
+      setSavedSheets(loadSavedSheets())
     }
   }, [currentTab])
 
@@ -3226,9 +3300,150 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           {currentTab === 'resources' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 시트 통합 {spreadsheetTitle && `- ${spreadsheetTitle}`}</h2>
+                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 시트 통합</h2>
               </div>
 
+              {/* 시트 선택 버튼들 */}
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                {savedSheets.map(sheet => (
+                  <div key={sheet.id} style={{ position: 'relative' }}>
+                    <button
+                      onClick={() => selectSheet(sheet)}
+                      style={{
+                        padding: '14px 24px',
+                        background: selectedSheet?.id === sheet.id ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
+                        border: selectedSheet?.id === sheet.id ? '2px solid #818cf8' : '2px solid rgba(255,255,255,0.1)',
+                        borderRadius: '12px',
+                        color: '#fff',
+                        fontSize: '15px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        minWidth: '160px'
+                      }}
+                    >
+                      📊 {sheet.name}
+                    </button>
+                    {sheet.id !== '1' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeSheet(sheet.id) }}
+                        style={{
+                          position: 'absolute',
+                          top: '-6px',
+                          right: '-6px',
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          background: 'rgba(239,68,68,0.8)',
+                          border: 'none',
+                          color: '#fff',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          lineHeight: 1
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => setShowAddSheet(true)}
+                  style={{
+                    padding: '14px 24px',
+                    background: 'transparent',
+                    border: '2px dashed rgba(255,255,255,0.2)',
+                    borderRadius: '12px',
+                    color: 'rgba(255,255,255,0.5)',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    minWidth: '160px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  + 시트 추가
+                </button>
+              </div>
+
+              {/* 시트 추가 모달 */}
+              {showAddSheet && (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0,0,0,0.6)', zIndex: 10000,
+                  display: 'flex', justifyContent: 'center', alignItems: 'center'
+                }} onClick={() => { setShowAddSheet(false); setAddSheetUrl(''); setAddSheetName('') }}>
+                  <div onClick={e => e.stopPropagation()} style={{
+                    background: '#1e293b', borderRadius: '16px', padding: '30px',
+                    width: '480px', maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '20px' }}>시트 추가</h3>
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '6px' }}>Google Sheets URL</label>
+                      <input
+                        value={addSheetUrl}
+                        onChange={e => setAddSheetUrl(e.target.value)}
+                        placeholder="https://docs.google.com/spreadsheets/d/..."
+                        style={{
+                          width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px',
+                          color: '#fff', fontSize: '14px', outline: 'none', boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: '24px' }}>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '6px' }}>시트 이름 (비워두면 자동 감지)</label>
+                      <input
+                        value={addSheetName}
+                        onChange={e => setAddSheetName(e.target.value)}
+                        placeholder="예: 주간 보고 시트"
+                        style={{
+                          width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px',
+                          color: '#fff', fontSize: '14px', outline: 'none', boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => { setShowAddSheet(false); setAddSheetUrl(''); setAddSheetName('') }}
+                        style={{
+                          padding: '10px 20px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                          color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                        }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={addNewSheet}
+                        disabled={!addSheetUrl || addSheetLoading}
+                        style={{
+                          padding: '10px 20px',
+                          background: addSheetUrl && !addSheetLoading ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(99,102,241,0.3)',
+                          border: 'none', borderRadius: '8px',
+                          color: '#fff', fontSize: '14px', fontWeight: '600',
+                          cursor: addSheetUrl && !addSheetLoading ? 'pointer' : 'not-allowed'
+                        }}
+                      >
+                        {addSheetLoading ? '확인 중...' : '추가'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 선택된 시트가 없으면 안내 */}
+              {!selectedSheet ? (
+                <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
+                  <p>위에서 시트를 선택해주세요.</p>
+                </div>
+              ) : (
+              <>
               {/* 시트 탭 버튼들 */}
               {sheetTabs.length > 0 ? (
                 <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap', maxHeight: '80px', overflowY: 'auto', padding: '4px 0' }}>
@@ -3534,8 +3749,10 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               ) : (
                 <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
                   <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
-                  <p>시트를 선택해주세요.</p>
+                  <p>시트 탭을 선택해주세요.</p>
                 </div>
+              )}
+              </>
               )}
             </div>
           )}
