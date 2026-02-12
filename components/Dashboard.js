@@ -3064,6 +3064,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                       })
                                       const d = await r.json()
                                       if (d.success) {
+                                        // 세션이 더 이상 수집 중이 아니면 자동 새로고침 중지
+                                        if (d.session.status !== 'collecting') {
+                                          clearInterval(viewPollingRef.current)
+                                          viewPollingRef.current = null
+                                        }
                                         setYtViewSession(d.session)
                                         setYtViewMessages(d.messages)
                                       }
@@ -3098,6 +3103,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                     })
                                     const listData = await listRes.json()
                                     if (listData.success) setYtSessions(listData.sessions)
+                                    // 채팅 보기 모달 자동 새로고침 중지
+                                    if (viewPollingRef.current) {
+                                      clearInterval(viewPollingRef.current)
+                                      viewPollingRef.current = null
+                                    }
                                     // 내가 폴링 중이던 세션이면 폴링도 중지
                                     if (ytSessionId === session.id) {
                                       if (pollingRef.current) {
