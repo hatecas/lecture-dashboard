@@ -15,7 +15,12 @@ async function googleSheetsApiFetch(url) {
     console.error('Google Sheets API error:', response.status, googleMsg)
 
     if (response.status === 403) {
-      return { error: `Google API 접근 거부: ${googleMsg || '서비스 계정에 스프레드시트 공유 권한이 필요합니다.'}`, status: 403 }
+      const serviceEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || ''
+      return {
+        error: '스프레드시트 접근 권한이 없습니다.',
+        serviceEmail,
+        status: 403
+      }
     }
     if (response.status === 404) {
       return { error: '스프레드시트를 찾을 수 없습니다. URL을 확인해주세요.', status: 404 }
@@ -50,7 +55,9 @@ export async function POST(request) {
     const result = await googleSheetsApiFetch(url)
 
     if (result.error) {
-      return NextResponse.json({ error: result.error }, { status: result.status })
+      const body = { error: result.error }
+      if (result.serviceEmail) body.serviceEmail = result.serviceEmail
+      return NextResponse.json(body, { status: result.status })
     }
 
     const tabs = result.data.sheets.map(sheet => ({
@@ -93,7 +100,9 @@ export async function GET(request) {
     const result = await googleSheetsApiFetch(url)
 
     if (result.error) {
-      return NextResponse.json({ error: result.error }, { status: result.status })
+      const body = { error: result.error }
+      if (result.serviceEmail) body.serviceEmail = result.serviceEmail
+      return NextResponse.json(body, { status: result.status })
     }
 
     return NextResponse.json({
