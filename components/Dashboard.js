@@ -108,8 +108,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sheetApiLoading, setSheetApiLoading] = useState(false)
   const [iframeLoading, setIframeLoading] = useState(true) // iframe 로딩 상태
 
-  // Google Sheets API 설정
-  const SHEETS_API_KEY = 'AIzaSyB0EjAxzu3JxwqZYf0cfB4sN5DNbZFSpbA'
+  // Google Sheets 설정
   const DEFAULT_SHEETS = [{ id: '1', name: '주간 보고 시트', url: 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit' }]
   const [savedSheets, setSavedSheets] = useState([]) // 저장된 시트 목록
   const [selectedSheet, setSelectedSheet] = useState(null) // 현재 선택된 시트
@@ -152,7 +151,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       const response = await fetch('/api/sheets-meta', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ spreadsheetUrl: sheetUrl, apiKey: SHEETS_API_KEY })
+        body: JSON.stringify({ spreadsheetUrl: sheetUrl })
       })
 
       const data = await response.json()
@@ -210,7 +209,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       const response = await fetch('/api/sheets-meta', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ spreadsheetUrl: addSheetUrl, apiKey: SHEETS_API_KEY })
+        body: JSON.stringify({ spreadsheetUrl: addSheetUrl })
       })
       const data = await response.json()
       if (!response.ok) {
@@ -285,7 +284,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     try {
       const params = new URLSearchParams({
         spreadsheetId: sheetId || spreadsheetId,
-        apiKey: SHEETS_API_KEY,
         sheetName: sheetName
       })
 
