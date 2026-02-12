@@ -122,6 +122,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [showDeleteSheet, setShowDeleteSheet] = useState(false) // 시트 삭제 모달
   const [deleteSheetIds, setDeleteSheetIds] = useState([]) // 삭제 선택된 시트 ID들
   const [deleteSheetLoading, setDeleteSheetLoading] = useState(false)
+  const [permissionError, setPermissionError] = useState(null) // 권한 에러 시 서비스 계정 이메일
 
   // 서버에서 시트 목록 로드
   const loadSavedSheets = async () => {
@@ -155,7 +156,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       const data = await response.json()
 
       if (!response.ok) {
-        if (response.status === 429 || (data.error && data.error.includes('quota'))) {
+        if (response.status === 403 && data.serviceEmail) {
+          setPermissionError(data.serviceEmail)
+        } else if (response.status === 429 || (data.error && data.error.includes('quota'))) {
           alert('Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.')
         } else {
           alert(data.error || '시트 정보를 가져올 수 없습니다.')
@@ -3560,6 +3563,62 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                         }}
                       >
                         {deleteSheetLoading ? '삭제 중...' : `삭제 (${deleteSheetIds.length})`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {permissionError && (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0,0,0,0.6)', zIndex: 10000,
+                  display: 'flex', justifyContent: 'center', alignItems: 'center'
+                }} onClick={() => setPermissionError(null)}>
+                  <div onClick={e => e.stopPropagation()} style={{
+                    background: '#1e293b', borderRadius: '16px', padding: '30px',
+                    width: '520px', maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#f87171', marginBottom: '12px' }}>스프레드시트 접근 권한 없음</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.6', marginBottom: '16px' }}>
+                      이 스프레드시트가 &quot;제한됨&quot;으로 설정되어 있습니다.<br />
+                      아래 이메일을 복사하여 스프레드시트 공유 설정에서 <strong style={{ color: '#fff' }}>뷰어</strong> 권한을 부여해주세요.
+                    </p>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '10px', padding: '14px 16px', marginBottom: '16px'
+                    }}>
+                      <span style={{ color: '#e2e8f0', fontSize: '13px', flex: 1, wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                        {permissionError}
+                      </span>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(permissionError)
+                          alert('복사되었습니다!')
+                        }}
+                        style={{
+                          padding: '6px 14px', background: 'rgba(99,102,241,0.8)',
+                          border: 'none', borderRadius: '6px', color: '#fff',
+                          fontSize: '13px', fontWeight: '600', cursor: 'pointer', whiteSpace: 'nowrap'
+                        }}
+                      >
+                        복사
+                      </button>
+                    </div>
+                    <p style={{ color: '#64748b', fontSize: '12px', lineHeight: '1.5', marginBottom: '20px' }}>
+                      구글 스프레드시트 → 공유 버튼 → 위 이메일 추가 → 뷰어 선택 → 전송
+                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => setPermissionError(null)}
+                        style={{
+                          padding: '10px 24px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                          color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                        }}
+                      >
+                        확인
                       </button>
                     </div>
                   </div>
