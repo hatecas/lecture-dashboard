@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 
-export default function Dashboard({ onLogout, userName }) {
+export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sessions, setSessions] = useState([])
   const [instructors, setInstructors] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
@@ -56,12 +56,237 @@ export default function Dashboard({ onLogout, userName }) {
   const folderInputRef = useRef(null)
 
   // 툴 관련 상태
-  const [currentTool, setCurrentTool] = useState('inflow') // inflow, crm, kakao, media
+  const [currentTool, setCurrentTool] = useState('crm') // crm, kakao, youtube (inflow는 권한 필요)
   const [toolFiles1, setToolFiles1] = useState([]) // 여러 파일 지원
   const [toolFiles2, setToolFiles2] = useState([]) // 여러 파일 지원
   const [toolResult, setToolResult] = useState(null)
   const [toolProcessing, setToolProcessing] = useState(false)
   const [toolLog, setToolLog] = useState([])
+
+  // 유튜브 채팅 수집 상태
+  const [ytVideoId, setYtVideoId] = useState('')
+  const [ytTargetUser, setYtTargetUser] = useState('')
+  const [ytSessionName, setYtSessionName] = useState('')
+  const [ytSessionId, setYtSessionId] = useState(null)
+  const [ytCollecting, setYtCollecting] = useState(false)
+  const [ytSessions, setYtSessions] = useState([])
+  const [ytMessageCount, setYtMessageCount] = useState(0)
+  const [ytViewSession, setYtViewSession] = useState(null) // 채팅 보기용 세션
+  const [ytViewMessages, setYtViewMessages] = useState([])
+  const pollingRef = useRef(null)
+  const viewPollingRef = useRef(null) // 채팅 보기 자동 새로고침용
+
+  // 리소스 허브 상태
+  const [currentResource, setCurrentResource] = useState(null) // 현재 선택된 탭 gid
+  const [resourceZoom, setResourceZoom] = useState(75) // 줌 레벨 (%) - 기본 75%로 더 많이 보이게
+  const [resourceFullscreen, setResourceFullscreen] = useState(false) // 전체화면 모드
+  const [resourceViewMode, setResourceViewMode] = useState('api') // 'iframe' or 'api' - 기본 API 모드 (빠름)
+  const [sheetApiData, setSheetApiData] = useState(null) // API로 가져온 시트 데이터
+  const [sheetApiLoading, setSheetApiLoading] = useState(false)
+  const [iframeLoading, setIframeLoading] = useState(true) // iframe 로딩 상태
+
+  // Google Sheets API 설정 (하드코딩)
+  const SHEETS_API_KEY = 'AIzaSyB0EjAxzu3JxwqZYf0cfB4sN5DNbZFSpbA'
+  const SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit'
+  const [sheetTabs, setSheetTabs] = useState([]) // 시트 탭 목록
+  const [sheetsLoading, setSheetsLoading] = useState(false)
+  const [spreadsheetId, setSpreadsheetId] = useState('')
+  const [spreadsheetTitle, setSpreadsheetTitle] = useState('')
+
+  // 시트 탭 목록 가져오기
+  const fetchSheetTabs = async () => {
+    setSheetsLoading(true)
+    try {
+      const response = await fetch('/api/sheets-meta', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ spreadsheetUrl: SHEETS_URL, apiKey: SHEETS_API_KEY })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        // API 할당량 초과 체크
+        if (response.status === 429 || (data.error && data.error.includes('quota'))) {
+          alert('Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.')
+        } else {
+          alert(data.error || '시트 정보를 가져올 수 없습니다.')
+        }
+        return
+      }
+
+      setSheetTabs(data.tabs)
+      setSpreadsheetId(data.spreadsheetId)
+      setSpreadsheetTitle(data.spreadsheetTitle)
+
+      // 첫 번째 탭 선택
+      if (data.tabs.length > 0 && !currentResource) {
+        setCurrentResource(data.tabs[0].gid)
+        // API 모드면 데이터도 가져오기
+        if (resourceViewMode === 'api') {
+          fetchSheetDataByApi(data.spreadsheetId, data.tabs[0].title)
+        }
+      }
+
+    } catch (error) {
+      console.error('Fetch tabs error:', error)
+      alert('시트 정보를 가져오는 중 오류가 발생했습니다.')
+    } finally {
+      setSheetsLoading(false)
+    }
+  }
+
+  // API로 시트 데이터 가져오기
+  const fetchSheetDataByApi = async (sheetId, sheetName) => {
+    setSheetApiLoading(true)
+    setSheetApiData(null)
+    try {
+      const params = new URLSearchParams({
+        spreadsheetId: sheetId || spreadsheetId,
+        apiKey: SHEETS_API_KEY,
+        sheetName: sheetName
+      })
+
+      const response = await fetch(`/api/sheets-meta?${params}`, {
+        headers: getAuthHeaders()
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        // API 할당량 초과 체크
+        if (response.status === 429 || (data.error && data.error.includes('quota'))) {
+          alert('Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.')
+        }
+        console.error('Sheet data error:', data.error)
+        return
+      }
+
+      setSheetApiData(data.values)
+    } catch (error) {
+      console.error('Fetch sheet data error:', error)
+    } finally {
+      setSheetApiLoading(false)
+    }
+  }
+
+  // 현재 선택된 시트 탭 정보
+  const selectedSheetTab = sheetTabs.find(t => t.gid === currentResource)
+
+  // 현재 탭의 URL 생성
+  const getCurrentTabUrl = () => {
+    if (!spreadsheetId || currentResource === null) return ''
+    return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${currentResource}`
+  }
+
+  // 현재 탭의 임베드 URL 생성
+  const getCurrentEmbedUrl = () => {
+    if (!spreadsheetId || currentResource === null) return ''
+    return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/htmlembed?gid=${currentResource}`
+  }
+
+  // 구글 시트 URL을 임베드 URL로 변환
+  const getEmbedUrl = (url) => {
+    // 구글 스프레드시트
+    if (url.includes('docs.google.com/spreadsheets')) {
+      const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/)
+      const gidMatch = url.match(/gid=(\d+)/)
+      if (match) {
+        const sheetId = match[1]
+        const gid = gidMatch ? gidMatch[1] : '0'
+        // htmlembed: 링크 공유만 되어 있으면 작동
+        return `https://docs.google.com/spreadsheets/d/${sheetId}/htmlembed?gid=${gid}`
+      }
+    }
+    // 구글 문서
+    if (url.includes('docs.google.com/document')) {
+      const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/)
+      if (match) {
+        return `https://docs.google.com/document/d/${match[1]}/preview`
+      }
+    }
+    // 구글 캘린더 (이미 embed URL인 경우 그대로)
+    if (url.includes('calendar.google.com')) {
+      return url
+    }
+    return url
+  }
+
+  // 구글 시트 데이터를 API로 가져오기 (공개된 시트만 가능)
+  const fetchSheetData = async (url) => {
+    setSheetApiLoading(true)
+    setSheetApiData(null)
+    try {
+      const match = url.match(/\/d\/([a-zA-Z0-9-_]+)/)
+      const gidMatch = url.match(/gid=(\d+)/)
+      if (!match) throw new Error('Invalid sheet URL')
+
+      const sheetId = match[1]
+      const gid = gidMatch ? gidMatch[1] : '0'
+
+      // 공개된 시트의 CSV 데이터 가져오기
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+      const response = await fetch(csvUrl)
+
+      if (!response.ok) {
+        throw new Error('시트가 공개되지 않았거나 접근할 수 없습니다.')
+      }
+
+      const csvText = await response.text()
+
+      // CSV 파싱
+      const rows = []
+      let currentRow = []
+      let currentCell = ''
+      let inQuotes = false
+
+      for (let i = 0; i < csvText.length; i++) {
+        const char = csvText[i]
+        const nextChar = csvText[i + 1]
+
+        if (inQuotes) {
+          if (char === '"' && nextChar === '"') {
+            currentCell += '"'
+            i++
+          } else if (char === '"') {
+            inQuotes = false
+          } else {
+            currentCell += char
+          }
+        } else {
+          if (char === '"') {
+            inQuotes = true
+          } else if (char === ',') {
+            currentRow.push(currentCell)
+            currentCell = ''
+          } else if (char === '\n' || (char === '\r' && nextChar === '\n')) {
+            currentRow.push(currentCell)
+            if (currentRow.some(cell => cell.trim())) {
+              rows.push(currentRow)
+            }
+            currentRow = []
+            currentCell = ''
+            if (char === '\r') i++
+          } else {
+            currentCell += char
+          }
+        }
+      }
+      if (currentCell || currentRow.length > 0) {
+        currentRow.push(currentCell)
+        if (currentRow.some(cell => cell.trim())) {
+          rows.push(currentRow)
+        }
+      }
+
+      setSheetApiData(rows)
+    } catch (error) {
+      console.error('Sheet fetch error:', error)
+      alert('시트 데이터를 가져올 수 없습니다. 시트가 "링크가 있는 모든 사용자"에게 공개되어 있는지 확인하세요.')
+    } finally {
+      setSheetApiLoading(false)
+    }
+  }
 
   // 툴 상태 초기화 함수
   const resetToolState = () => {
@@ -70,6 +295,12 @@ export default function Dashboard({ onLogout, userName }) {
     setToolResult(null)
     setToolProcessing(false)
     setToolLog([])
+    // 유튜브 채팅 수집 중지
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+    setYtCollecting(false)
   }
 
   // API 호출용 인증 헤더 생성
@@ -96,6 +327,51 @@ export default function Dashboard({ onLogout, userName }) {
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
+
+  // 권한에 따라 기본 툴 설정
+  useEffect(() => {
+    if (permissions.canUseInflow) {
+      setCurrentTool('inflow')
+    } else if (currentTool === 'inflow') {
+      setCurrentTool('crm')
+    }
+  }, [permissions.canUseInflow])
+
+  // 유튜브 채팅 수집 중 페이지 이탈 방지
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (ytCollecting) {
+        e.preventDefault()
+        e.returnValue = '채팅 수집이 진행 중입니다. 페이지를 떠나면 수집이 중단됩니다.'
+        return e.returnValue
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [ytCollecting])
+
+  // 리소스 탭 진입 시 시트 탭 자동 로드
+  useEffect(() => {
+    if (currentTab === 'resources' && sheetTabs.length === 0 && !sheetsLoading) {
+      fetchSheetTabs()
+    }
+  }, [currentTab])
+
+  // 로그아웃 핸들러 (수집 중 확인)
+  const handleLogoutWithConfirm = () => {
+    if (ytCollecting) {
+      if (window.confirm('⚠️ 유튜브 채팅 수집이 진행 중입니다.\n\n로그아웃하면 현재 브라우저에서의 수집이 중단됩니다.\n(수집된 데이터는 저장되어 있습니다)\n\n정말 로그아웃하시겠습니까?')) {
+        // 폴링 중지
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current)
+          pollingRef.current = null
+        }
+        onLogout()
+      }
+    } else {
+      onLogout()
+    }
+  }
 
   useEffect(() => {
     // 데이터 로드 완료 후 한번만 동기화 (instructors가 로드되면)
@@ -1052,6 +1328,30 @@ export default function Dashboard({ onLogout, userName }) {
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🛠️</span>
             툴
           </button>
+
+          {/* 리소스 메뉴 */}
+          <button onClick={() => { setCurrentTab('resources'); if(isMobile) setMobileMenuOpen(false) }} style={{
+            width: '100%',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+            background: currentTab === 'resources' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'resources' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'resources' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'resources' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
+            alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+            gap: sidebarCollapsed ? '4px' : '10px',
+            transition: 'all 0.3s ease'
+          }} title="리소스">
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📁</span>
+            리소스
+          </button>
         </div>
       </div>
 
@@ -1086,7 +1386,7 @@ export default function Dashboard({ onLogout, userName }) {
               ☰
             </button>
             <span style={{ fontSize: '14px', fontWeight: '600', color: '#a5b4fc' }}>📊 강의 관리</span>
-            <button onClick={onLogout} style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '12px' }}>
+            <button onClick={handleLogoutWithConfirm} style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '12px' }}>
               로그아웃
             </button>
           </div>
@@ -1099,7 +1399,7 @@ export default function Dashboard({ onLogout, userName }) {
               <span style={{ color: '#a5b4fc', fontSize: '14px' }}><strong>{userName}</strong>님 반갑습니다 👋</span>
             </div>
           )}
-          <button onClick={onLogout} style={{ padding: '10px 18px', background: 'rgba(239,68,68,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', color: '#f87171', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'all 0.3s ease' }}>
+          <button onClick={handleLogoutWithConfirm} style={{ padding: '10px 18px', background: 'rgba(239,68,68,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', color: '#f87171', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'all 0.3s ease' }}>
             로그아웃
           </button>
         </div>}
@@ -1838,11 +2138,11 @@ export default function Dashboard({ onLogout, userName }) {
               {/* 툴 서브탭 */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
                 {[
-                  { id: 'inflow', icon: '🔀', label: '유입경로 매칭' },
+                  { id: 'inflow', icon: '🔀', label: '유입경로 매칭', requiresPermission: 'canUseInflow' },
                   { id: 'crm', icon: '📋', label: 'CRM 정리' },
                   { id: 'kakao', icon: '💬', label: '카톡 매칭' },
-                  { id: 'media', icon: '📺', label: '미디어 분석' }
-                ].map(tool => (
+                  { id: 'youtube', icon: '📡', label: 'YT채팅 수집' }
+                ].filter(tool => !tool.requiresPermission || permissions[tool.requiresPermission]).map(tool => (
                   <button
                     key={tool.id}
                     onClick={() => {
@@ -2453,193 +2753,974 @@ export default function Dashboard({ onLogout, userName }) {
                 </div>
               )}
 
-              {/* 미디어 분석 툴 */}
-              {currentTool === 'media' && (
+              {/* 유튜브 채팅 수집 툴 */}
+              {currentTool === 'youtube' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>📺 미디어 분석</h3>
-                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>YouTube 데이터를 분석하고 AI 인사이트를 제공합니다.</p>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>📡 유튜브 라이브 채팅 수집기</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>유튜브 라이브 채팅을 실시간으로 수집하고 저장합니다.</p>
                   </div>
 
-                  <div style={{
-                    padding: '20px',
-                    background: 'rgba(239,68,68,0.1)',
-                    borderRadius: '12px',
-                    border: '2px dashed rgba(239,68,68,0.3)',
-                    textAlign: 'center',
-                    marginBottom: '20px'
-                  }}>
-                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📊</div>
-                    <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>YouTube 데이터</p>
-                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>조회수, 전환수 등 포함 (Excel/CSV, 여러개 가능)</p>
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      multiple
-                      onChange={(e) => setToolFiles1(Array.from(e.target.files))}
-                      style={{ display: 'none' }}
-                      id="media-file"
-                    />
-                    <label
-                      htmlFor="media-file"
+                  {/* 새 수집 시작 */}
+                  <div style={{ marginBottom: '24px', padding: '20px', background: 'rgba(239,68,68,0.1)', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '16px', color: '#fca5a5' }}>🚀 새 수집 시작</h4>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>비디오 ID *</label>
+                        <input
+                          type="text"
+                          value={ytVideoId}
+                          onChange={(e) => setYtVideoId(e.target.value)}
+                          placeholder="예: dQw4w9WgXcQ"
+                          style={{
+                            width: '100%',
+                            padding: '10px 14px',
+                            background: 'rgba(0,0,0,0.3)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '14px'
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>세션 이름 (선택)</label>
+                        <input
+                          type="text"
+                          value={ytSessionName}
+                          onChange={(e) => setYtSessionName(e.target.value)}
+                          placeholder="예: 1월 라이브"
+                          style={{
+                            width: '100%',
+                            padding: '10px 14px',
+                            background: 'rgba(0,0,0,0.3)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '14px'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>특정 유저만 수집 (선택)</label>
+                      <input
+                        type="text"
+                        value={ytTargetUser}
+                        onChange={(e) => setYtTargetUser(e.target.value)}
+                        placeholder="예: 말차굿 (빈칸이면 전체 수집)"
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px',
+                          background: 'rgba(0,0,0,0.3)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '8px',
+                          color: '#fff',
+                          fontSize: '14px'
+                        }}
+                      />
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        if (!ytVideoId.trim()) {
+                          alert('비디오 ID를 입력하세요.')
+                          return
+                        }
+                        setToolProcessing(true)
+                        setToolLog(['수집 시작 중...'])
+                        try {
+                          const res = await fetch('/api/tools/youtube-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              action: 'start',
+                              videoId: ytVideoId.trim(),
+                              targetUser: ytTargetUser.trim() || null,
+                              sessionName: ytSessionName.trim() || null
+                            })
+                          })
+                          const data = await res.json()
+                          if (data.success) {
+                            setYtSessionId(data.session.id)
+                            setYtCollecting(true)
+                            setYtMessageCount(0)
+                            setToolLog(prev => [...prev, '✅ 수집 시작됨!', `세션: ${data.session.session_name}`, '📡 첫 번째 폴링 중...'])
+
+                            // 폴링 함수
+                            const doPoll = async () => {
+                              try {
+                                const pollRes = await fetch('/api/tools/youtube-chat', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'poll', sessionId: data.session.id })
+                                })
+                                const pollData = await pollRes.json()
+                                if (pollData.success) {
+                                  if (pollData.stopped) {
+                                    clearInterval(pollingRef.current)
+                                    pollingRef.current = null
+                                    setYtCollecting(false)
+                                    setToolLog(prev => [...prev, pollData.message || '수집 종료'])
+                                  } else {
+                                    setYtMessageCount(pollData.totalMessages)
+                                    const now = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                                    if (pollData.logs?.length > 0) {
+                                      setToolLog(prev => [...prev, `📡 [${now}] 새 메시지 ${pollData.newMessages}개 수집`, ...pollData.logs])
+                                    } else {
+                                      setToolLog(prev => [...prev, `📡 [${now}] 폴링 완료 (새 메시지 없음) - 총 ${pollData.totalMessages}개`])
+                                    }
+                                  }
+                                } else if (pollData.quotaExceeded) {
+                                  clearInterval(pollingRef.current)
+                                  pollingRef.current = null
+                                  setYtCollecting(false)
+                                  setToolLog(prev => [...prev, '❌ 할당량 초과!'])
+                                  alert('⚠️ YouTube API 할당량이 초과되었습니다!\n\n수집이 자동으로 중지됩니다.\n(지금까지 수집된 데이터는 저장되어 있습니다)')
+                                }
+                              } catch (e) {
+                                console.error('Poll error:', e)
+                                setToolLog(prev => [...prev, `⚠️ 폴링 오류: ${e.message}`])
+                              }
+                            }
+
+                            // 즉시 첫 폴링 실행
+                            doPoll()
+
+                            // 이후 60초 간격으로 폴링
+                            pollingRef.current = setInterval(doPoll, 60000)
+                          } else {
+                            setToolLog(prev => [...prev, '❌ ' + data.error])
+                          }
+                        } catch (e) {
+                          setToolLog(prev => [...prev, '❌ 오류: ' + e.message])
+                        }
+                        setToolProcessing(false)
+                      }}
+                      disabled={toolProcessing || ytCollecting}
                       style={{
-                        display: 'inline-block',
-                        padding: '8px 16px',
-                        background: 'rgba(239,68,68,0.3)',
-                        borderRadius: '8px',
-                        color: '#fca5a5',
-                        fontSize: '13px',
-                        cursor: 'pointer'
+                        padding: '12px 24px',
+                        background: toolProcessing || ytCollecting ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #ef4444, #dc2626)',
+                        border: 'none',
+                        borderRadius: '10px',
+                        color: '#fff',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        cursor: toolProcessing || ytCollecting ? 'not-allowed' : 'pointer'
                       }}
                     >
-                      파일 선택
-                    </label>
-                    {toolFiles1.length > 0 && (
-                      <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
-                        {toolFiles1.map((f, i) => <div key={i}>✓ {f.name}</div>)}
-                      </div>
-                    )}
+                      {toolProcessing ? '처리 중...' : ytCollecting ? '수집 중...' : '🚀 수집 시작'}
+                    </button>
                   </div>
 
-                  <button
-                    onClick={async () => {
-                      if (toolFiles1.length === 0) {
-                        alert('파일을 선택해주세요.')
-                        return
-                      }
-                      setToolProcessing(true)
-                      setToolLog(['분석 시작...'])
+                  {/* 수집 중 상태 */}
+                  {ytCollecting && ytSessionId && (
+                    <div style={{ marginBottom: '24px', padding: '20px', background: 'rgba(16,185,129,0.1)', borderRadius: '12px', border: '1px solid rgba(16,185,129,0.3)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ width: '10px', height: '10px', background: '#10b981', borderRadius: '50%', animation: 'pulse 2s infinite' }} />
+                          <span style={{ color: '#10b981', fontWeight: '600' }}>수집 중 (60초 간격 폴링)</span>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ color: '#fff', fontSize: '24px', fontWeight: '700' }}>{ytMessageCount}개</div>
+                          <div style={{ color: '#94a3b8', fontSize: '11px' }}>수집된 채팅</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (pollingRef.current) {
+                            clearInterval(pollingRef.current)
+                            pollingRef.current = null
+                          }
+                          await fetch('/api/tools/youtube-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'stop', sessionId: ytSessionId })
+                          })
+                          setYtCollecting(false)
+                          setToolLog(prev => [...prev, '⏹️ 수집 중지됨'])
+                          // 세션 목록 새로고침
+                          const listRes = await fetch('/api/tools/youtube-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'list' })
+                          })
+                          const listData = await listRes.json()
+                          if (listData.success) setYtSessions(listData.sessions)
+                        }}
+                        style={{
+                          padding: '10px 20px',
+                          background: 'rgba(239,68,68,0.2)',
+                          border: '1px solid rgba(239,68,68,0.4)',
+                          borderRadius: '8px',
+                          color: '#fca5a5',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ⏹️ 수집 중지
+                      </button>
+                    </div>
+                  )}
 
-                      const formData = new FormData()
-                      toolFiles1.forEach(f => formData.append('files', f))
-
-                      try {
-                        const res = await fetch('/api/tools/media-analyze', {
-                          method: 'POST',
-                          body: formData
-                        })
-                        const data = await res.json()
-                        if (data.success) {
-                          setToolResult(data)
-                          setToolLog(data.logs || ['분석 완료'])
-                        } else {
-                          setToolLog(['오류: ' + data.error])
-                        }
-                      } catch (err) {
-                        setToolLog(['오류: ' + err.message])
-                      }
-                      setToolProcessing(false)
-                    }}
-                    disabled={toolProcessing || toolFiles1.length === 0}
-                    style={{
-                      width: '100%',
-                      padding: '14px',
-                      background: toolProcessing ? '#4c4c6d' : 'linear-gradient(135deg, #ef4444, #f97316)',
-                      border: 'none',
-                      borderRadius: '10px',
-                      color: '#fff',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      cursor: toolProcessing ? 'wait' : 'pointer'
-                    }}
-                  >
-                    {toolProcessing ? '분석 중...' : '📊 분석 시작'}
-                  </button>
-
-                  {/* 로그 출력 */}
+                  {/* 로그 */}
                   {toolLog.length > 0 && (
                     <div style={{
-                      marginTop: '16px',
+                      marginBottom: '24px',
                       padding: '12px',
                       background: 'rgba(0,0,0,0.3)',
                       borderRadius: '8px',
-                      maxHeight: '150px',
+                      maxHeight: '200px',
                       overflow: 'auto',
                       fontFamily: 'monospace',
                       fontSize: '12px'
                     }}>
-                      {toolLog.map((log, i) => (
-                        <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '4px' }}>{log}</div>
+                      {toolLog.slice(-50).map((log, i) => (
+                        <div key={i} style={{ color: log.startsWith('❌') ? '#f87171' : log.startsWith('✅') ? '#10b981' : '#94a3b8', marginBottom: '4px' }}>{log}</div>
                       ))}
                     </div>
                   )}
 
-                  {/* 결과 */}
-                  {toolResult && toolResult.success && (
-                    <div style={{ marginTop: '16px' }}>
-                      {/* 통계 요약 */}
-                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
-                        <div style={{ padding: '16px', background: 'rgba(239,68,68,0.1)', borderRadius: '10px', textAlign: 'center' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#fca5a5' }}>{toolResult.stats?.totalVideos || 0}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>총 영상</div>
-                        </div>
-                        <div style={{ padding: '16px', background: 'rgba(99,102,241,0.1)', borderRadius: '10px', textAlign: 'center' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#a5b4fc' }}>{(toolResult.stats?.totalViews || 0).toLocaleString()}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>총 조회수</div>
-                        </div>
-                        <div style={{ padding: '16px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', textAlign: 'center' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#34d399' }}>{toolResult.stats?.totalConversions || 0}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>총 전환</div>
-                        </div>
-                        <div style={{ padding: '16px', background: 'rgba(250,204,21,0.1)', borderRadius: '10px', textAlign: 'center' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#fcd34d' }}>{toolResult.stats?.avgConversionRate?.toFixed(2) || 0}%</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>평균 전환율</div>
-                        </div>
-                      </div>
-
-                      {/* AI 인사이트 */}
-                      {toolResult.aiInsight && (
-                        <div style={{ padding: '16px', background: 'rgba(168,85,247,0.1)', borderRadius: '10px', border: '1px solid rgba(168,85,247,0.3)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                            <span style={{ fontSize: '18px' }}>🤖</span>
-                            <span style={{ fontWeight: '600', color: '#c4b5fd' }}>AI 인사이트</span>
-                          </div>
-                          <p style={{ color: '#e2e8f0', fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
-                            {toolResult.aiInsight}
-                          </p>
-                        </div>
-                      )}
-
-                      <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-                        <button
-                          onClick={() => {
-                            const link = document.createElement('a')
-                            link.href = toolResult.downloadUrl
-                            link.download = 'media_analysis.xlsx'
-                            link.click()
-                          }}
-                          style={{
-                            flex: 1,
-                            padding: '10px 20px',
-                            background: 'rgba(16,185,129,0.2)',
-                            border: '1px solid rgba(16,185,129,0.4)',
-                            borderRadius: '8px',
-                            color: '#10b981',
-                            fontSize: '13px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          📥 분석 결과 다운로드
-                        </button>
-                        <button
-                          onClick={resetToolState}
-                          style={{
-                            padding: '10px 20px',
-                            background: 'rgba(99,102,241,0.2)',
-                            border: '1px solid rgba(99,102,241,0.4)',
-                            borderRadius: '8px',
-                            color: '#a5b4fc',
-                            fontSize: '13px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          🔄 초기화
-                        </button>
-                      </div>
+                  {/* 저장된 세션 목록 */}
+                  <div style={{ padding: '20px', background: 'rgba(99,102,241,0.1)', borderRadius: '12px', border: '1px solid rgba(99,102,241,0.2)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                      <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#a5b4fc' }}>📁 저장된 세션</h4>
+                      <button
+                        onClick={async () => {
+                          const res = await fetch('/api/tools/youtube-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'list' })
+                          })
+                          const data = await res.json()
+                          if (data.success) setYtSessions(data.sessions)
+                        }}
+                        style={{
+                          padding: '6px 12px',
+                          background: 'rgba(99,102,241,0.2)',
+                          border: '1px solid rgba(99,102,241,0.3)',
+                          borderRadius: '6px',
+                          color: '#a5b4fc',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🔄 새로고침
+                      </button>
                     </div>
+
+                    {ytSessions.length === 0 ? (
+                      <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '20px' }}>저장된 세션이 없습니다. 새로고침을 눌러주세요.</p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '300px', overflow: 'auto' }}>
+                        {ytSessions.map(session => (
+                          <div key={session.id} style={{
+                            padding: '12px 16px',
+                            background: 'rgba(0,0,0,0.2)',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '10px'
+                          }}>
+                            <div
+                              style={{ cursor: 'pointer', flex: 1 }}
+                              onClick={async () => {
+                                // 세션 클릭 시 채팅 보기
+                                // 수집 중인 세션이면 먼저 poll 실행
+                                if (session.status === 'collecting') {
+                                  await fetch('/api/tools/youtube-chat', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ action: 'poll', sessionId: session.id })
+                                  })
+                                }
+                                const res = await fetch('/api/tools/youtube-chat', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
+                                })
+                                const data = await res.json()
+                                if (data.success) {
+                                  setYtViewSession(data.session)
+                                  setYtViewMessages(data.messages)
+                                  // 수집 중인 세션이면 자동 새로고침 시작 (poll 포함)
+                                  if (data.session.status === 'collecting') {
+                                    viewPollingRef.current = setInterval(async () => {
+                                      // 먼저 poll 실행하여 YouTube에서 새 채팅 수집
+                                      await fetch('/api/tools/youtube-chat', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ action: 'poll', sessionId: session.id })
+                                      })
+                                      // 그 다음 messages 조회
+                                      const r = await fetch('/api/tools/youtube-chat', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
+                                      })
+                                      const d = await r.json()
+                                      if (d.success) {
+                                        // 세션이 더 이상 수집 중이 아니면 자동 새로고침 중지
+                                        if (d.session.status !== 'collecting') {
+                                          clearInterval(viewPollingRef.current)
+                                          viewPollingRef.current = null
+                                        }
+                                        setYtViewSession(d.session)
+                                        setYtViewMessages(d.messages)
+                                      }
+                                    }, 10000)
+                                  }
+                                }
+                              }}
+                            >
+                              <div style={{ fontWeight: '600', color: '#a5b4fc', fontSize: '14px', marginBottom: '4px', textDecoration: 'underline' }}>
+                                {session.session_name || session.video_title || session.video_id}
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#64748b' }}>
+                                {session.message_count}개 메시지 · {session.status === 'collecting' ? '🟢 수집 중' : session.status === 'stopped' ? '⏹️ 중지됨' : session.status === 'ended' ? '🔴 종료됨' : session.status}
+                                {session.target_user && ` · 필터: ${session.target_user}`}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {/* 수집 중인 세션이면 정지 버튼 표시 */}
+                              {session.status === 'collecting' && (
+                                <button
+                                  onClick={async () => {
+                                    await fetch('/api/tools/youtube-chat', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'stop', sessionId: session.id })
+                                    })
+                                    // 세션 목록 새로고침
+                                    const listRes = await fetch('/api/tools/youtube-chat', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'list' })
+                                    })
+                                    const listData = await listRes.json()
+                                    if (listData.success) setYtSessions(listData.sessions)
+                                    // 채팅 보기 모달 자동 새로고침 중지
+                                    if (viewPollingRef.current) {
+                                      clearInterval(viewPollingRef.current)
+                                      viewPollingRef.current = null
+                                    }
+                                    // 내가 폴링 중이던 세션이면 폴링도 중지
+                                    if (ytSessionId === session.id) {
+                                      if (pollingRef.current) {
+                                        clearInterval(pollingRef.current)
+                                        pollingRef.current = null
+                                      }
+                                      setYtCollecting(false)
+                                      setToolLog(prev => [...prev, '⏹️ 수집 중지됨 (다른 사용자 또는 본인)'])
+                                    }
+                                  }}
+                                  style={{
+                                    padding: '6px 10px',
+                                    background: 'rgba(250,204,21,0.2)',
+                                    border: '1px solid rgba(250,204,21,0.3)',
+                                    borderRadius: '6px',
+                                    color: '#fcd34d',
+                                    fontSize: '11px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  ⏹️ 정지
+                                </button>
+                              )}
+                              <button
+                                onClick={async () => {
+                                  const res = await fetch('/api/tools/youtube-chat', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ action: 'download', sessionId: session.id })
+                                  })
+                                  const data = await res.json()
+                                  if (data.success) {
+                                    const link = document.createElement('a')
+                                    link.href = data.downloadUrl
+                                    link.download = data.filename
+                                    link.click()
+                                  } else {
+                                    alert(data.error)
+                                  }
+                                }}
+                                style={{
+                                  padding: '6px 10px',
+                                  background: 'rgba(16,185,129,0.2)',
+                                  border: '1px solid rgba(16,185,129,0.3)',
+                                  borderRadius: '6px',
+                                  color: '#10b981',
+                                  fontSize: '11px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                📥
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('이 세션을 삭제하시겠습니까?')) return
+                                  await fetch('/api/tools/youtube-chat', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ action: 'delete', sessionId: session.id })
+                                  })
+                                  setYtSessions(prev => prev.filter(s => s.id !== session.id))
+                                }}
+                                style={{
+                                  padding: '6px 10px',
+                                  background: 'rgba(239,68,68,0.2)',
+                                  border: '1px solid rgba(239,68,68,0.3)',
+                                  borderRadius: '6px',
+                                  color: '#f87171',
+                                  fontSize: '11px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 리소스 탭 */}
+          {currentTab === 'resources' && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 리소스 {spreadsheetTitle && `- ${spreadsheetTitle}`}</h2>
+              </div>
+
+              {/* 시트 탭 버튼들 */}
+              {sheetTabs.length > 0 ? (
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap', maxHeight: '80px', overflowY: 'auto', padding: '4px 0' }}>
+                  {sheetTabs.map(tab => (
+                    <button
+                      key={tab.gid}
+                      onClick={() => {
+                        setCurrentResource(tab.gid)
+                        setSheetApiData(null)
+                        setIframeLoading(true)
+                        if (resourceViewMode === 'api') {
+                          fetchSheetDataByApi(spreadsheetId, tab.title)
+                        }
+                      }}
+                      style={{
+                        padding: '8px 14px',
+                        background: currentResource === tab.gid ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
+                        border: currentResource === tab.gid ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '8px',
+                        color: '#fff',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {tab.title}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ marginBottom: '16px', padding: '20px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', textAlign: 'center' }}>
+                  {sheetsLoading ? (
+                    <p style={{ color: '#a5b4fc' }}>📊 시트 탭 불러오는 중...</p>
+                  ) : (
+                    <p style={{ color: '#64748b' }}>시트 탭을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</p>
                   )}
                 </div>
               )}
+
+              {/* 컨트롤 바 */}
+              {sheetTabs.length > 0 && (
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {/* 뷰 모드 토글 */}
+                  <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '2px' }}>
+                    <button
+                      onClick={() => setResourceViewMode('iframe')}
+                      style={{
+                        padding: '6px 12px',
+                        background: resourceViewMode === 'iframe' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '6px',
+                        color: resourceViewMode === 'iframe' ? '#a5b4fc' : '#64748b',
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📄 임베드
+                    </button>
+                    <button
+                      onClick={() => {
+                        setResourceViewMode('api')
+                        if (selectedSheetTab && !sheetApiData) {
+                          fetchSheetDataByApi(spreadsheetId, selectedSheetTab.title)
+                        }
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        background: resourceViewMode === 'api' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '6px',
+                        color: resourceViewMode === 'api' ? '#a5b4fc' : '#64748b',
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📊 테이블 (빠름)
+                    </button>
+                  </div>
+
+                  {/* 줌 컨트롤 (임베드 모드에서만) */}
+                  {resourceViewMode === 'iframe' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '4px 8px' }}>
+                      <button
+                        onClick={() => setResourceZoom(Math.max(40, resourceZoom - 10))}
+                        style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
+                      >
+                        −
+                      </button>
+                      <span style={{ color: '#94a3b8', fontSize: '12px', minWidth: '45px', textAlign: 'center' }}>{resourceZoom}%</span>
+                      <button
+                        onClick={() => setResourceZoom(Math.min(120, resourceZoom + 10))}
+                        style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', fontSize: '14px', cursor: 'pointer' }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+
+                  {/* 전체화면 버튼 */}
+                  <button
+                    onClick={() => setResourceFullscreen(true)}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#94a3b8',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ⛶ 전체화면
+                  </button>
+
+                  {/* 새로고침 버튼 */}
+                  <button
+                    onClick={() => {
+                      if (resourceViewMode === 'api' && selectedSheetTab) {
+                        fetchSheetDataByApi(spreadsheetId, selectedSheetTab.title)
+                      } else {
+                        setIframeLoading(true)
+                      }
+                    }}
+                    disabled={sheetApiLoading}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#94a3b8',
+                      fontSize: '12px',
+                      cursor: sheetApiLoading ? 'not-allowed' : 'pointer',
+                      opacity: sheetApiLoading ? 0.5 : 1
+                    }}
+                  >
+                    {sheetApiLoading ? '⏳ 로딩...' : '🔄 새로고침'}
+                  </button>
+
+                  {/* 새 탭에서 열기 */}
+                  {getCurrentTabUrl() && (
+                    <a
+                      href={getCurrentTabUrl()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        padding: '6px 12px',
+                        background: 'rgba(16,185,129,0.15)',
+                        border: '1px solid rgba(16,185,129,0.3)',
+                        borderRadius: '8px',
+                        color: '#34d399',
+                        fontSize: '12px',
+                        textDecoration: 'none',
+                        marginLeft: 'auto'
+                      }}
+                    >
+                      🔗 새 탭에서 열기
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {/* 시트 표시 영역 */}
+              {sheetTabs.length > 0 && currentResource !== null ? (
+                <div style={{
+                  background: '#fff',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  overflow: 'hidden',
+                  height: 'calc(100vh - 280px)',
+                  minHeight: '500px',
+                  position: 'relative'
+                }}>
+                  {resourceViewMode === 'iframe' ? (
+                    // 임베드 모드 (줌 지원)
+                    <div style={{ width: '100%', height: '100%', overflow: 'auto', background: '#fff' }}>
+                      {/* 로딩 인디케이터 */}
+                      {iframeLoading && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          background: '#fff',
+                          zIndex: 10
+                        }}>
+                          <div style={{ textAlign: 'center', color: '#64748b' }}>
+                            <div style={{ fontSize: '40px', marginBottom: '16px' }}>📊</div>
+                            <p style={{ fontSize: '14px' }}>시트를 불러오는 중...</p>
+                            <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '8px' }}>잠시만 기다려주세요</p>
+                          </div>
+                        </div>
+                      )}
+                      {getCurrentEmbedUrl() && (
+                        <iframe
+                          src={getCurrentEmbedUrl()}
+                          onLoad={() => setIframeLoading(false)}
+                          style={{
+                            width: `${10000 / resourceZoom}%`,
+                            height: `${10000 / resourceZoom}%`,
+                            border: 'none',
+                            transform: `scale(${resourceZoom / 100})`,
+                            transformOrigin: 'top left',
+                            opacity: iframeLoading ? 0 : 1,
+                            transition: 'opacity 0.3s ease'
+                          }}
+                          title={selectedSheetTab?.title || '시트'}
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    // API 테이블 모드 - 밝은 배경 스타일
+                    <div style={{ width: '100%', height: '100%', overflow: 'auto', background: '#ffffff', borderRadius: '8px' }}>
+                      {sheetApiLoading ? (
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+                            <p>데이터를 불러오는 중...</p>
+                          </div>
+                        </div>
+                      ) : sheetApiData ? (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: '#fff' }}>
+                          <thead>
+                            {/* 첫 번째 행 - 테이블 제목 (sticky) */}
+                            {sheetApiData.length > 0 && (
+                              <tr>
+                                {sheetApiData[0].map((cell, i) => (
+                                  <th key={i} style={{
+                                    padding: '12px 14px',
+                                    background: '#1e3a5f',
+                                    borderBottom: '1px solid #ccc',
+                                    borderRight: '1px solid rgba(255,255,255,0.2)',
+                                    textAlign: 'left',
+                                    fontWeight: '700',
+                                    color: '#fff',
+                                    whiteSpace: 'nowrap',
+                                    position: 'sticky',
+                                    top: 0,
+                                    zIndex: 2
+                                  }}>
+                                    {cell}
+                                  </th>
+                                ))}
+                              </tr>
+                            )}
+                            {/* 두 번째 행 - 컬럼 헤더 (sticky) */}
+                            {sheetApiData.length > 1 && (
+                              <tr>
+                                {sheetApiData[1].map((cell, i) => (
+                                  <th key={i} style={{
+                                    padding: '10px 14px',
+                                    background: '#f0f4f8',
+                                    borderBottom: '2px solid #3b82f6',
+                                    borderRight: '1px solid #e2e8f0',
+                                    textAlign: 'left',
+                                    fontWeight: '600',
+                                    color: '#1e293b',
+                                    whiteSpace: 'nowrap',
+                                    position: 'sticky',
+                                    top: '41px',
+                                    zIndex: 1
+                                  }}>
+                                    {cell}
+                                  </th>
+                                ))}
+                              </tr>
+                            )}
+                          </thead>
+                          <tbody>
+                            {sheetApiData.slice(2).map((row, rowIdx) => (
+                              <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? '#fff' : '#f8fafc' }}>
+                                {row.map((cell, cellIdx) => (
+                                  <td key={cellIdx} style={{
+                                    padding: '10px 14px',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    borderRight: '1px solid #f1f5f9',
+                                    color: '#334155',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    {cell}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '32px', marginBottom: '12px' }}>📊</div>
+                            <p>테이블 모드로 보려면 시트가 공개되어 있어야 합니다.</p>
+                            <p style={{ fontSize: '12px', marginTop: '8px' }}>시트 설정 → 공유 → &quot;링크가 있는 모든 사용자&quot;</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
+                  <p>시트를 선택해주세요.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 리소스 전체화면 모달 */}
+          {resourceFullscreen && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: '#0a0a12',
+              zIndex: 10000,
+              display: 'flex',
+              flexDirection: 'column'
+            }}>
+              {/* 모달 헤더 */}
+              <div style={{
+                padding: '12px 20px',
+                background: 'rgba(30,30,50,0.9)',
+                borderBottom: '1px solid rgba(255,255,255,0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '18px' }}>📊</span>
+                  <span style={{ color: '#fff', fontWeight: '600' }}>
+                    {selectedSheetTab?.title || ''}
+                  </span>
+
+                  {/* 뷰 모드 토글 */}
+                  <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '6px', padding: '2px', marginLeft: '20px' }}>
+                    <button
+                      onClick={() => setResourceViewMode('iframe')}
+                      style={{
+                        padding: '4px 10px',
+                        background: resourceViewMode === 'iframe' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: resourceViewMode === 'iframe' ? '#a5b4fc' : '#64748b',
+                        fontSize: '11px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      임베드
+                    </button>
+                    <button
+                      onClick={() => {
+                        setResourceViewMode('api')
+                        if (selectedSheetTab && !sheetApiData) {
+                          fetchSheetDataByApi(spreadsheetId, selectedSheetTab.title)
+                        }
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        background: resourceViewMode === 'api' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: resourceViewMode === 'api' ? '#a5b4fc' : '#64748b',
+                        fontSize: '11px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      테이블
+                    </button>
+                  </div>
+
+                  {/* 줌 컨트롤 */}
+                  {resourceViewMode === 'iframe' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <button onClick={() => setResourceZoom(Math.max(40, resourceZoom - 10))} style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer' }}>−</button>
+                      <span style={{ color: '#94a3b8', fontSize: '11px', minWidth: '40px', textAlign: 'center' }}>{resourceZoom}%</span>
+                      <button onClick={() => setResourceZoom(Math.min(120, resourceZoom + 10))} style={{ padding: '4px 8px', background: 'transparent', border: 'none', color: '#a5b4fc', cursor: 'pointer' }}>+</button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <a
+                    href={getCurrentTabUrl()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(16,185,129,0.2)',
+                      border: '1px solid rgba(16,185,129,0.3)',
+                      borderRadius: '6px',
+                      color: '#34d399',
+                      fontSize: '12px',
+                      textDecoration: 'none'
+                    }}
+                  >
+                    🔗 새 탭
+                  </a>
+                  <button
+                    onClick={() => setResourceFullscreen(false)}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(239,68,68,0.2)',
+                      border: '1px solid rgba(239,68,68,0.3)',
+                      borderRadius: '6px',
+                      color: '#f87171',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ✕ 닫기
+                  </button>
+                </div>
+              </div>
+
+              {/* 모달 컨텐츠 */}
+              <div style={{ flex: 1, overflow: 'auto', background: '#fff' }}>
+                {resourceViewMode === 'iframe' ? (
+                  <div style={{ width: '100%', height: '100%', overflow: 'auto', background: '#fff' }}>
+                    {spreadsheetId && currentResource !== null && (
+                      <iframe
+                        src={getCurrentEmbedUrl()}
+                        style={{
+                          width: `${10000 / resourceZoom}%`,
+                          height: `${10000 / resourceZoom}%`,
+                          border: 'none',
+                          transform: `scale(${resourceZoom / 100})`,
+                          transformOrigin: 'top left'
+                        }}
+                        title={selectedSheetTab?.title || ''}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ padding: '20px', height: '100%', overflow: 'auto', background: '#f8fafc' }}>
+                    {sheetApiLoading ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+                          <p>데이터를 불러오는 중...</p>
+                        </div>
+                      </div>
+                    ) : sheetApiData ? (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                        <thead>
+                          {/* 첫 번째 행 - 테이블 제목 (sticky) */}
+                          {sheetApiData.length > 0 && (
+                            <tr>
+                              {sheetApiData[0].map((cell, i) => (
+                                <th key={i} style={{
+                                  padding: '14px 16px',
+                                  background: '#1e3a5f',
+                                  borderBottom: '1px solid #ccc',
+                                  borderRight: '1px solid rgba(255,255,255,0.2)',
+                                  textAlign: 'left',
+                                  fontWeight: '700',
+                                  color: '#fff',
+                                  whiteSpace: 'nowrap',
+                                  position: 'sticky',
+                                  top: 0,
+                                  zIndex: 2
+                                }}>
+                                  {cell}
+                                </th>
+                              ))}
+                            </tr>
+                          )}
+                          {/* 두 번째 행 - 컬럼 헤더 (sticky) */}
+                          {sheetApiData.length > 1 && (
+                            <tr>
+                              {sheetApiData[1].map((cell, i) => (
+                                <th key={i} style={{
+                                  padding: '12px 16px',
+                                  background: '#f0f4f8',
+                                  borderBottom: '2px solid #3b82f6',
+                                  borderRight: '1px solid #e2e8f0',
+                                  textAlign: 'left',
+                                  fontWeight: '600',
+                                  color: '#1e293b',
+                                  whiteSpace: 'nowrap',
+                                  position: 'sticky',
+                                  top: '47px',
+                                  zIndex: 1
+                                }}>
+                                  {cell}
+                                </th>
+                              ))}
+                            </tr>
+                          )}
+                        </thead>
+                        <tbody>
+                          {sheetApiData.slice(2).map((row, rowIdx) => (
+                            <tr key={rowIdx} style={{ background: rowIdx % 2 === 0 ? '#fff' : '#f8fafc' }}>
+                              {row.map((cell, cellIdx) => (
+                                <td key={cellIdx} style={{
+                                  padding: '12px 16px',
+                                  borderBottom: '1px solid #e2e8f0',
+                                  borderRight: '1px solid #f1f5f9',
+                                  color: '#334155',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  {cell}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#64748b' }}>
+                        <p>테이블 모드로 보려면 시트가 공개되어 있어야 합니다.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -2655,6 +3736,142 @@ export default function Dashboard({ onLogout, userName }) {
           개발자 이진우
         </div>
       </div>
+
+      {/* 유튜브 채팅 보기 모달 */}
+      {ytViewSession && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={(e) => {
+            // 배경 클릭 시 모달 닫기
+            if (e.target === e.currentTarget) {
+              if (viewPollingRef.current) {
+                clearInterval(viewPollingRef.current)
+                viewPollingRef.current = null
+              }
+              setYtViewSession(null)
+              setYtViewMessages([])
+            }
+          }}
+        >
+          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '24px', width: '600px', maxWidth: '95vw', border: '1px solid rgba(255,255,255,0.1)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '4px' }}>{ytViewSession.session_name || ytViewSession.video_title}</h3>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>
+                  {ytViewSession.message_count}개 메시지 · {ytViewSession.status === 'collecting' ? '🟢 수집 중' : ytViewSession.status === 'stopped' ? '⏹️ 중지됨' : '🔴 종료됨'}
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (viewPollingRef.current) {
+                    clearInterval(viewPollingRef.current)
+                    viewPollingRef.current = null
+                  }
+                  setYtViewSession(null)
+                  setYtViewMessages([])
+                }}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '28px', cursor: 'pointer', lineHeight: 1 }}
+              >×</button>
+            </div>
+
+            {/* 채팅 목록 */}
+            <div style={{
+              flex: 1,
+              overflow: 'auto',
+              background: 'rgba(0,0,0,0.3)',
+              borderRadius: '12px',
+              padding: '16px'
+            }}>
+              {ytViewMessages.length === 0 ? (
+                <p style={{ color: '#64748b', textAlign: 'center', padding: '40px' }}>수집된 채팅이 없습니다.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {ytViewMessages.map((msg, i) => (
+                    <div key={i} style={{ display: 'flex', gap: '10px', fontSize: '13px' }}>
+                      <span style={{ color: '#64748b', minWidth: '50px' }}>{msg.time_kst}</span>
+                      <span style={{ color: '#a5b4fc', fontWeight: '600', minWidth: '80px' }}>{msg.author}</span>
+                      <span style={{ color: '#e2e8f0', flex: 1 }}>{msg.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 하단 버튼 */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              {ytViewSession.status === 'collecting' && (
+                <button
+                  onClick={async () => {
+                    await fetch('/api/tools/youtube-chat', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'stop', sessionId: ytViewSession.id })
+                    })
+                    // 새로고침
+                    const res = await fetch('/api/tools/youtube-chat', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'messages', sessionId: ytViewSession.id, limit: 200 })
+                    })
+                    const data = await res.json()
+                    if (data.success) {
+                      setYtViewSession(data.session)
+                    }
+                    // 세션 목록도 새로고침
+                    const listRes = await fetch('/api/tools/youtube-chat', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'list' })
+                    })
+                    const listData = await listRes.json()
+                    if (listData.success) setYtSessions(listData.sessions)
+                  }}
+                  style={{
+                    padding: '12px 20px',
+                    background: 'rgba(250,204,21,0.2)',
+                    border: '1px solid rgba(250,204,21,0.4)',
+                    borderRadius: '10px',
+                    color: '#fcd34d',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ⏹️ 수집 정지
+                </button>
+              )}
+              <button
+                onClick={async () => {
+                  const res = await fetch('/api/tools/youtube-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'download', sessionId: ytViewSession.id })
+                  })
+                  const data = await res.json()
+                  if (data.success) {
+                    const link = document.createElement('a')
+                    link.href = data.downloadUrl
+                    link.download = data.filename
+                    link.click()
+                  }
+                }}
+                style={{
+                  padding: '12px 20px',
+                  background: 'rgba(16,185,129,0.2)',
+                  border: '1px solid rgba(16,185,129,0.4)',
+                  borderRadius: '10px',
+                  color: '#10b981',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                📥 다운로드
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 메모 모달 */}
       {showMemoModal && (

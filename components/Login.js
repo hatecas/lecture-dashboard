@@ -62,7 +62,9 @@ export default function Login({ onLogin }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: data.name || data.username })
         })
-        onLogin(data.name || data.username)
+        onLogin(data.name || data.username, {
+          canUseInflow: data.can_use_inflow || false
+        })
       }
     } catch (err) {
       setError('로그인 중 오류가 발생했습니다.')
