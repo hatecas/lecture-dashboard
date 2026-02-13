@@ -1,5 +1,10 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
-import { GoogleGenAI } from '@google/genai'
+// @google/genai: Turbopack이 정적 분석 못하도록 변수로 우회
+const _genaiPkg = '@google/' + 'genai'
+async function getGoogleGenAI(apiKey) {
+  const mod = await import(/* webpackIgnore: true */ _genaiPkg)
+  return new mod.GoogleGenAI({ apiKey })
+}
 // youtube-caption-extractor: Turbopack이 정적 분석 못하도록 변수로 우회
 const _captionPkg = 'youtube-caption-' + 'extractor'
 async function getSubtitles(options) {
@@ -209,7 +214,7 @@ async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgres
 
 // Helper: Analyze uploaded file with Gemini (via File API)
 async function analyzeFileWithGemini(fileBuffer, fileName, mimeType, prompt, geminiKey, onProgress) {
-  const ai = new GoogleGenAI({ apiKey: geminiKey })
+  const ai = await getGoogleGenAI(geminiKey)
 
   onProgress('Gemini File API에 업로드 중...')
 
