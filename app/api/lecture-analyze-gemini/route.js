@@ -1,6 +1,12 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { GoogleGenAI } from '@google/genai'
 import { getSubtitles } from 'youtube-caption-extractor'
+import { createClient } from '@supabase/supabase-js'
+
+// Supabase client for caching
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null
 
 // Long-running route: 5 min timeout for processing large video files
 export const maxDuration = 300
@@ -49,26 +55,15 @@ async function fetchYoutubeCaptions(videoId, onProgress) {
   }
 }
 
-// Helper: Analyze text transcript with Gemini (text-only, no video)
-async function analyzeTranscriptWithGemini(transcript, prompt, geminiKey, onProgress) {
-  onProgress('Gemini로 자막 텍스트 분석 중...')
-
-  const maxChars = 120000
-  const truncated = transcript.length > maxChars
-    ? transcript.slice(0, maxChars) + '\n\n...(이하 생략)'
-    : transcript
-
+// Helper: Call Gemini API once with given text
+async function callGemini(text, geminiKey) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: `${prompt}\n\n---\n\n${truncated}` }
-          ]
-        }]
+        contents: [{ parts: [{ text }] }]
       })
     }
   )
@@ -80,8 +75,94 @@ async function analyzeTranscriptWithGemini(transcript, prompt, geminiKey, onProg
     throw new Error(`Gemini API 오류: ${errMsg}`)
   }
 
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+}
+
+// Helper: Split transcript into chunks by character limit, respecting sentence boundaries
+function splitTranscript(transcript, maxChars = 100000) {
+  if (transcript.length <= maxChars) return [transcript]
+
+  const chunks = []
+  let remaining = transcript
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChars) {
+      chunks.push(remaining)
+      break
+    }
+
+    // Find a good split point (sentence boundary near maxChars)
+    let splitAt = remaining.lastIndexOf('. ', maxChars)
+    if (splitAt < maxChars * 0.5) splitAt = remaining.lastIndexOf(' ', maxChars)
+    if (splitAt < maxChars * 0.5) splitAt = maxChars
+
+    chunks.push(remaining.slice(0, splitAt + 1))
+    remaining = remaining.slice(splitAt + 1)
+  }
+
+  return chunks
+}
+
+// Helper: Analyze text transcript with Gemini — supports Map-Reduce for long transcripts
+async function analyzeTranscriptWithGemini(transcript, prompt, geminiKey, onProgress) {
+  const CHUNK_LIMIT = 100000 // ~100k chars per chunk
+
+  // Short transcript: single-pass analysis
+  if (transcript.length <= CHUNK_LIMIT) {
+    onProgress('Gemini로 자막 텍스트 분석 중...')
+    const result = await callGemini(`${prompt}\n\n---\n\n${transcript}`, geminiKey)
+    onProgress('분석 완료!')
+    return result || '분석 결과가 비어있습니다.'
+  }
+
+  // Long transcript: Map-Reduce
+  const chunks = splitTranscript(transcript, CHUNK_LIMIT)
+  onProgress(`장시간 강의 감지 (${transcript.length.toLocaleString()}자) — ${chunks.length}개 구간으로 분할 분석합니다...`)
+
+  // MAP phase: summarize each chunk in parallel
+  const mapPrompt = `당신은 온라인 강의 분석 전문가입니다. 아래는 장시간 강의의 일부 구간입니다.
+이 구간의 내용을 다음 형식으로 상세하게 요약해주세요:
+- 핵심 내용 요약 (5~10문장)
+- 주요 키워드 및 반복 메시지
+- 판매 전환 포인트 (수강 유도, 할인, 긴급성 등)
+- 수강생 반응 유도 구간
+- 특이사항
+
+구간 내용:\n\n`
+
+  const summaries = []
+
+  // Process chunks in parallel batches of 3 (to respect Gemini rate limits)
+  const BATCH_SIZE = 3
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE)
+    const batchPromises = batch.map((chunk, j) => {
+      const chunkIdx = i + j + 1
+      onProgress(`구간 ${chunkIdx}/${chunks.length} 분석 중...`)
+      return callGemini(`${mapPrompt}${chunk}`, geminiKey)
+    })
+
+    const results = await Promise.all(batchPromises)
+    summaries.push(...results)
+    onProgress(`${Math.min(i + BATCH_SIZE, chunks.length)}/${chunks.length} 구간 분석 완료`)
+  }
+
+  // REDUCE phase: combine all summaries into final analysis
+  onProgress('전체 구간 종합 분석 중...')
+
+  const reduceInput = summaries.map((s, i) => `=== 구간 ${i + 1}/${chunks.length} ===\n${s}`).join('\n\n')
+  const reducePrompt = `아래는 장시간 강의(총 ${chunks.length}개 구간)의 구간별 분석 결과입니다.
+이 모든 구간의 분석을 종합하여, 다음 원본 프롬프트의 형식에 맞게 최종 분석 리포트를 작성해주세요.
+
+[원본 분석 프롬프트]
+${prompt}
+
+[구간별 분석 결과]
+${reduceInput}`
+
+  const finalAnalysis = await callGemini(reducePrompt, geminiKey)
   onProgress('분석 완료!')
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '분석 결과가 비어있습니다.'
+  return finalAnalysis || '분석 결과가 비어있습니다.'
 }
 
 // Helper: Analyze YouTube URL with Gemini via REST API (v1beta) - fallback
@@ -204,6 +285,29 @@ export async function POST(request) {
           const videoId = extractVideoId(youtubeUrl)
           if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
 
+          // 캐시 확인: 같은 영상 + 같은 프롬프트의 기존 분석 결과
+          const promptHash = prompt.length + '_' + prompt.slice(0, 50).replace(/\s+/g, '')
+          const cacheKey = `${videoId}_${promptHash}`
+
+          if (supabase) {
+            try {
+              const { data: cached } = await supabase
+                .from('lecture_analysis_cache')
+                .select('analysis')
+                .eq('cache_key', cacheKey)
+                .single()
+
+              if (cached?.analysis) {
+                sendProgress('캐시 적중', 95, '이전에 분석한 결과를 불러옵니다.')
+                analysis = cached.analysis
+
+                sseEvent(controller, encoder, { type: 'result', analysis })
+                controller.close()
+                return
+              }
+            } catch { /* cache miss, continue */ }
+          }
+
           // 1차: YouTube 자막 추출 시도 (빠르고 무료)
           sendProgress('자막 추출 시도', 10, 'YouTube 자막을 가져오는 중...')
 
@@ -225,6 +329,15 @@ export async function POST(request) {
             analysis = await analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, (msg) => {
               sendProgress('Gemini 분석 중', 50, msg)
             })
+          }
+
+          // 캐시 저장 (fire-and-forget)
+          if (supabase && analysis) {
+            supabase
+              .from('lecture_analysis_cache')
+              .upsert({ cache_key: cacheKey, video_id: videoId, analysis, created_at: new Date().toISOString() })
+              .then(() => {})
+              .catch(() => {})
           }
 
           sendProgress('분석 완료', 95, '결과를 정리합니다...')
