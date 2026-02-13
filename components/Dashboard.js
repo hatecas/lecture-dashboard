@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
+import HelpTooltip from './HelpTooltip'
 
 export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sessions, setSessions] = useState([])
@@ -76,6 +77,29 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const pollingRef = useRef(null)
   const viewPollingRef = useRef(null) // 채팅 보기 자동 새로고침용
 
+  // 업데이트 공지 모달
+  const [showUpdateModal, setShowUpdateModal] = useState(false)
+  const UPDATE_VERSION = '2025-02-12' // 업데이트 날짜 키
+  const UPDATE_NOTES = [
+    { icon: '📊', title: '시트 통합 다중 시트 지원', desc: '여러 Google Sheets를 추가/전환할 수 있습니다. 시트 추가 버튼으로 URL만 넣으면 자동 등록됩니다.' },
+    { icon: '🎬', title: '유튜브 세션 자동 로드', desc: '유튜브 채팅 수집 탭 진입 시 세션 목록이 자동으로 로드됩니다.' },
+    { icon: '🐛', title: '모달 버그 수정', desc: '모달 닫은 후 다시 열리는 버그를 수정했습니다.' },
+    { icon: '⚡', title: '성능 개선', desc: '모달 로딩 속도 개선 및 좀비 세션 자동 정리 기능이 추가되었습니다.' },
+  ]
+
+  useEffect(() => {
+    const dismissed = localStorage.getItem(`update_dismissed_${UPDATE_VERSION}`)
+    if (!dismissed) {
+      setShowUpdateModal(true)
+    }
+  }, [])
+
+  const dismissUpdateToday = () => {
+    const today = new Date().toISOString().split('T')[0]
+    localStorage.setItem(`update_dismissed_${UPDATE_VERSION}`, today)
+    setShowUpdateModal(false)
+  }
+
   // 리소스 허브 상태
   const [currentResource, setCurrentResource] = useState(null) // 현재 선택된 탭 gid
   const [resourceZoom, setResourceZoom] = useState(75) // 줌 레벨 (%) - 기본 75%로 더 많이 보이게
@@ -85,29 +109,82 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sheetApiLoading, setSheetApiLoading] = useState(false)
   const [iframeLoading, setIframeLoading] = useState(true) // iframe 로딩 상태
 
-  // Google Sheets API 설정 (하드코딩)
-  const SHEETS_API_KEY = 'AIzaSyB0EjAxzu3JxwqZYf0cfB4sN5DNbZFSpbA'
-  const SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1uBREvtjZWsqdlCVKInjb9ZkxzH5v-R7SLPrlHdCqV54/edit'
+  // Google Sheets 설정
+  const [savedSheets, setSavedSheets] = useState([]) // 저장된 시트 목록
+  const [selectedSheet, setSelectedSheet] = useState(null) // 현재 선택된 시트
+  const [showAddSheet, setShowAddSheet] = useState(false) // 시트 추가 모달
+  const [addSheetUrl, setAddSheetUrl] = useState('')
+  const [addSheetName, setAddSheetName] = useState('')
+  const [addSheetLoading, setAddSheetLoading] = useState(false)
   const [sheetTabs, setSheetTabs] = useState([]) // 시트 탭 목록
   const [sheetsLoading, setSheetsLoading] = useState(false)
   const [spreadsheetId, setSpreadsheetId] = useState('')
   const [spreadsheetTitle, setSpreadsheetTitle] = useState('')
+  const [showDeleteSheet, setShowDeleteSheet] = useState(false) // 시트 삭제 모달
+  const [deleteSheetIds, setDeleteSheetIds] = useState([]) // 삭제 선택된 시트 ID들
+  const [deleteSheetLoading, setDeleteSheetLoading] = useState(false)
+  const [permissionError, setPermissionError] = useState(null) // 권한 에러 시 서비스 계정 이메일
+
+  // CS AI 상태
+  const [csMessages, setCsMessages] = useState([])
+  const [csInput, setCsInput] = useState('')
+  const [csSending, setCsSending] = useState(false)
+  const [csImages, setCsImages] = useState([]) // { file, preview, data, mediaType }
+  const [csMode, setCsMode] = useState('chat') // 'chat' | 'policy'
+  const [csPolicies, setCsPolicies] = useState([])
+  const [csPoliciesLoading, setCsPoliciesLoading] = useState(false)
+  const [csEditPolicy, setCsEditPolicy] = useState(null) // 편집 중인 정책
+  const [csNewPolicy, setCsNewPolicy] = useState({ title: '', category: '환불', content: '' })
+  const [csShowAddPolicy, setCsShowAddPolicy] = useState(false)
+  const [csHistory, setCsHistory] = useState([])
+  const [csHistoryLoading, setCsHistoryLoading] = useState(false)
+  const [csHistoryTotal, setCsHistoryTotal] = useState(0)
+  const [csHistoryPage, setCsHistoryPage] = useState(1)
+  const [csHistorySearch, setCsHistorySearch] = useState('')
+  const [csShowAddHistory, setCsShowAddHistory] = useState(false)
+  const [csNewHistory, setCsNewHistory] = useState({ category: '일반', customer_inquiry: '', agent_response: '', tags: '', result: '' })
+  const [csUploadingHistory, setCsUploadingHistory] = useState(false)
+  const [csSyncing, setCsSyncing] = useState(false)
+  const [csSyncResult, setCsSyncResult] = useState(null)
+  const csEndRef = useRef(null)
+  const csFileRef = useRef(null)
+  const csHistoryFileRef = useRef(null)
+
+  // 서버에서 시트 목록 로드
+  const loadSavedSheets = async () => {
+    try {
+      const response = await fetch('/api/saved-sheets', {
+        headers: getAuthHeaders()
+      })
+      if (!response.ok) throw new Error('Failed to load')
+      const result = await response.json()
+      const serverSheets = (result.sheets || []).map(s => ({
+        id: s.id.toString(),
+        name: s.name,
+        url: s.url
+      }))
+      return serverSheets
+    } catch {
+      return []
+    }
+  }
 
   // 시트 탭 목록 가져오기
-  const fetchSheetTabs = async () => {
+  const fetchSheetTabs = async (sheetUrl) => {
     setSheetsLoading(true)
     try {
       const response = await fetch('/api/sheets-meta', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ spreadsheetUrl: SHEETS_URL, apiKey: SHEETS_API_KEY })
+        body: JSON.stringify({ spreadsheetUrl: sheetUrl })
       })
 
       const data = await response.json()
 
       if (!response.ok) {
-        // API 할당량 초과 체크
-        if (response.status === 429 || (data.error && data.error.includes('quota'))) {
+        if (response.status === 403 && data.serviceEmail) {
+          setPermissionError(data.serviceEmail)
+        } else if (response.status === 429 || (data.error && data.error.includes('quota'))) {
           alert('Google Sheets API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.')
         } else {
           alert(data.error || '시트 정보를 가져올 수 없습니다.')
@@ -120,9 +197,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       setSpreadsheetTitle(data.spreadsheetTitle)
 
       // 첫 번째 탭 선택
-      if (data.tabs.length > 0 && !currentResource) {
+      if (data.tabs.length > 0) {
         setCurrentResource(data.tabs[0].gid)
-        // API 모드면 데이터도 가져오기
         if (resourceViewMode === 'api') {
           fetchSheetDataByApi(data.spreadsheetId, data.tabs[0].title)
         }
@@ -136,6 +212,96 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     }
   }
 
+  // 시트 선택 핸들러
+  const selectSheet = (sheet) => {
+    setSelectedSheet(sheet)
+    setSheetTabs([])
+    setSheetApiData(null)
+    setCurrentResource(null)
+    setSpreadsheetId('')
+    setSpreadsheetTitle('')
+    fetchSheetTabs(sheet.url)
+  }
+
+  // 시트 추가
+  const addNewSheet = async () => {
+    if (!addSheetUrl) return
+    const urlMatch = addSheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)
+    if (!urlMatch) {
+      alert('올바른 Google Sheets URL이 아닙니다.')
+      return
+    }
+    setAddSheetLoading(true)
+    try {
+      const response = await fetch('/api/sheets-meta', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ spreadsheetUrl: addSheetUrl })
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        alert(data.error || '시트 정보를 가져올 수 없습니다.')
+        return
+      }
+      const name = addSheetName.trim() || data.spreadsheetTitle || '새 시트'
+      // 서버에 저장
+      const saveResponse = await fetch('/api/saved-sheets', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ name, url: addSheetUrl })
+      })
+      if (!saveResponse.ok) {
+        const saveErr = await saveResponse.json()
+        alert(saveErr.error || '시트 저장에 실패했습니다.')
+        return
+      }
+      const saveResult = await saveResponse.json()
+      const newSheet = { id: saveResult.sheet.id.toString(), name, url: addSheetUrl }
+      setSavedSheets(prev => [...prev, newSheet])
+      setShowAddSheet(false)
+      setAddSheetUrl('')
+      setAddSheetName('')
+      selectSheet(newSheet)
+    } catch (error) {
+      alert('시트 정보를 가져오는 중 오류가 발생했습니다.')
+    } finally {
+      setAddSheetLoading(false)
+    }
+  }
+
+  // 시트 삭제 (서버)
+  const removeSheets = async (sheetIds) => {
+    const serverIds = sheetIds.map(id => parseInt(id))
+    if (serverIds.length === 0) return
+
+    setDeleteSheetLoading(true)
+    try {
+      const response = await fetch('/api/saved-sheets', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ ids: serverIds })
+      })
+      if (!response.ok) {
+        const err = await response.json()
+        alert(err.error || '시트 삭제에 실패했습니다.')
+        return
+      }
+      setSavedSheets(prev => prev.filter(s => !sheetIds.includes(s.id)))
+      if (selectedSheet && sheetIds.includes(selectedSheet.id)) {
+        setSelectedSheet(null)
+        setSheetTabs([])
+        setSheetApiData(null)
+        setCurrentResource(null)
+      }
+      setShowDeleteSheet(false)
+      setDeleteSheetIds([])
+    } catch {
+      alert('시트 삭제 중 오류가 발생했습니다.')
+    } finally {
+      setDeleteSheetLoading(false)
+    }
+  }
+
   // API로 시트 데이터 가져오기
   const fetchSheetDataByApi = async (sheetId, sheetName) => {
     setSheetApiLoading(true)
@@ -143,7 +309,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     try {
       const params = new URLSearchParams({
         spreadsheetId: sheetId || spreadsheetId,
-        apiKey: SHEETS_API_KEY,
         sheetName: sheetName
       })
 
@@ -350,10 +515,10 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [ytCollecting])
 
-  // 리소스 탭 진입 시 시트 탭 자동 로드
+  // 시트 통합 탭 진입 시 저장된 시트 목록 로드
   useEffect(() => {
-    if (currentTab === 'resources' && sheetTabs.length === 0 && !sheetsLoading) {
-      fetchSheetTabs()
+    if (currentTab === 'resources' && savedSheets.length === 0) {
+      loadSavedSheets().then(sheets => setSavedSheets(sheets))
     }
   }, [currentTab])
 
@@ -1329,7 +1494,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             툴
           </button>
 
-          {/* 리소스 메뉴 */}
+          {/* 시트 통합 메뉴 */}
           <button onClick={() => { setCurrentTab('resources'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
@@ -1348,9 +1513,33 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
             gap: sidebarCollapsed ? '4px' : '10px',
             transition: 'all 0.3s ease'
-          }} title="리소스">
+          }} title="시트 통합">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📁</span>
-            리소스
+            시트 통합
+          </button>
+
+          {/* CS AI 메뉴 */}
+          <button onClick={() => { setCurrentTab('cs-ai'); if(isMobile) setMobileMenuOpen(false) }} style={{
+            width: '100%',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+            background: currentTab === 'cs-ai' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'cs-ai' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'cs-ai' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'cs-ai' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
+            alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+            gap: sidebarCollapsed ? '4px' : '10px',
+            transition: 'all 0.3s ease'
+          }} title="CS AI">
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🤖</span>
+            CS AI
           </button>
         </div>
       </div>
@@ -1482,6 +1671,10 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           {currentTab === 'dashboard' && (
             <>
               {/* 지표 카드 - 글래스모피즘 + 그라데이션 테두리 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '15px', fontWeight: '600', color: 'rgba(255,255,255,0.7)' }}>핵심 지표</span>
+                <HelpTooltip text={"선택한 강사/기수의 핵심 성과지표입니다.\n시트 동기화 데이터 또는 직접 입력한 데이터를 표시합니다."} />
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px', marginBottom: '24px' }}>
                 <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(96,165,250,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(167,139,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
                   <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
@@ -1522,7 +1715,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
                 <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
                   <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>⏰ 무료특강 후 시간별 구매 추이 <HelpTooltip text={"무료특강 종료 후 시간대별 구매 건수를\n차트로 보여줍니다.\n우측 드롭다운으로 시간 간격(5~30분)을\n조절할 수 있습니다."} /></span>
                     <select
                       value={timelineInterval}
                       onChange={(e) => setTimelineInterval(parseInt(e.target.value))}
@@ -1594,7 +1787,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   )}
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>💵 영업이익 현황</div>
+                  <div style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>💵 영업이익 현황 <HelpTooltip text={"매출에서 광고비, 강사료 등 비용을\n차감한 최종 영업이익과 이익률입니다.\n프로그레스 바로 수익성을 한눈에\n확인할 수 있습니다."} /></div>
                   {(sheetData?.revenue || currentSession.revenue > 0) ? (() => {
                     const profit = sheetData?.operatingProfit || currentSession.operating_profit || 0
                     const margin = sheetData?.profitMargin ?? currentSession.profit_margin ?? 0
@@ -1630,7 +1823,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 const revenuePerPurchase = sheetData.totalPurchases > 0 ? Math.round(sheetData.revenue / sheetData.totalPurchases) : 0
                 return (
                   <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)', marginBottom: '24px' }}>
-                    <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px', color: 'rgba(255,255,255,0.8)' }}>📈 광고 성과</div>
+                    <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px', color: 'rgba(255,255,255,0.8)', display: 'flex', alignItems: 'center', gap: '8px' }}>📈 광고 성과 <HelpTooltip text={"ROAS, GDN/메타 전환단가, 총 광고비 등\n광고 효율을 한눈에 파악할 수 있습니다.\nROAS = 매출 ÷ 광고비 (높을수록 좋음)\n전환단가 = 광고비 ÷ 결제건수 (낮을수록 좋음)"} /></div>
                     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '12px' }}>
                       <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(255,255,255,0.08)' }}>
                         <div style={{ fontSize: '12px', color: '#60a5fa', marginBottom: '6px', fontWeight: '500' }}>ROAS (광고수익률)</div>
@@ -1668,7 +1861,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {/* 유튜브 성과 */}
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600' }}>📺 유튜브 출연 성과</div>
+                  <div style={{ fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>📺 유튜브 출연 성과 <HelpTooltip text={"유튜브 채널 출연 영상의 조회수와\n전환(구매) 건수를 관리합니다.\n+ 추가 버튼으로 유튜브 링크를 등록하면\n조회수를 자동으로 가져옵니다."} /></div>
                   <button onClick={() => setShowYoutubeModal(true)} style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: '8px', padding: '8px 14px', color: '#fb7185', fontSize: '13px', cursor: 'pointer' }}>+ 추가</button>
                 </div>
                 {youtubeLinks.length > 0 ? (
@@ -1702,9 +1895,12 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               </div>
 
               {/* AI 분석 */}
-              <button onClick={() => runAiAnalysis('dashboard')} disabled={analyzing} style={{ background: analyzing ? '#4c4c6d' : 'linear-gradient(135deg, #ec4899, #f43f5e)', border: 'none', borderRadius: '12px', padding: '14px 28px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: analyzing ? 'wait' : 'pointer', marginBottom: '24px' }}>
-                {analyzing ? '✨ AI 분석 중...' : '✨ AI 분석 실행'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
+                <button onClick={() => runAiAnalysis('dashboard')} disabled={analyzing} style={{ background: analyzing ? '#4c4c6d' : 'linear-gradient(135deg, #ec4899, #f43f5e)', border: 'none', borderRadius: '12px', padding: '14px 28px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: analyzing ? 'wait' : 'pointer' }}>
+                  {analyzing ? '✨ AI 분석 중...' : '✨ AI 분석 실행'}
+                </button>
+                <HelpTooltip text={"현재 기수의 모든 지표를 AI가 분석하여\n강점, 개선점, 추천 액션을 제공합니다.\n시트 데이터가 연동된 상태에서\n더 정확한 분석이 가능합니다."} />
+              </div>
 
               {aiAnalysis && (
                 <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(99,102,241,0.3)' }}>
@@ -1739,7 +1935,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {/* 강사 메모 */}
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600' }}>📝 강사 메모</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>📝 강사 메모 <HelpTooltip text={"각 기수별 강사 메모를 기록합니다.\n특이사항, 피드백, 개선점 등을\n자유롭게 작성하세요."} /></div>
                   <button onClick={() => setShowMemoModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}>메모 추가</button>
                 </div>
                 {memos.length > 0 ? (
@@ -1771,7 +1967,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 onDrop={handleDrop}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600' }}>📎 첨부파일 & 링크</div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>📎 첨부파일 & 링크 <HelpTooltip text={"기수별 관련 파일과 링크를 관리합니다.\n파일 업로드, 폴더 업로드, 드래그&드롭을\n모두 지원합니다.\n링크는 URL, 제목, 설명을 입력할 수 있습니다."} /></div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <input
                       type="file"
@@ -1915,7 +2111,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             return (
               <>
                 <div style={{ marginBottom: '24px' }}>
-                  <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>🏆 랭킹</h2>
+                  <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>🏆 랭킹 <HelpTooltip text={"모든 기수의 성과를 지표별로 비교합니다.\n원하는 지표 버튼을 클릭하고\n오름차순/내림차순을 선택하세요.\n시트 동기화된 데이터 기준으로 표시됩니다."} /></h2>
                   <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
                     {METRICS.map(m => (
                       <button key={m.key} onClick={() => setRankingMetric(m.key)} style={{ padding: '8px 16px', background: rankingMetric === m.key ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)', border: rankingMetric === m.key ? 'none' : '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer', fontWeight: rankingMetric === m.key ? '600' : '400' }}>{m.label}</button>
@@ -2022,7 +2218,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
             return (
               <>
-                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>⚖️ 대조</h2>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>⚖️ 대조 <HelpTooltip text={"두 기수의 성과를 나란히 비교합니다.\n좌/우측에서 각각 강사와 기수를 선택하면\n13개 지표를 한눈에 비교할 수 있습니다.\n초록색이 더 좋은 쪽을 의미합니다."} /></h2>
                 <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center' }}>
                   {/* 좌측 선택 */}
                   <div style={{ flex: 1, display: 'flex', gap: '8px' }}>
@@ -2133,7 +2329,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           {/* 툴 탭 */}
           {currentTab === 'tools' && (
             <div>
-              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>🛠️ 업무 툴</h2>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>🛠️ 업무 툴 <HelpTooltip text={"데이터 처리 자동화 도구 모음입니다.\n각 도구 버튼을 클릭하여 사용하세요.\nExcel/CSV 파일을 업로드하면\n자동으로 매칭/정리가 진행됩니다."} /></h2>
 
               {/* 툴 서브탭 */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
@@ -2141,13 +2337,24 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   { id: 'inflow', icon: '🔀', label: '유입경로 매칭', requiresPermission: 'canUseInflow' },
                   { id: 'crm', icon: '📋', label: 'CRM 정리' },
                   { id: 'kakao', icon: '💬', label: '카톡 매칭' },
-                  { id: 'youtube', icon: '📡', label: 'YT채팅 수집' }
+                  { id: 'youtube', icon: '📡', label: '유튜브 채팅 로그 수집' }
                 ].filter(tool => !tool.requiresPermission || permissions[tool.requiresPermission]).map(tool => (
                   <button
                     key={tool.id}
-                    onClick={() => {
+                    onClick={async () => {
                       setCurrentTool(tool.id)
                       resetToolState()
+                      if (tool.id === 'youtube') {
+                        try {
+                          const res = await fetch('/api/tools/youtube-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'list' })
+                          })
+                          const data = await res.json()
+                          if (data.success) setYtSessions(data.sessions)
+                        } catch {}
+                      }
                     }}
                     style={{
                       padding: '10px 16px',
@@ -2173,7 +2380,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {currentTool === 'inflow' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>🔀 신청자-결제자 유입경로 매칭</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>🔀 신청자-결제자 유입경로 매칭 <HelpTooltip text={"무료특강 신청자 명단과 결제자 명단을\n연락처 기준으로 매칭합니다.\n좌측에 신청자, 우측에 결제자 파일을\n업로드 후 매칭 시작을 누르세요.\n결과를 Excel로 다운로드할 수 있습니다."} /></h3>
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>무료특강 신청자와 결제자 데이터를 비교하여 유입경로를 매칭합니다.</p>
                   </div>
 
@@ -2376,7 +2583,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {currentTool === 'crm' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>📋 CRM 데이터 정리</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>📋 CRM 데이터 정리 <HelpTooltip text={"CRM 데이터에서 중복을 자동 제거하고\n연락처 형식(010-XXXX-XXXX)을\n통일합니다.\n여러 파일을 한번에 업로드할 수 있으며\n정리된 결과를 Excel로 다운로드합니다."} /></h3>
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>CRM 데이터의 중복을 제거하고 연락처 형식을 통일합니다.</p>
                   </div>
 
@@ -2545,7 +2752,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {currentTool === 'kakao' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>💬 카카오톡 입장자 매칭</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>💬 카카오톡 입장자 매칭 <HelpTooltip text={"카카오톡 오픈채팅 입장 로그와\n결제자 데이터를 이름 기준으로 매칭합니다.\n좌측에 카톡 로그(TXT), 우측에 결제자\n파일을 업로드하세요.\n매칭/미매칭 결과를 확인하고\nExcel로 다운로드할 수 있습니다."} /></h3>
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>카카오톡 오픈채팅 입장 로그와 결제자 데이터를 매칭합니다.</p>
                   </div>
 
@@ -2757,7 +2964,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {currentTool === 'youtube' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>📡 유튜브 라이브 채팅 수집기</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>📡 유튜브 라이브 채팅 수집기 <HelpTooltip text={"유튜브 라이브 방송의 채팅을\n실시간으로 수집합니다.\n비디오 ID를 입력하고 수집을 시작하세요.\n특정 사용자만 필터링하거나\n세션별로 저장/다운로드할 수 있습니다."} /></h3>
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>유튜브 라이브 채팅을 실시간으로 수집하고 저장합니다.</p>
                   </div>
 
@@ -3012,7 +3219,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     </div>
 
                     {ytSessions.length === 0 ? (
-                      <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '20px' }}>저장된 세션이 없습니다. 새로고침을 눌러주세요.</p>
+                      <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '20px' }}>저장된 세션이 없습니다.</p>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '300px', overflow: 'auto' }}>
                         {ytSessions.map(session => (
@@ -3029,7 +3236,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                             <div
                               style={{ cursor: 'pointer', flex: 1 }}
                               onClick={async () => {
-                                // 세션 클릭 시 채팅 보기
+                                // 세션 클릭 시 즉시 모달 열기 (로딩 상태로)
+                                setYtViewSession(session)
+                                setYtViewMessages([])
+
+                                // DB에서 메시지 먼저 빠르게 가져오기
                                 const res = await fetch('/api/tools/youtube-chat', {
                                   method: 'POST',
                                   headers: { 'Content-Type': 'application/json' },
@@ -3039,21 +3250,55 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                 if (data.success) {
                                   setYtViewSession(data.session)
                                   setYtViewMessages(data.messages)
-                                  // 수집 중인 세션이면 자동 새로고침 시작
-                                  if (data.session.status === 'collecting') {
-                                    viewPollingRef.current = setInterval(async () => {
+                                }
+
+                                // 수집 중인 세션이면 백그라운드에서 poll + 자동 새로고침
+                                if (session.status === 'collecting') {
+                                  // 첫 poll은 백그라운드로 (모달 로딩 안 막음)
+                                  fetch('/api/tools/youtube-chat', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ action: 'poll', sessionId: session.id })
+                                  }).then(() => {
+                                    // 모달이 이미 닫혔으면 무시
+                                    if (!viewPollingRef.current) return
+                                    fetch('/api/tools/youtube-chat', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
+                                    }).then(r => r.json()).then(d => {
+                                      if (d.success && viewPollingRef.current) {
+                                        setYtViewSession(d.session)
+                                        setYtViewMessages(d.messages)
+                                      }
+                                    })
+                                  }).catch(() => {})
+
+                                  viewPollingRef.current = setInterval(async () => {
+                                    if (!viewPollingRef.current) return
+                                    try {
+                                      await fetch('/api/tools/youtube-chat', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ action: 'poll', sessionId: session.id })
+                                      })
+                                      if (!viewPollingRef.current) return
                                       const r = await fetch('/api/tools/youtube-chat', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ action: 'messages', sessionId: session.id, limit: 200 })
                                       })
                                       const d = await r.json()
-                                      if (d.success) {
+                                      if (d.success && viewPollingRef.current) {
+                                        if (d.session.status !== 'collecting') {
+                                          clearInterval(viewPollingRef.current)
+                                          viewPollingRef.current = null
+                                        }
                                         setYtViewSession(d.session)
                                         setYtViewMessages(d.messages)
                                       }
-                                    }, 10000)
-                                  }
+                                    } catch {}
+                                  }, 10000)
                                 }
                               }}
                             >
@@ -3083,6 +3328,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                     })
                                     const listData = await listRes.json()
                                     if (listData.success) setYtSessions(listData.sessions)
+                                    // 채팅 보기 모달 자동 새로고침 중지
+                                    if (viewPollingRef.current) {
+                                      clearInterval(viewPollingRef.current)
+                                      viewPollingRef.current = null
+                                    }
                                     // 내가 폴링 중이던 세션이면 폴링도 중지
                                     if (ytSessionId === session.id) {
                                       if (pollingRef.current) {
@@ -3168,13 +3418,278 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             </div>
           )}
 
-          {/* 리소스 탭 */}
+          {/* 시트 통합 탭 */}
           {currentTab === 'resources' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '22px', fontWeight: '700' }}>📁 리소스 {spreadsheetTitle && `- ${spreadsheetTitle}`}</h2>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>📁 시트 통합 <HelpTooltip text={"구글 스프레드시트를 연동하여\n대시보드에서 바로 확인할 수 있습니다.\n+ 시트 추가로 URL을 등록하고\n탭을 클릭하여 데이터를 확인하세요.\n임베드/테이블 두 가지 뷰 모드를 지원합니다."} /></h2>
+                {savedSheets.length > 0 && (
+                  <button
+                    onClick={() => { setShowDeleteSheet(true); setDeleteSheetIds([]) }}
+                    style={{
+                      padding: '8px 16px',
+                      background: 'rgba(239,68,68,0.15)',
+                      border: '1px solid rgba(239,68,68,0.3)',
+                      borderRadius: '8px',
+                      color: '#f87171',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    🗑️ 시트 삭제
+                  </button>
+                )}
               </div>
 
+              {/* 시트 선택 버튼들 */}
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                {savedSheets.map(sheet => (
+                  <button
+                    key={sheet.id}
+                    onClick={() => selectSheet(sheet)}
+                    style={{
+                      padding: '14px 24px',
+                      background: selectedSheet?.id === sheet.id ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
+                      border: selectedSheet?.id === sheet.id ? '2px solid #818cf8' : '2px solid rgba(255,255,255,0.1)',
+                      borderRadius: '12px',
+                      color: '#fff',
+                      fontSize: '15px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      minWidth: '160px'
+                    }}
+                  >
+                    📊 {sheet.name}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setShowAddSheet(true)}
+                  style={{
+                    padding: '14px 24px',
+                    background: 'transparent',
+                    border: '2px dashed rgba(255,255,255,0.2)',
+                    borderRadius: '12px',
+                    color: 'rgba(255,255,255,0.5)',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    minWidth: '160px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  + 시트 추가
+                </button>
+              </div>
+
+              {/* 시트 추가 모달 */}
+              {showAddSheet && (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0,0,0,0.6)', zIndex: 10000,
+                  display: 'flex', justifyContent: 'center', alignItems: 'center'
+                }} onClick={() => { setShowAddSheet(false); setAddSheetUrl(''); setAddSheetName('') }}>
+                  <div onClick={e => e.stopPropagation()} style={{
+                    background: '#1e293b', borderRadius: '16px', padding: '30px',
+                    width: '480px', maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '20px' }}>시트 추가</h3>
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '6px' }}>Google Sheets URL</label>
+                      <input
+                        value={addSheetUrl}
+                        onChange={e => setAddSheetUrl(e.target.value)}
+                        placeholder="https://docs.google.com/spreadsheets/d/..."
+                        style={{
+                          width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px',
+                          color: '#fff', fontSize: '14px', outline: 'none', boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: '24px' }}>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '6px' }}>시트 이름 (비워두면 자동 감지)</label>
+                      <input
+                        value={addSheetName}
+                        onChange={e => setAddSheetName(e.target.value)}
+                        placeholder="예: 주간 보고 시트"
+                        style={{
+                          width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px',
+                          color: '#fff', fontSize: '14px', outline: 'none', boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => { setShowAddSheet(false); setAddSheetUrl(''); setAddSheetName('') }}
+                        style={{
+                          padding: '10px 20px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                          color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                        }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={addNewSheet}
+                        disabled={!addSheetUrl || addSheetLoading}
+                        style={{
+                          padding: '10px 20px',
+                          background: addSheetUrl && !addSheetLoading ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(99,102,241,0.3)',
+                          border: 'none', borderRadius: '8px',
+                          color: '#fff', fontSize: '14px', fontWeight: '600',
+                          cursor: addSheetUrl && !addSheetLoading ? 'pointer' : 'not-allowed'
+                        }}
+                      >
+                        {addSheetLoading ? '확인 중...' : '추가'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 시트 삭제 모달 */}
+              {showDeleteSheet && (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0,0,0,0.6)', zIndex: 10000,
+                  display: 'flex', justifyContent: 'center', alignItems: 'center'
+                }} onClick={() => { setShowDeleteSheet(false); setDeleteSheetIds([]) }}>
+                  <div onClick={e => e.stopPropagation()} style={{
+                    background: '#1e293b', borderRadius: '16px', padding: '30px',
+                    width: '480px', maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>시트 삭제</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '20px' }}>삭제할 시트를 선택하세요.</p>
+                    <div style={{ maxHeight: '300px', overflowY: 'auto', marginBottom: '20px' }}>
+                      {savedSheets.length === 0 ? (
+                        <p style={{ color: '#64748b', textAlign: 'center', padding: '20px' }}>삭제할 수 있는 시트가 없습니다.</p>
+                      ) : (
+                        savedSheets.map(sheet => (
+                          <label
+                            key={sheet.id}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: '12px',
+                              padding: '12px 16px', marginBottom: '8px',
+                              background: deleteSheetIds.includes(sheet.id) ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.03)',
+                              border: deleteSheetIds.includes(sheet.id) ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(255,255,255,0.08)',
+                              borderRadius: '10px', cursor: 'pointer', transition: 'all 0.2s ease'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={deleteSheetIds.includes(sheet.id)}
+                              onChange={() => {
+                                setDeleteSheetIds(prev =>
+                                  prev.includes(sheet.id) ? prev.filter(id => id !== sheet.id) : [...prev, sheet.id]
+                                )
+                              }}
+                              style={{ width: '18px', height: '18px', accentColor: '#ef4444', cursor: 'pointer' }}
+                            />
+                            <div>
+                              <div style={{ color: '#fff', fontSize: '14px', fontWeight: '600' }}>📊 {sheet.name}</div>
+                              <div style={{ color: '#64748b', fontSize: '11px', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '350px' }}>{sheet.url}</div>
+                            </div>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => { setShowDeleteSheet(false); setDeleteSheetIds([]) }}
+                        style={{
+                          padding: '10px 20px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                          color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                        }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={() => removeSheets(deleteSheetIds)}
+                        disabled={deleteSheetIds.length === 0 || deleteSheetLoading}
+                        style={{
+                          padding: '10px 20px',
+                          background: deleteSheetIds.length > 0 && !deleteSheetLoading ? 'rgba(239,68,68,0.8)' : 'rgba(239,68,68,0.2)',
+                          border: 'none', borderRadius: '8px',
+                          color: '#fff', fontSize: '14px', fontWeight: '600',
+                          cursor: deleteSheetIds.length > 0 && !deleteSheetLoading ? 'pointer' : 'not-allowed'
+                        }}
+                      >
+                        {deleteSheetLoading ? '삭제 중...' : `삭제 (${deleteSheetIds.length})`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {permissionError && (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0,0,0,0.6)', zIndex: 10000,
+                  display: 'flex', justifyContent: 'center', alignItems: 'center'
+                }} onClick={() => setPermissionError(null)}>
+                  <div onClick={e => e.stopPropagation()} style={{
+                    background: '#1e293b', borderRadius: '16px', padding: '30px',
+                    width: '520px', maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.1)'
+                  }}>
+                    <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#f87171', marginBottom: '12px' }}>스프레드시트 접근 권한 없음</h3>
+                    <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.6', marginBottom: '16px' }}>
+                      이 스프레드시트가 &quot;제한됨&quot;으로 설정되어 있습니다.<br />
+                      아래 이메일을 복사하여 스프레드시트 공유 설정에서 <strong style={{ color: '#fff' }}>뷰어</strong> 권한을 부여해주세요.
+                    </p>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '10px', padding: '14px 16px', marginBottom: '16px'
+                    }}>
+                      <span style={{ color: '#e2e8f0', fontSize: '13px', flex: 1, wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                        {permissionError}
+                      </span>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(permissionError)
+                          alert('복사되었습니다!')
+                        }}
+                        style={{
+                          padding: '6px 14px', background: 'rgba(99,102,241,0.8)',
+                          border: 'none', borderRadius: '6px', color: '#fff',
+                          fontSize: '13px', fontWeight: '600', cursor: 'pointer', whiteSpace: 'nowrap'
+                        }}
+                      >
+                        복사
+                      </button>
+                    </div>
+                    <p style={{ color: '#64748b', fontSize: '12px', lineHeight: '1.5', marginBottom: '20px' }}>
+                      구글 스프레드시트 → 공유 버튼 → 위 이메일 추가 → 뷰어 선택 → 전송
+                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={() => setPermissionError(null)}
+                        style={{
+                          padding: '10px 24px', background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                          color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                        }}
+                      >
+                        확인
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 선택된 시트가 없으면 안내 */}
+              {!selectedSheet ? (
+                <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
+                  <p>위에서 시트를 선택해주세요.</p>
+                </div>
+              ) : (
+              <>
               {/* 시트 탭 버튼들 */}
               {sheetTabs.length > 0 ? (
                 <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap', maxHeight: '80px', overflowY: 'auto', padding: '4px 0' }}>
@@ -3219,6 +3734,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {sheetTabs.length > 0 && (
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
                   {/* 뷰 모드 토글 */}
+                  <HelpTooltip text={"임베드: 구글 시트 원본을 그대로 표시\n(스타일 유지, 로딩 느림)\n\n테이블: API로 데이터만 가져와 표시\n(빠른 로딩, 정렬 가능)"} size={13} />
                   <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '2px' }}>
                     <button
                       onClick={() => setResourceViewMode('iframe')}
@@ -3480,9 +3996,343 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               ) : (
                 <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
                   <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
-                  <p>시트를 선택해주세요.</p>
+                  <p>시트 탭을 선택해주세요.</p>
                 </div>
               )}
+              </>
+              )}
+            </div>
+          )}
+
+          {/* CS AI 탭 */}
+          {currentTab === 'cs-ai' && (
+            <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)' }}>
+              {/* 헤더 */}
+              <div style={{ marginBottom: '16px', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h2 style={{ fontSize: '22px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    🤖 CS 대응 AI
+                    <HelpTooltip text={"고객 문의 내용을 입력하면\nAI가 채널톡 대화 조회, 정책 검색,\n상담 이력 검색을 자동으로 수행하여\n전문적인 CS 답변을 생성합니다.\n\n예시:\n• '김철수 채널톡 가져와'\n• '환불 요청 어떻게 대응해?'\n• '결제 오류 문의 답변 만들어줘'"} />
+                  </h2>
+                  <button
+                    onClick={() => {
+                      if (csSyncing) return
+                      setCsSyncing(true)
+                      setCsSyncResult(null)
+                      fetch('/api/cs-history/sync', {
+                        method: 'POST',
+                        headers: getAuthHeaders()
+                      })
+                        .then(res => res.json())
+                        .then(data => {
+                          setCsSyncResult(data.error ? `실패: ${data.error}` : data.message)
+                          setCsSyncing(false)
+                          setTimeout(() => setCsSyncResult(null), 5000)
+                        })
+                        .catch(() => {
+                          setCsSyncResult('동기화 중 오류 발생')
+                          setCsSyncing(false)
+                          setTimeout(() => setCsSyncResult(null), 5000)
+                        })
+                    }}
+                    disabled={csSyncing}
+                    style={{
+                      padding: '8px 16px',
+                      background: csSyncing ? 'rgba(99,102,241,0.2)' : 'rgba(16,185,129,0.1)',
+                      border: `1px solid ${csSyncing ? 'rgba(99,102,241,0.3)' : 'rgba(16,185,129,0.25)'}`,
+                      borderRadius: '10px',
+                      color: csSyncing ? '#a5b4fc' : '#34d399',
+                      fontSize: '13px',
+                      cursor: csSyncing ? 'not-allowed' : 'pointer',
+                      fontWeight: '500',
+                      display: 'flex', alignItems: 'center', gap: '6px'
+                    }}
+                  >{csSyncing ? '⏳ 동기화 중...' : '🔄 채널톡 이력 동기화'}</button>
+                </div>
+                {csSyncResult && (
+                  <div style={{
+                    marginTop: '8px', padding: '8px 14px', borderRadius: '8px',
+                    background: csSyncResult.startsWith('실패') ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
+                    border: `1px solid ${csSyncResult.startsWith('실패') ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}`,
+                    color: csSyncResult.startsWith('실패') ? '#f87171' : '#34d399',
+                    fontSize: '13px'
+                  }}>{csSyncResult}</div>
+                )}
+              </div>
+
+              <>
+                  {/* 채팅 영역 */}
+                  <div style={{
+                    flex: 1, overflowY: 'auto', background: 'rgba(255,255,255,0.03)', borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.08)', padding: '20px', marginBottom: '16px',
+                    display: 'flex', flexDirection: 'column', gap: '16px'
+                  }}>
+                    {csMessages.length === 0 ? (
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748b', gap: '16px' }}>
+                        <div style={{ fontSize: '64px' }}>🤖</div>
+                        <div style={{ textAlign: 'center' }}>
+                          <p style={{ fontSize: '18px', fontWeight: '600', color: '#94a3b8', marginBottom: '8px' }}>CS 대응 AI</p>
+                          <p style={{ fontSize: '14px', lineHeight: '1.6' }}>고객 문의 내용을 입력하면<br/>전문적인 CS 답변을 생성해드립니다</p>
+                          <p style={{ fontSize: '12px', color: '#475569', marginTop: '8px' }}>이미지도 첨부할 수 있습니다 (스크린샷, 결제내역 등)</p>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', marginTop: '8px' }}>
+                          {['환불 요청 고객 대응', '결제 오류 문의', '강의 불만 컴플레인', '수강 방법 문의'].map(example => (
+                            <button key={example} onClick={() => setCsInput(example)} style={{
+                              padding: '8px 16px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)',
+                              borderRadius: '20px', color: '#a5b4fc', fontSize: '13px', cursor: 'pointer'
+                            }}>{example}</button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      csMessages.map((msg, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: '10px' }}>
+                          {msg.role === 'assistant' && (
+                            <div style={{
+                              width: '36px', height: '36px', borderRadius: '50%',
+                              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0
+                            }}>🤖</div>
+                          )}
+                          <div style={{
+                            maxWidth: '75%', padding: '14px 18px',
+                            borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                            background: msg.role === 'user' ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'rgba(255,255,255,0.08)',
+                            border: msg.role === 'user' ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                            color: '#e2e8f0', fontSize: '14px', lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+                          }}>
+                            {/* 이미지 미리보기 */}
+                            {msg.images && msg.images.length > 0 && (
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: msg.content ? '10px' : 0 }}>
+                                {msg.images.map((img, i) => (
+                                  <img key={i} src={img.preview} alt="" style={{
+                                    maxWidth: '200px', maxHeight: '150px', borderRadius: '8px', objectFit: 'cover'
+                                  }} />
+                                ))}
+                              </div>
+                            )}
+                            {msg.role === 'assistant' && msg.toolsUsed && (
+                              <div style={{
+                                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                padding: '4px 10px', borderRadius: '6px', marginBottom: '10px',
+                                background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)',
+                                fontSize: '11px', color: '#34d399'
+                              }}>⚡ 채널톡/정책/이력 자동 조회 완료</div>
+                            )}
+                            {msg.content}
+                            {msg.role === 'assistant' && (
+                              <button onClick={() => { navigator.clipboard.writeText(msg.content) }} style={{
+                                display: 'block', marginTop: '10px', padding: '4px 10px',
+                                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                                borderRadius: '6px', color: '#94a3b8', fontSize: '11px', cursor: 'pointer'
+                              }}>📋 복사</button>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    {csSending && (
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <div style={{
+                          width: '36px', height: '36px', borderRadius: '50%',
+                          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0
+                        }}>🤖</div>
+                        <div style={{
+                          padding: '14px 18px', borderRadius: '18px 18px 18px 4px',
+                          background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)',
+                          color: '#94a3b8', fontSize: '14px'
+                        }}>답변 생성 중...</div>
+                      </div>
+                    )}
+                    <div ref={csEndRef} />
+                  </div>
+
+                  {/* 이미지 미리보기 */}
+                  {csImages.length > 0 && (
+                    <div style={{
+                      display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '8px 12px',
+                      background: 'rgba(255,255,255,0.03)', borderRadius: '12px 12px 0 0',
+                      border: '1px solid rgba(255,255,255,0.08)', borderBottom: 'none'
+                    }}>
+                      {csImages.map((img, i) => (
+                        <div key={i} style={{ position: 'relative' }}>
+                          <img src={img.preview} alt="" style={{ width: '60px', height: '60px', borderRadius: '8px', objectFit: 'cover' }} />
+                          <button onClick={() => {
+                            URL.revokeObjectURL(img.preview)
+                            setCsImages(prev => prev.filter((_, idx) => idx !== i))
+                          }} style={{
+                            position: 'absolute', top: '-6px', right: '-6px',
+                            width: '20px', height: '20px', borderRadius: '50%',
+                            background: '#ef4444', border: 'none', color: '#fff',
+                            fontSize: '12px', cursor: 'pointer', display: 'flex',
+                            alignItems: 'center', justifyContent: 'center', lineHeight: 1
+                          }}>x</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 입력 영역 */}
+                  <div style={{
+                    display: 'flex', gap: '10px', flexShrink: 0,
+                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: csImages.length > 0 ? '0 0 16px 16px' : '16px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderTop: csImages.length > 0 ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(255,255,255,0.08)',
+                    padding: '12px'
+                  }}>
+                    <input
+                      type="file"
+                      ref={csFileRef}
+                      accept="image/*"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || [])
+                        for (const file of files) {
+                          const reader = new FileReader()
+                          reader.onload = (ev) => {
+                            const base64 = ev.target.result.split(',')[1]
+                            setCsImages(prev => [...prev, {
+                              file,
+                              preview: URL.createObjectURL(file),
+                              data: base64,
+                              mediaType: file.type
+                            }])
+                          }
+                          reader.readAsDataURL(file)
+                        }
+                        e.target.value = ''
+                      }}
+                    />
+                    <button onClick={() => csFileRef.current?.click()} title="이미지 첨부" style={{
+                      padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '12px', color: '#94a3b8', fontSize: '18px', cursor: 'pointer', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>🖼️</button>
+                    <textarea
+                      value={csInput}
+                      onChange={(e) => setCsInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          if ((csInput.trim() || csImages.length > 0) && !csSending) {
+                            const userMsg = {
+                              role: 'user',
+                              content: csInput.trim(),
+                              images: csImages.map(img => ({ preview: img.preview, data: img.data, mediaType: img.mediaType }))
+                            }
+                            const newMessages = [...csMessages, userMsg]
+                            setCsMessages(newMessages)
+                            setCsInput('')
+                            setCsImages([])
+                            setCsSending(true)
+                            setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                            fetch('/api/cs-ai', {
+                              method: 'POST',
+                              headers: getAuthHeaders(),
+                              body: JSON.stringify({ messages: newMessages.map(m => ({
+                                role: m.role, content: m.content,
+                                images: m.images?.filter(img => img.data).map(img => ({ data: img.data, mediaType: img.mediaType }))
+                              }))})
+                            })
+                              .then(res => res.json())
+                              .then(data => {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: data.reply || '답변 생성에 실패했습니다.', toolsUsed: data.toolsUsed }])
+                                setCsSending(false)
+                                setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                              })
+                              .catch(() => {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류가 발생했습니다.' }])
+                                setCsSending(false)
+                              })
+                          }
+                        }
+                      }}
+                      onPaste={(e) => {
+                        const items = e.clipboardData?.items
+                        if (!items) return
+                        for (const item of items) {
+                          if (item.type.startsWith('image/')) {
+                            e.preventDefault()
+                            const file = item.getAsFile()
+                            const reader = new FileReader()
+                            reader.onload = (ev) => {
+                              const base64 = ev.target.result.split(',')[1]
+                              setCsImages(prev => [...prev, {
+                                file,
+                                preview: URL.createObjectURL(file),
+                                data: base64,
+                                mediaType: file.type
+                              }])
+                            }
+                            reader.readAsDataURL(file)
+                          }
+                        }
+                      }}
+                      placeholder="고객 문의 내용을 입력하세요... (Enter 전송 / 이미지 붙여넣기 가능)"
+                      style={{
+                        flex: 1, padding: '12px 16px', background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#e2e8f0',
+                        fontSize: '14px', resize: 'none', minHeight: '48px', maxHeight: '120px',
+                        outline: 'none', fontFamily: 'inherit', lineHeight: '1.5'
+                      }}
+                      rows={1}
+                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <button
+                        onClick={() => {
+                          if ((csInput.trim() || csImages.length > 0) && !csSending) {
+                            const userMsg = {
+                              role: 'user',
+                              content: csInput.trim(),
+                              images: csImages.map(img => ({ preview: img.preview, data: img.data, mediaType: img.mediaType }))
+                            }
+                            const newMessages = [...csMessages, userMsg]
+                            setCsMessages(newMessages)
+                            setCsInput('')
+                            setCsImages([])
+                            setCsSending(true)
+                            setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                            fetch('/api/cs-ai', {
+                              method: 'POST',
+                              headers: getAuthHeaders(),
+                              body: JSON.stringify({ messages: newMessages.map(m => ({
+                                role: m.role, content: m.content,
+                                images: m.images?.filter(img => img.data).map(img => ({ data: img.data, mediaType: img.mediaType }))
+                              }))})
+                            })
+                              .then(res => res.json())
+                              .then(data => {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: data.reply || '답변 생성에 실패했습니다.', toolsUsed: data.toolsUsed }])
+                                setCsSending(false)
+                                setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                              })
+                              .catch(() => {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류가 발생했습니다.' }])
+                                setCsSending(false)
+                              })
+                          }
+                        }}
+                        disabled={(!csInput.trim() && csImages.length === 0) || csSending}
+                        style={{
+                          padding: '12px 20px',
+                          background: (csInput.trim() || csImages.length > 0) && !csSending ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'rgba(99,102,241,0.2)',
+                          border: 'none', borderRadius: '12px', color: '#fff', fontSize: '14px', fontWeight: '600',
+                          cursor: (csInput.trim() || csImages.length > 0) && !csSending ? 'pointer' : 'not-allowed',
+                          opacity: (csInput.trim() || csImages.length > 0) && !csSending ? 1 : 0.5, whiteSpace: 'nowrap'
+                        }}
+                      >{csSending ? '⏳' : '전송'}</button>
+                      {csMessages.length > 0 && (
+                        <button onClick={() => { setCsMessages([]); setCsInput(''); setCsImages([]) }} style={{
+                          padding: '8px 12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                          borderRadius: '10px', color: '#f87171', fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap'
+                        }}>초기화</button>
+                      )}
+                    </div>
+                  </div>
+                </>
             </div>
           )}
 
@@ -3714,7 +4564,20 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
       {/* 유튜브 채팅 보기 모달 */}
       {ytViewSession && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={(e) => {
+            // 배경 클릭 시 모달 닫기
+            if (e.target === e.currentTarget) {
+              if (viewPollingRef.current) {
+                clearInterval(viewPollingRef.current)
+                viewPollingRef.current = null
+              }
+              setYtViewSession(null)
+              setYtViewMessages([])
+            }
+          }}
+        >
           <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '24px', width: '600px', maxWidth: '95vw', border: '1px solid rgba(255,255,255,0.1)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div>
@@ -3745,7 +4608,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               padding: '16px'
             }}>
               {ytViewMessages.length === 0 ? (
-                <p style={{ color: '#64748b', textAlign: 'center', padding: '40px' }}>수집된 채팅이 없습니다.</p>
+                <p style={{ color: '#64748b', textAlign: 'center', padding: '40px' }}>
+                  {ytViewSession?.message_count > 0 ? '채팅 불러오는 중...' : '수집된 채팅이 없습니다.'}
+                </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {ytViewMessages.map((msg, i) => (
@@ -4032,6 +4897,75 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             {/* 현재 파일명 */}
             <div style={{ fontSize: '13px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 20px' }}>
               {uploadProgress.fileName}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 업데이트 공지 모달 */}
+      {showUpdateModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', zIndex: 50000,
+          display: 'flex', justifyContent: 'center', alignItems: 'center'
+        }} onClick={() => setShowUpdateModal(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(135deg, #1e293b 0%, #1a1f35 100%)',
+            borderRadius: '16px', padding: '0', width: '420px', maxWidth: '90vw',
+            border: '1px solid rgba(255,255,255,0.1)',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+            overflow: 'hidden'
+          }}>
+            {/* 헤더 */}
+            <div style={{
+              padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', position: 'relative'
+            }}>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>업데이트 안내</div>
+                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginTop: '2px' }}>2025.02.12</div>
+              </div>
+              <button
+                onClick={() => setShowUpdateModal(false)}
+                style={{
+                  background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%',
+                  width: '28px', height: '28px', color: '#fff', fontSize: '16px',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            {/* 내용 */}
+            <div style={{ padding: '20px 24px' }}>
+              {UPDATE_NOTES.map((note, i) => (
+                <div key={i} style={{
+                  display: 'flex', gap: '12px', padding: '12px 0',
+                  borderBottom: i < UPDATE_NOTES.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
+                }}>
+                  <div style={{ fontSize: '22px', flexShrink: 0, marginTop: '2px' }}>{note.icon}</div>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0', marginBottom: '4px' }}>{note.title}</div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5' }}>{note.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* 하단 */}
+            <div style={{
+              padding: '14px 24px', borderTop: '1px solid rgba(255,255,255,0.06)',
+              display: 'flex', justifyContent: 'center'
+            }}>
+              <button
+                onClick={dismissUpdateToday}
+                style={{
+                  background: 'transparent', border: 'none',
+                  color: '#64748b', fontSize: '13px', cursor: 'pointer',
+                  padding: '6px 12px', borderRadius: '6px'
+                }}
+              >
+                오늘 하루 보지 않기
+              </button>
             </div>
           </div>
         </div>
