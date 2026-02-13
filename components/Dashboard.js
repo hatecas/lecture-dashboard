@@ -4047,6 +4047,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     background: csMode === 'history' ? 'rgba(99,102,241,0.3)' : 'transparent',
                     color: csMode === 'history' ? '#a5b4fc' : '#64748b'
                   }}>📚 상담 이력</button>
+                  <button onClick={() => setCsMode('channel')} style={{
+                    padding: '8px 16px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+                    background: csMode === 'channel' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                    color: csMode === 'channel' ? '#a5b4fc' : '#64748b'
+                  }}>🔗 채널톡</button>
                 </div>
               </div>
 
@@ -4804,6 +4809,194 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                       )}
                     </>
                   )}
+                </div>
+              )}
+
+              {/* 채널톡 연동 모드 */}
+              {csMode === 'channel' && (
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  {/* 연동 상태 */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.1))',
+                    borderRadius: '16px', border: '1px solid rgba(99,102,241,0.2)', padding: '24px', marginBottom: '20px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                      <div style={{
+                        width: '48px', height: '48px', borderRadius: '12px',
+                        background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px'
+                      }}>🔗</div>
+                      <div>
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#e2e8f0' }}>채널톡 AI 자동응답</h3>
+                        <p style={{ fontSize: '13px', color: '#94a3b8' }}>고객 문의가 오면 AI가 자동으로 답변합니다</p>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '16px',
+                      display: 'flex', flexDirection: 'column', gap: '12px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '13px', color: '#94a3b8' }}>연동 상태</span>
+                        <span style={{
+                          padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+                          background: 'rgba(245,158,11,0.15)', color: '#fbbf24'
+                        }}>환경변수 설정 필요</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 설정 가이드 */}
+                  <div style={{
+                    background: 'rgba(255,255,255,0.03)', borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.08)', padding: '24px', marginBottom: '20px'
+                  }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#e2e8f0', marginBottom: '20px' }}>설정 가이드</h3>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      {/* Step 1 */}
+                      <div style={{ display: 'flex', gap: '14px' }}>
+                        <div style={{
+                          width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
+                          background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '13px', fontWeight: '700', color: '#fff'
+                        }}>1</div>
+                        <div>
+                          <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0', marginBottom: '6px' }}>채널톡 API 키 발급</h4>
+                          <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: '1.7' }}>
+                            채널톡 &gt; 설정 &gt; 보안 및 개발 &gt; API 관리에서<br/>
+                            <strong style={{ color: '#a5b4fc' }}>Access Key</strong>와 <strong style={{ color: '#a5b4fc' }}>Access Secret</strong>을 발급받으세요.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Step 2 */}
+                      <div style={{ display: 'flex', gap: '14px' }}>
+                        <div style={{
+                          width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
+                          background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '13px', fontWeight: '700', color: '#fff'
+                        }}>2</div>
+                        <div>
+                          <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0', marginBottom: '6px' }}>Vercel 환경변수 설정</h4>
+                          <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: '1.7', marginBottom: '10px' }}>
+                            Vercel 대시보드 &gt; Settings &gt; Environment Variables에 추가:
+                          </p>
+                          <div style={{
+                            background: 'rgba(0,0,0,0.3)', borderRadius: '10px', padding: '14px',
+                            fontFamily: 'monospace', fontSize: '12px', color: '#a5b4fc', lineHeight: '2'
+                          }}>
+                            CHANNEL_ACCESS_KEY=발급받은_Access_Key<br/>
+                            CHANNEL_ACCESS_SECRET=발급받은_Access_Secret<br/>
+                            CHANNEL_AUTO_REPLY=false
+                          </div>
+                          <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+                            * CHANNEL_AUTO_REPLY=true → 고객에게 바로 자동 답변<br/>
+                            * CHANNEL_AUTO_REPLY=false → 매니저에게 AI 추천 답변 표시 (권장)
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Step 3 */}
+                      <div style={{ display: 'flex', gap: '14px' }}>
+                        <div style={{
+                          width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
+                          background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '13px', fontWeight: '700', color: '#fff'
+                        }}>3</div>
+                        <div>
+                          <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0', marginBottom: '6px' }}>채널톡 웹훅 등록</h4>
+                          <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: '1.7', marginBottom: '10px' }}>
+                            채널톡 &gt; 설정 &gt; 보안 및 개발 &gt; Webhook 관리에서 새 웹훅 생성:
+                          </p>
+                          <div style={{
+                            background: 'rgba(0,0,0,0.3)', borderRadius: '10px', padding: '14px',
+                            fontFamily: 'monospace', fontSize: '12px', color: '#34d399', lineHeight: '1.8'
+                          }}>
+                            URL: https://[your-domain]/api/channel-webhook<br/>
+                            이벤트: New message (메시지 생성)
+                          </div>
+                          <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+                            * your-domain = Vercel 배포 도메인 (예: lecture-dashboard.vercel.app)
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Step 4 */}
+                      <div style={{ display: 'flex', gap: '14px' }}>
+                        <div style={{
+                          width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
+                          background: 'linear-gradient(135deg, #10b981, #059669)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '13px', fontWeight: '700', color: '#fff'
+                        }}>✓</div>
+                        <div>
+                          <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0', marginBottom: '6px' }}>완료!</h4>
+                          <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: '1.7' }}>
+                            이제 채널톡으로 고객 문의가 오면 AI가 자동으로:<br/>
+                            1. 등록된 <strong style={{ color: '#a5b4fc' }}>CS 정책</strong>을 참고하고<br/>
+                            2. 유사한 <strong style={{ color: '#a5b4fc' }}>과거 상담 이력</strong>을 검색하고<br/>
+                            3. 학습된 답변 스타일로 응답을 생성합니다
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 작동 방식 */}
+                  <div style={{
+                    background: 'rgba(255,255,255,0.03)', borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.08)', padding: '24px'
+                  }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#e2e8f0', marginBottom: '16px' }}>작동 방식</h3>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      gap: '12px', flexWrap: 'wrap', padding: '20px 0'
+                    }}>
+                      {[
+                        { icon: '💬', label: '고객 문의' },
+                        { icon: '→', label: '' },
+                        { icon: '🔗', label: '채널톡 웹훅' },
+                        { icon: '→', label: '' },
+                        { icon: '🤖', label: 'AI 분석' },
+                        { icon: '→', label: '' },
+                        { icon: '📋', label: '정책+이력 참조' },
+                        { icon: '→', label: '' },
+                        { icon: '✅', label: '답변 전송' }
+                      ].map((step, i) => (
+                        <div key={i} style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: step.icon === '→' ? '16px' : '28px', color: step.icon === '→' ? '#4b5563' : '#e2e8f0' }}>{step.icon}</div>
+                          {step.label && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>{step.label}</div>}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px'
+                    }}>
+                      <div style={{
+                        background: 'rgba(245,158,11,0.08)', borderRadius: '10px', padding: '14px',
+                        border: '1px solid rgba(245,158,11,0.15)'
+                      }}>
+                        <div style={{ fontSize: '13px', fontWeight: '600', color: '#fbbf24', marginBottom: '6px' }}>추천 모드 (기본)</div>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
+                          AI가 답변 초안을 생성하여<br/>매니저에게 보여줍니다.<br/>매니저가 확인 후 전송.
+                        </div>
+                      </div>
+                      <div style={{
+                        background: 'rgba(16,185,129,0.08)', borderRadius: '10px', padding: '14px',
+                        border: '1px solid rgba(16,185,129,0.15)'
+                      }}>
+                        <div style={{ fontSize: '13px', fontWeight: '600', color: '#34d399', marginBottom: '6px' }}>자동 답변 모드</div>
+                        <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
+                          AI가 고객에게 바로 답변.<br/>충분한 학습 데이터가<br/>쌓인 후 전환 권장.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
