@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '500mb',
     },
   },
-  serverExternalPackages: ['@distube/ytdl-core'],
+  serverExternalPackages: ['@distube/ytdl-core', 'youtube-caption-extractor'],
 };
 
 export default nextConfig;
