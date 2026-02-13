@@ -175,41 +175,69 @@ ${reduceInput}`
   return finalAnalysis || '분석 결과가 비어있습니다.'
 }
 
-// Helper: Analyze YouTube URL with Gemini via REST API (v1beta) - fallback
-async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
-  const videoId = extractVideoId(youtubeUrl)
+// Helper: Download YouTube audio — try yt-dlp first, fallback to ytdl-core
+async function downloadYoutubeAudio(url, onProgress) {
+  const videoId = extractVideoId(url)
   if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
+  const fullUrl = `https://www.youtube.com/watch?v=${videoId}`
 
-  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`
+  // 1차: yt-dlp 시도 (로컬 환경에서만 동작)
+  try {
+    const { execFile } = await import('child_process')
+    const { promisify } = await import('util')
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const os = await import('os')
+    const execFileAsync = promisify(execFile)
 
-  onProgress('Gemini에 YouTube 영상 직접 전달 중 (폴백)...')
+    const tmpDir = os.tmpdir()
+    const outPath = path.join(tmpDir, `yt_${videoId}`)
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { file_data: { file_uri: cleanUrl, mime_type: 'video/mp4' } },
-            { text: prompt }
-          ]
-        }]
-      })
+    onProgress('yt-dlp로 오디오 다운로드 시도 중...')
+    await execFileAsync('yt-dlp', [
+      '-x', '--audio-format', 'mp3', '--audio-quality', '5',
+      '-o', `${outPath}.%(ext)s`, '--no-playlist', fullUrl
+    ], { maxBuffer: 10 * 1024 * 1024, timeout: 180000 })
+
+    const expectedPath = `${outPath}.mp3`
+    let audioPath = expectedPath
+    try {
+      await fs.access(expectedPath)
+    } catch {
+      const files = await fs.readdir(tmpDir)
+      const match = files.find(f => f.startsWith(`yt_${videoId}.`))
+      if (!match) throw new Error('파일 없음')
+      audioPath = path.join(tmpDir, match)
     }
-  )
 
-  const data = await res.json()
-
-  if (!res.ok || data.error) {
-    const errMsg = data.error?.message || JSON.stringify(data.error) || `HTTP ${res.status}`
-    throw new Error(`Gemini API 오류: ${errMsg}`)
+    const audioBuffer = await fs.readFile(audioPath)
+    const ext = path.extname(audioPath).slice(1) || 'mp3'
+    fs.unlink(audioPath).catch(() => {})
+    onProgress(`yt-dlp 다운로드 완료: ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB`)
+    return { audioBuffer, ext, mimeType: ext === 'mp3' ? 'audio/mpeg' : `audio/${ext}` }
+  } catch {
+    onProgress('yt-dlp 사용 불가, ytdl-core로 폴백...')
   }
 
-  onProgress('분석 완료!')
+  // 2차: ytdl-core 폴백 (Vercel 호환)
+  const ytdl = (await import('@distube/ytdl-core')).default
+  onProgress('YouTube 영상 정보 가져오는 중...')
+  const info = await ytdl.getInfo(fullUrl)
+  const duration = parseInt(info.videoDetails.lengthSeconds || '0')
+  onProgress(`영상: "${info.videoDetails.title}" (${Math.floor(duration / 60)}분 ${duration % 60}초)`)
 
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '분석 결과가 비어있습니다.'
+  const format = ytdl.chooseFormat(info.formats, { quality: 'lowestaudio', filter: 'audioonly' })
+    || ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' })
+  if (!format) throw new Error('오디오 포맷을 찾을 수 없습니다.')
+
+  onProgress('오디오 다운로드 중...')
+  const stream = ytdl(fullUrl, { format })
+  const chunks = []
+  for await (const chunk of stream) { chunks.push(chunk) }
+  const audioBuffer = Buffer.concat(chunks)
+  const ext = format.container || 'webm'
+  onProgress(`다운로드 완료: ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB`)
+  return { audioBuffer, ext, mimeType: format.mimeType?.split(';')[0] || `audio/${ext}` }
 }
 
 // Helper: Analyze uploaded file with Gemini (via File API)
@@ -333,11 +361,18 @@ export async function POST(request) {
               sendProgress('Gemini 분석 중', 70, msg)
             })
           } else {
-            // 2차: 자막 실패 → Gemini에 영상 URL 직접 전달 (폴백)
-            sendProgress('영상 분석 전환', 20, '자막을 찾을 수 없어 Gemini 영상 분석으로 전환합니다...')
+            // 2차: 자막 실패 → 오디오 다운로드 후 Gemini File API로 분석
+            sendProgress('영상 분석 전환', 20, '자막을 찾을 수 없어 오디오 다운로드 후 분석합니다...')
 
-            analysis = await analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, (msg) => {
-              sendProgress('Gemini 분석 중', 50, msg)
+            const audio = await downloadYoutubeAudio(youtubeUrl, (msg) => {
+              sendProgress('오디오 다운로드', 30, msg)
+            })
+
+            sendProgress('Gemini 업로드 중', 50, `오디오 ${(audio.audioBuffer.length / (1024 * 1024)).toFixed(1)}MB를 Gemini에 업로드합니다...`)
+
+            analysis = await analyzeFileWithGemini(audio.audioBuffer, `audio.${audio.ext}`, audio.mimeType, prompt, geminiKey, (msg) => {
+              const percent = msg.includes('업로드') ? 55 : msg.includes('처리 중') ? 65 : 80
+              sendProgress('Gemini 분석 중', percent, msg)
             })
           }
 
