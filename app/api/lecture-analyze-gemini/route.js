@@ -22,61 +22,44 @@ function extractVideoId(url) {
   return null
 }
 
-// Helper: Download YouTube video/audio for Gemini upload
-async function downloadYoutubeForGemini(url, onProgress) {
-  const ytdl = (await import('@distube/ytdl-core')).default
+// Helper: Analyze YouTube URL directly with Gemini
+async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
+  const ai = new GoogleGenAI({ apiKey: geminiKey })
 
-  const videoId = extractVideoId(url)
+  const videoId = extractVideoId(youtubeUrl)
   if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
 
-  const fullUrl = `https://www.youtube.com/watch?v=${videoId}`
+  // Clean URL: Gemini requires plain youtube.com/watch?v= format
+  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`
 
-  onProgress('YouTube 영상 정보 가져오는 중...')
-  const info = await ytdl.getInfo(fullUrl)
-  const title = info.videoDetails.title
-  const duration = parseInt(info.videoDetails.lengthSeconds || '0')
+  onProgress('Gemini에 YouTube URL 전달 중...')
 
-  onProgress(`영상: "${title}" (${Math.floor(duration / 60)}분 ${duration % 60}초)`)
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: [
+        {
+          fileData: {
+            fileUri: cleanUrl,
+          },
+        },
+        { text: prompt }
+      ],
+    })
 
-  // Prefer audio-only for faster download, Gemini can analyze audio too
-  const format = ytdl.chooseFormat(info.formats, { quality: 'lowestaudio', filter: 'audioonly' })
-    || ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' })
-    || ytdl.chooseFormat(info.formats, { quality: 'lowest' })
-
-  if (!format) throw new Error('다운로드 가능한 포맷을 찾을 수 없습니다.')
-
-  onProgress('YouTube 오디오 다운로드 중...')
-  const stream = ytdl(fullUrl, { format })
-
-  const chunks = []
-  let downloaded = 0
-  const contentLength = parseInt(format.contentLength || '0')
-
-  for await (const chunk of stream) {
-    chunks.push(chunk)
-    downloaded += chunk.length
-    if (contentLength > 0) {
-      const percent = Math.round((downloaded / contentLength) * 100)
-      if (percent % 20 === 0) {
-        onProgress(`다운로드 중... ${percent}% (${(downloaded / (1024 * 1024)).toFixed(1)}MB)`)
-      }
-    }
+    return response.text
+  } catch (error) {
+    console.error('[Gemini YouTube Error]', {
+      message: error.message,
+      status: error.status,
+      statusText: error.statusText,
+      code: error.code,
+      details: error.details,
+      errorInfo: error.errorInfo,
+      raw: JSON.stringify(error, Object.getOwnPropertyNames(error)),
+    })
+    throw new Error(`Gemini YouTube 분석 실패: ${error.message || JSON.stringify(error)}`)
   }
-
-  const buffer = Buffer.concat(chunks)
-  const ext = format.container || 'webm'
-  const mimeType = format.mimeType?.split(';')[0] || `audio/${ext}`
-
-  onProgress(`다운로드 완료: ${(buffer.length / (1024 * 1024)).toFixed(1)}MB`)
-
-  return { buffer, ext, mimeType, title }
-}
-
-// Helper: Analyze YouTube video with Gemini (download + File API upload)
-async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
-  const { buffer, ext, mimeType } = await downloadYoutubeForGemini(youtubeUrl, onProgress)
-
-  return analyzeFileWithGemini(buffer, `youtube_audio.${ext}`, mimeType, prompt, geminiKey, onProgress)
 }
 
 // Helper: Analyze uploaded file with Gemini (via File API)
