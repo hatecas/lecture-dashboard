@@ -11,26 +11,40 @@ function getChannelHeaders() {
   }
 }
 
-// 채널톡 user-chats에서 사용자 이름으로 필터링
+// 채널톡 user-chats에서 사용자 이름으로 필터링 (전체 페이지네이션)
 async function searchUsersByName(query) {
   const headers = getChannelHeaders()
   const matchedUsers = []
+  const MAX_PAGES = 50 // 안전 제한: 최대 50페이지 × 100개 = 5000개/상태
 
   for (const state of ['opened', 'closed']) {
-    const res = await fetch(`${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`, {
-      headers
-    })
+    let since = undefined
+    let page = 0
 
-    if (!res.ok) continue
+    while (page < MAX_PAGES) {
+      let url = `${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`
+      if (since) url += `&since=${since}`
 
-    const data = await res.json()
-    const users = data.users || []
+      const res = await fetch(url, { headers })
+      if (!res.ok) break
 
-    for (const user of users) {
-      const userName = user.profile?.name || user.name || ''
-      if (userName.includes(query) && !matchedUsers.find(u => u.id === user.id)) {
-        matchedUsers.push(user)
+      const data = await res.json()
+      const chats = data.userChats || []
+      const users = data.users || []
+
+      for (const user of users) {
+        const userName = user.profile?.name || user.name || ''
+        if (userName.includes(query) && !matchedUsers.find(u => u.id === user.id)) {
+          matchedUsers.push(user)
+        }
       }
+
+      // 더 이상 데이터 없으면 종료
+      if (chats.length < 100) break
+
+      // 다음 페이지 커서 설정
+      since = chats[chats.length - 1].createdAt
+      page++
     }
   }
 

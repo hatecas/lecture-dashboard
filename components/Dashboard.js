@@ -144,6 +144,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [csShowAddHistory, setCsShowAddHistory] = useState(false)
   const [csNewHistory, setCsNewHistory] = useState({ category: '일반', customer_inquiry: '', agent_response: '', tags: '', result: '' })
   const [csUploadingHistory, setCsUploadingHistory] = useState(false)
+  const [csSyncing, setCsSyncing] = useState(false)
+  const [csSyncResult, setCsSyncResult] = useState(null)
   const csEndRef = useRef(null)
   const csFileRef = useRef(null)
   const csHistoryFileRef = useRef(null)
@@ -4007,10 +4009,55 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)' }}>
               {/* 헤더 */}
               <div style={{ marginBottom: '16px', flexShrink: 0 }}>
-                <h2 style={{ fontSize: '22px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  🤖 CS 대응 AI
-                  <HelpTooltip text={"고객 문의 내용을 입력하면\nAI가 채널톡 대화 조회, 정책 검색,\n상담 이력 검색을 자동으로 수행하여\n전문적인 CS 답변을 생성합니다.\n\n예시:\n• '김철수 채널톡 가져와'\n• '환불 요청 어떻게 대응해?'\n• '결제 오류 문의 답변 만들어줘'"} />
-                </h2>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h2 style={{ fontSize: '22px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    🤖 CS 대응 AI
+                    <HelpTooltip text={"고객 문의 내용을 입력하면\nAI가 채널톡 대화 조회, 정책 검색,\n상담 이력 검색을 자동으로 수행하여\n전문적인 CS 답변을 생성합니다.\n\n예시:\n• '김철수 채널톡 가져와'\n• '환불 요청 어떻게 대응해?'\n• '결제 오류 문의 답변 만들어줘'"} />
+                  </h2>
+                  <button
+                    onClick={() => {
+                      if (csSyncing) return
+                      setCsSyncing(true)
+                      setCsSyncResult(null)
+                      fetch('/api/cs-history/sync', {
+                        method: 'POST',
+                        headers: getAuthHeaders()
+                      })
+                        .then(res => res.json())
+                        .then(data => {
+                          setCsSyncResult(data.error ? `실패: ${data.error}` : data.message)
+                          setCsSyncing(false)
+                          setTimeout(() => setCsSyncResult(null), 5000)
+                        })
+                        .catch(() => {
+                          setCsSyncResult('동기화 중 오류 발생')
+                          setCsSyncing(false)
+                          setTimeout(() => setCsSyncResult(null), 5000)
+                        })
+                    }}
+                    disabled={csSyncing}
+                    style={{
+                      padding: '8px 16px',
+                      background: csSyncing ? 'rgba(99,102,241,0.2)' : 'rgba(16,185,129,0.1)',
+                      border: `1px solid ${csSyncing ? 'rgba(99,102,241,0.3)' : 'rgba(16,185,129,0.25)'}`,
+                      borderRadius: '10px',
+                      color: csSyncing ? '#a5b4fc' : '#34d399',
+                      fontSize: '13px',
+                      cursor: csSyncing ? 'not-allowed' : 'pointer',
+                      fontWeight: '500',
+                      display: 'flex', alignItems: 'center', gap: '6px'
+                    }}
+                  >{csSyncing ? '⏳ 동기화 중...' : '🔄 채널톡 이력 동기화'}</button>
+                </div>
+                {csSyncResult && (
+                  <div style={{
+                    marginTop: '8px', padding: '8px 14px', borderRadius: '8px',
+                    background: csSyncResult.startsWith('실패') ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
+                    border: `1px solid ${csSyncResult.startsWith('실패') ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}`,
+                    color: csSyncResult.startsWith('실패') ? '#f87171' : '#34d399',
+                    fontSize: '13px'
+                  }}>{csSyncResult}</div>
+                )}
               </div>
 
               <>
