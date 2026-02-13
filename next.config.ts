@@ -6,7 +6,6 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '500mb',
     },
   },
-  // Disable body size limit for API routes (large audio file upload)
   serverExternalPackages: ['@distube/ytdl-core'],
 };
 
