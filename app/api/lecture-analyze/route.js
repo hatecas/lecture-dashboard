@@ -1,5 +1,9 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
-import { getSubtitles } from 'youtube-caption-extractor'
+// youtube-caption-extractor: Turbopack 호환을 위해 동적 import 사용
+async function getSubtitles(options) {
+  const mod = await import('youtube-caption-extractor')
+  return mod.getSubtitles(options)
+}
 
 // Long-running route: 5 min timeout for processing large audio files
 export const maxDuration = 300
