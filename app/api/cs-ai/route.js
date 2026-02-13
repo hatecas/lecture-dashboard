@@ -2,20 +2,130 @@ import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { supabase } from '@/lib/supabase'
 
-// 유사 상담 이력 검색
-async function findSimilarHistory(inquiry) {
+const CHANNEL_API = 'https://api.channel.io/open'
+
+function getChannelHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'x-access-key': process.env.CHANNEL_ACCESS_KEY || '',
+    'x-access-secret': process.env.CHANNEL_ACCESS_SECRET || ''
+  }
+}
+
+// 채널톡 사용자 검색 → 대화 가져오기
+async function fetchChannelConversations(customerName) {
+  if (!process.env.CHANNEL_ACCESS_KEY || !process.env.CHANNEL_ACCESS_SECRET) {
+    return { error: '채널톡 API 키가 설정되지 않았습니다.' }
+  }
+
   try {
-    // 키워드 추출 (2글자 이상 단어)
-    const keywords = inquiry
+    // 1. 사용자 검색
+    const userRes = await fetch(
+      `${CHANNEL_API}/v5/users?query=${encodeURIComponent(customerName)}&limit=5`,
+      { headers: getChannelHeaders() }
+    )
+
+    if (!userRes.ok) {
+      return { error: `채널톡 사용자 검색 실패 (${userRes.status})` }
+    }
+
+    const userData = await userRes.json()
+    const users = userData.users || []
+
+    if (users.length === 0) {
+      return { conversations: [], message: `"${customerName}" 이름의 소비자를 찾을 수 없습니다.` }
+    }
+
+    // 2. 각 사용자의 채팅 + 메시지 가져오기
+    const allConversations = []
+
+    for (const user of users.slice(0, 3)) {
+      const userName = user.profile?.name || user.name || '알 수 없음'
+
+      const chatRes = await fetch(
+        `${CHANNEL_API}/v5/user-chats?userId=${user.id}&limit=5&sortOrder=desc`,
+        { headers: getChannelHeaders() }
+      )
+
+      if (!chatRes.ok) continue
+      const chatData = await chatRes.json()
+      const chats = chatData.userChats || []
+
+      for (const chat of chats.slice(0, 3)) {
+        const msgRes = await fetch(
+          `${CHANNEL_API}/v5/user-chats/${chat.id}/messages?sortOrder=asc&limit=50`,
+          { headers: getChannelHeaders() }
+        )
+
+        if (!msgRes.ok) continue
+        const msgData = await msgRes.json()
+        const messages = (msgData.messages || [])
+          .map(msg => ({
+            sender: msg.personType === 'user' ? userName : '상담원',
+            text: msg.plainText || msg.message || '',
+            createdAt: msg.createdAt
+          }))
+          .filter(m => m.text)
+
+        if (messages.length > 0) {
+          allConversations.push({
+            chatId: chat.id,
+            userName,
+            createdAt: chat.createdAt,
+            state: chat.state,
+            messages
+          })
+        }
+      }
+    }
+
+    return {
+      conversations: allConversations,
+      message: allConversations.length > 0
+        ? `"${customerName}" 관련 ${allConversations.length}개의 대화를 찾았습니다.`
+        : `"${customerName}" 소비자의 대화 기록이 없습니다.`
+    }
+  } catch (err) {
+    return { error: `채널톡 조회 오류: ${err.message}` }
+  }
+}
+
+// CS 정책 검색
+async function searchPolicies(category) {
+  try {
+    let query = supabase.from('cs_policies').select('title, category, content').order('category')
+    if (category && category !== '전체') {
+      query = query.eq('category', category)
+    }
+
+    const { data: policies } = await query
+    if (!policies || policies.length === 0) return { policies: [], message: '등록된 정책이 없습니다.' }
+
+    return {
+      policies: policies.map(p => ({
+        title: p.title,
+        category: p.category,
+        content: p.content
+      })),
+      message: `${policies.length}개의 정책을 찾았습니다.`
+    }
+  } catch {
+    return { policies: [], message: '정책 조회 중 오류 발생' }
+  }
+}
+
+// 유사 상담 이력 검색
+async function searchHistory(keywords) {
+  try {
+    const keywordList = keywords
       .replace(/[^\w\sㄱ-ㅎㅏ-ㅣ가-힣]/g, ' ')
       .split(/\s+/)
       .filter(w => w.length >= 2)
-      .slice(0, 5) // 상위 5개 키워드
+      .slice(0, 5)
 
-    if (keywords.length === 0) return []
+    if (keywordList.length === 0) return { history: [], message: '검색 키워드가 부족합니다.' }
 
-    // 각 키워드로 검색하여 합침
-    const orFilter = keywords.map(k => `customer_inquiry.ilike.%${k}%`).join(',')
+    const orFilter = keywordList.map(k => `customer_inquiry.ilike.%${k}%`).join(',')
 
     const { data } = await supabase
       .from('cs_history')
@@ -23,22 +133,85 @@ async function findSimilarHistory(inquiry) {
       .or(orFilter)
       .limit(10)
 
-    if (!data || data.length === 0) return []
+    if (!data || data.length === 0) return { history: [], message: '유사한 상담 이력이 없습니다.' }
 
-    // 키워드 매칭 수로 관련도 점수 매기기
     const scored = data.map(item => {
       const text = (item.customer_inquiry + ' ' + item.agent_response).toLowerCase()
-      const score = keywords.reduce((s, k) => s + (text.includes(k.toLowerCase()) ? 1 : 0), 0)
+      const score = keywordList.reduce((s, k) => s + (text.includes(k.toLowerCase()) ? 1 : 0), 0)
       return { ...item, score }
     })
 
-    // 점수 높은 순으로 상위 5개
-    return scored
+    const results = scored
       .sort((a, b) => b.score - a.score)
       .slice(0, 5)
       .map(({ score, ...rest }) => rest)
+
+    return {
+      history: results,
+      message: `${results.length}개의 유사 상담 이력을 찾았습니다.`
+    }
   } catch {
-    return []
+    return { history: [], message: '이력 검색 중 오류 발생' }
+  }
+}
+
+// 도구 정의
+const tools = [
+  {
+    name: 'fetch_channel_conversations',
+    description: '채널톡에서 특정 소비자/고객의 대화 내용을 가져옵니다. 사용자가 "OOO 고객 채널톡 가져와", "OOO 소비자 대화 내용 보여줘" 등의 요청을 하면 이 도구를 사용합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        customer_name: {
+          type: 'string',
+          description: '검색할 소비자/고객 이름'
+        }
+      },
+      required: ['customer_name']
+    }
+  },
+  {
+    name: 'search_cs_policies',
+    description: '우리 회사의 CS 대응 정책/매뉴얼을 검색합니다. 사용자가 "어떻게 대응해야 돼?", "환불 정책이 뭐야?", "대응 매뉴얼 알려줘" 등의 요청을 하면 이 도구를 사용합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          description: '검색할 정책 카테고리 (환불, 결제, 수강, 컴플레인, 일반 등). 전체 검색은 "전체"로 입력'
+        }
+      },
+      required: ['category']
+    }
+  },
+  {
+    name: 'search_cs_history',
+    description: '과거 유사한 상담 이력을 검색합니다. 이전에 비슷한 문의에 어떻게 대응했는지 찾을 때 사용합니다.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        keywords: {
+          type: 'string',
+          description: '검색할 키워드 (공백으로 구분된 핵심 단어들)'
+        }
+      },
+      required: ['keywords']
+    }
+  }
+]
+
+// 도구 실행
+async function executeTool(toolName, toolInput) {
+  switch (toolName) {
+    case 'fetch_channel_conversations':
+      return await fetchChannelConversations(toolInput.customer_name)
+    case 'search_cs_policies':
+      return await searchPolicies(toolInput.category)
+    case 'search_cs_history':
+      return await searchHistory(toolInput.keywords)
+    default:
+      return { error: `알 수 없는 도구: ${toolName}` }
   }
 }
 
@@ -55,71 +228,33 @@ export async function POST(request) {
       return NextResponse.json({ error: '메시지가 없습니다' }, { status: 400 })
     }
 
-    // 1. Supabase에서 저장된 CS 정책 로드
-    let policiesText = ''
-    try {
-      const { data: policies } = await supabase
-        .from('cs_policies')
-        .select('title, category, content')
-        .order('category')
-
-      if (policies && policies.length > 0) {
-        policiesText = '\n\n===== 우리 회사 CS 정책 =====\n'
-        const grouped = {}
-        for (const p of policies) {
-          if (!grouped[p.category]) grouped[p.category] = []
-          grouped[p.category].push(p)
-        }
-        for (const [cat, items] of Object.entries(grouped)) {
-          policiesText += `\n[${cat}]\n`
-          for (const item of items) {
-            policiesText += `■ ${item.title}\n${item.content}\n\n`
-          }
-        }
-        policiesText += '===== 정책 끝 =====\n'
-      }
-    } catch {
-      // 테이블 없으면 무시
-    }
-
-    // 2. 유사 상담 이력 검색 (마지막 user 메시지 기준)
-    let historyText = ''
-    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
-    if (lastUserMsg?.content) {
-      const similar = await findSimilarHistory(lastUserMsg.content)
-      if (similar.length > 0) {
-        historyText = '\n\n===== 과거 유사 상담 사례 =====\n'
-        similar.forEach((item, i) => {
-          historyText += `\n[사례 ${i + 1}] (${item.category}${item.result ? ' / ' + item.result : ''})\n`
-          historyText += `고객: ${item.customer_inquiry}\n`
-          historyText += `답변: ${item.agent_response}\n`
-        })
-        historyText += '\n===== 사례 끝 =====\n\n위 과거 사례들의 톤, 말투, 대응 방식을 참고하여 답변하세요. 우리 팀이 실제로 했던 답변 스타일을 최대한 따라하세요.'
-      }
-    }
-
-    const systemPrompt = `당신은 온라인 강의 플랫폼의 전문 CS(고객상담) 담당자입니다.
+    const systemPrompt = `당신은 온라인 강의 플랫폼의 전문 CS(고객상담) AI 어시스턴트입니다.
 
 역할:
-- 고객 문의에 대해 친절하고 전문적인 답변을 작성합니다
-- 환불, 결제, 수강 관련 문의에 정확하게 대응합니다
-- 불만 고객에게는 공감하며 해결책을 제시합니다
-- 답변은 실제 CS 담당자가 고객에게 보내는 메시지 형태로 작성합니다
+- 채널톡 대화 내용을 조회하고 분석합니다
+- 고객 문의에 대한 최적의 CS 대응 답변을 생성합니다
+- 회사 CS 정책/매뉴얼에 기반한 정확한 답변을 제공합니다
+- 과거 상담 이력을 참고하여 일관된 톤과 스타일로 답변합니다
 
-답변 원칙:
-1. 존댓말 사용 (~~습니다, ~~드리겠습니다)
-2. 공감 표현으로 시작 (불편을 드려 죄송합니다, 문의 감사합니다 등)
-3. 구체적인 해결 방안 제시
-4. 추가 문의 안내로 마무리
-5. 너무 길지 않게 핵심만 전달 (3-5문장)
-6. 과거 상담 사례가 제공되면 그 톤과 스타일을 최우선으로 따르세요
+사용 가능한 기능:
+1. 채널톡 대화 조회: 특정 소비자/고객의 채널톡 대화 내용을 가져올 수 있습니다
+2. 정책 검색: 회사 CS 대응 정책/매뉴얼을 검색할 수 있습니다
+3. 이력 검색: 과거 유사한 상담에서 어떻게 대응했는지 찾을 수 있습니다
 
-이미지가 포함된 경우:
-- 이미지 내용을 분석하여 고객 문의 맥락을 파악합니다
-- 스크린샷의 오류 메시지, 결제 내역 등을 읽고 답변에 반영합니다
+대화 내용을 가져온 후 사용자가 대응 방법을 물으면:
+1. 먼저 관련 정책을 자동으로 검색합니다
+2. 과거 유사 상담 이력도 함께 검색합니다
+3. 정책과 이력을 기반으로 구체적인 대응 답변을 작성합니다
 
-사용자가 고객 문의 내용을 입력하면, 그에 맞는 CS 답변을 작성해주세요.
-사용자가 추가 지시(톤 변경, 내용 수정 등)를 하면 그에 맞게 조정하세요.${policiesText}${historyText}`
+답변 작성 원칙:
+- 존댓말 사용 (~~습니다, ~~드리겠습니다)
+- 공감 표현으로 시작
+- 구체적인 해결 방안 제시
+- 핵심만 전달 (3-5문장)
+- 과거 상담 사례가 있으면 그 톤과 스타일을 따르세요
+
+채널톡 대화를 보여줄 때는 읽기 쉽게 대화 형식으로 정리해주세요.
+이미지가 포함된 경우 이미지 내용을 분석하여 맥락을 파악합니다.`
 
     // 메시지 포맷 변환 (이미지 지원)
     const apiMessages = messages.map(m => {
@@ -143,28 +278,78 @@ export async function POST(request) {
       return { role: m.role, content: m.content }
     })
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1500,
-        system: systemPrompt,
-        messages: apiMessages
+    // Tool-use 루프: AI가 도구 호출을 멈출 때까지 반복
+    let currentMessages = [...apiMessages]
+    let maxIterations = 5
+
+    while (maxIterations > 0) {
+      maxIterations--
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4096,
+          system: systemPrompt,
+          tools,
+          messages: currentMessages
+        })
       })
-    })
 
-    const data = await response.json()
+      const data = await response.json()
 
-    if (data.content && data.content[0]) {
-      return NextResponse.json({ reply: data.content[0].text })
+      if (!data.content) {
+        return NextResponse.json({ error: 'AI 응답 실패' }, { status: 500 })
+      }
+
+      // stop_reason이 end_turn이면 최종 응답
+      if (data.stop_reason === 'end_turn') {
+        const textBlock = data.content.find(b => b.type === 'text')
+        return NextResponse.json({
+          reply: textBlock?.text || '답변을 생성하지 못했습니다.',
+          toolsUsed: currentMessages.length > apiMessages.length
+        })
+      }
+
+      // stop_reason이 tool_use이면 도구 실행
+      if (data.stop_reason === 'tool_use') {
+        // AI의 응답을 메시지에 추가
+        currentMessages.push({ role: 'assistant', content: data.content })
+
+        // 도구 호출 결과 수집
+        const toolResults = []
+        for (const block of data.content) {
+          if (block.type === 'tool_use') {
+            const result = await executeTool(block.name, block.input)
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: JSON.stringify(result, null, 2)
+            })
+          }
+        }
+
+        // 도구 결과를 메시지에 추가
+        currentMessages.push({ role: 'user', content: toolResults })
+        continue
+      }
+
+      // 그 외의 경우 (예기치 않은 stop_reason)
+      const textBlock = data.content.find(b => b.type === 'text')
+      return NextResponse.json({
+        reply: textBlock?.text || '답변을 생성하지 못했습니다.'
+      })
     }
 
-    return NextResponse.json({ error: 'AI 응답 실패' }, { status: 500 })
+    // 최대 반복 횟수 초과
+    return NextResponse.json({
+      reply: '요청을 처리하는 데 시간이 너무 오래 걸립니다. 다시 시도해주세요.'
+    })
 
   } catch (error) {
     console.error('CS AI 오류:', error)
