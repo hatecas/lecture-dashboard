@@ -3925,7 +3925,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                   <th key={i} style={{
                                     padding: '12px 14px',
                                     background: '#1e3a5f',
-                                    borderBottom: '1px solid #ccc',
+                                    borderBottom: 'none',
                                     borderRight: '1px solid rgba(255,255,255,0.2)',
                                     textAlign: 'left',
                                     fontWeight: '700',
