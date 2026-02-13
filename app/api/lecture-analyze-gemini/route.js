@@ -193,8 +193,36 @@ async function downloadYoutubeAudio(url, onProgress) {
     const tmpDir = os.tmpdir()
     const outPath = path.join(tmpDir, `yt_${videoId}`)
 
+    // yt-dlp 바이너리 경로 탐색: PATH에 있는 것 우선, 없으면 일반적인 설치 경로 시도
+    let ytdlpCmd = 'yt-dlp'
+    try {
+      // PATH에서 yt-dlp를 찾을 수 있는지 확인
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which'
+      await execFileAsync(whichCmd, ['yt-dlp'], { timeout: 5000 })
+    } catch {
+      // PATH에 없으면 일반적인 Windows 설치 경로 시도
+      if (process.platform === 'win32') {
+        const homedir = os.homedir()
+        const commonPaths = [
+          path.join(homedir, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'yt-dlp.exe'),
+          path.join(homedir, 'AppData', 'Local', 'Programs', 'yt-dlp', 'yt-dlp.exe'),
+          path.join(homedir, 'scoop', 'shims', 'yt-dlp.exe'),
+          'C:\\ProgramData\\chocolatey\\bin\\yt-dlp.exe',
+        ]
+        for (const p of commonPaths) {
+          try {
+            await fs.access(p)
+            ytdlpCmd = p
+            console.log(`[lecture-analyze-gemini] yt-dlp found at: ${p}`)
+            break
+          } catch { /* 다음 경로 시도 */ }
+        }
+      }
+    }
+
     onProgress('yt-dlp로 오디오 다운로드 시도 중...')
-    await execFileAsync('yt-dlp', [
+    console.log(`[lecture-analyze-gemini] yt-dlp 실행: ${ytdlpCmd}`)
+    await execFileAsync(ytdlpCmd, [
       '-x', '--audio-format', 'mp3', '--audio-quality', '5',
       '-o', `${outPath}.%(ext)s`, '--no-playlist', fullUrl
     ], { maxBuffer: 10 * 1024 * 1024, timeout: 180000 })
@@ -215,7 +243,8 @@ async function downloadYoutubeAudio(url, onProgress) {
     fs.unlink(audioPath).catch(() => {})
     onProgress(`yt-dlp 다운로드 완료: ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB`)
     return { audioBuffer, ext, mimeType: ext === 'mp3' ? 'audio/mpeg' : `audio/${ext}` }
-  } catch {
+  } catch (ytdlpErr) {
+    console.error(`[lecture-analyze-gemini] yt-dlp 실패:`, ytdlpErr.message || ytdlpErr)
     onProgress('yt-dlp 사용 불가, ytdl-core로 폴백...')
   }
 
