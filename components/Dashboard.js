@@ -125,6 +125,12 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [deleteSheetLoading, setDeleteSheetLoading] = useState(false)
   const [permissionError, setPermissionError] = useState(null) // 권한 에러 시 서비스 계정 이메일
 
+  // CS AI 상태
+  const [csMessages, setCsMessages] = useState([])
+  const [csInput, setCsInput] = useState('')
+  const [csSending, setCsSending] = useState(false)
+  const csEndRef = useRef(null)
+
   // 서버에서 시트 목록 로드
   const loadSavedSheets = async () => {
     try {
@@ -1491,6 +1497,30 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           }} title="시트 통합">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📁</span>
             시트 통합
+          </button>
+
+          {/* CS AI 메뉴 */}
+          <button onClick={() => { setCurrentTab('cs-ai'); if(isMobile) setMobileMenuOpen(false) }} style={{
+            width: '100%',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+            background: currentTab === 'cs-ai' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'cs-ai' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'cs-ai' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'cs-ai' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
+            alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+            gap: sidebarCollapsed ? '4px' : '10px',
+            transition: 'all 0.3s ease'
+          }} title="CS AI">
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🤖</span>
+            CS AI
           </button>
         </div>
       </div>
@@ -3952,6 +3982,270 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               )}
               </>
               )}
+            </div>
+          )}
+
+          {/* CS AI 탭 */}
+          {currentTab === 'cs-ai' && (
+            <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                🤖 CS 대응 AI
+                <HelpTooltip text={"고객 문의 내용을 입력하면\nAI가 전문적인 CS 답변을\n자동으로 생성해드립니다.\n환불, 결제, 수강 문의 등\n다양한 상황에 대응할 수 있습니다."} />
+              </h2>
+
+              {/* 채팅 영역 */}
+              <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                background: 'rgba(255,255,255,0.03)',
+                borderRadius: '16px',
+                border: '1px solid rgba(255,255,255,0.08)',
+                padding: '20px',
+                marginBottom: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px'
+              }}>
+                {csMessages.length === 0 ? (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748b', gap: '16px' }}>
+                    <div style={{ fontSize: '64px' }}>🤖</div>
+                    <div style={{ textAlign: 'center' }}>
+                      <p style={{ fontSize: '18px', fontWeight: '600', color: '#94a3b8', marginBottom: '8px' }}>CS 대응 AI</p>
+                      <p style={{ fontSize: '14px', lineHeight: '1.6' }}>고객 문의 내용을 입력하면<br/>전문적인 CS 답변을 생성해드립니다</p>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', marginTop: '8px' }}>
+                      {['환불 요청 고객 대응', '결제 오류 문의', '강의 불만 컴플레인', '수강 방법 문의'].map(example => (
+                        <button
+                          key={example}
+                          onClick={() => setCsInput(example)}
+                          style={{
+                            padding: '8px 16px',
+                            background: 'rgba(99,102,241,0.1)',
+                            border: '1px solid rgba(99,102,241,0.25)',
+                            borderRadius: '20px',
+                            color: '#a5b4fc',
+                            fontSize: '13px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          {example}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  csMessages.map((msg, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex',
+                      justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                      gap: '10px'
+                    }}>
+                      {msg.role === 'assistant' && (
+                        <div style={{
+                          width: '36px', height: '36px', borderRadius: '50%',
+                          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '18px', flexShrink: 0
+                        }}>🤖</div>
+                      )}
+                      <div style={{
+                        maxWidth: '75%',
+                        padding: '14px 18px',
+                        borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                        background: msg.role === 'user'
+                          ? 'linear-gradient(135deg, #6366f1, #4f46e5)'
+                          : 'rgba(255,255,255,0.08)',
+                        border: msg.role === 'user' ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                        color: '#e2e8f0',
+                        fontSize: '14px',
+                        lineHeight: '1.7',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word'
+                      }}>
+                        {msg.content}
+                        {msg.role === 'assistant' && (
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(msg.content)
+                              alert('답변이 복사되었습니다!')
+                            }}
+                            style={{
+                              display: 'block',
+                              marginTop: '10px',
+                              padding: '4px 10px',
+                              background: 'rgba(255,255,255,0.08)',
+                              border: '1px solid rgba(255,255,255,0.15)',
+                              borderRadius: '6px',
+                              color: '#94a3b8',
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            📋 복사
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+                {csSending && (
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{
+                      width: '36px', height: '36px', borderRadius: '50%',
+                      background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '18px', flexShrink: 0
+                    }}>🤖</div>
+                    <div style={{
+                      padding: '14px 18px',
+                      borderRadius: '18px 18px 18px 4px',
+                      background: 'rgba(255,255,255,0.08)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      color: '#94a3b8',
+                      fontSize: '14px'
+                    }}>
+                      답변 생성 중...
+                    </div>
+                  </div>
+                )}
+                <div ref={csEndRef} />
+              </div>
+
+              {/* 입력 영역 */}
+              <div style={{
+                display: 'flex',
+                gap: '10px',
+                flexShrink: 0,
+                background: 'rgba(255,255,255,0.03)',
+                borderRadius: '16px',
+                border: '1px solid rgba(255,255,255,0.08)',
+                padding: '12px'
+              }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <textarea
+                    value={csInput}
+                    onChange={(e) => setCsInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        if (csInput.trim() && !csSending) {
+                          const userMsg = { role: 'user', content: csInput.trim() }
+                          const newMessages = [...csMessages, userMsg]
+                          setCsMessages(newMessages)
+                          setCsInput('')
+                          setCsSending(true)
+                          setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                          fetch('/api/cs-ai', {
+                            method: 'POST',
+                            headers: getAuthHeaders(),
+                            body: JSON.stringify({ messages: newMessages.map(m => ({ role: m.role, content: m.content })) })
+                          })
+                            .then(res => res.json())
+                            .then(data => {
+                              if (data.reply) {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+                              } else {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: '죄송합니다. 답변 생성에 실패했습니다. 다시 시도해주세요.' }])
+                              }
+                              setCsSending(false)
+                              setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                            })
+                            .catch(() => {
+                              setCsMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류가 발생했습니다. 다시 시도해주세요.' }])
+                              setCsSending(false)
+                            })
+                        }
+                      }
+                    }}
+                    placeholder="고객 문의 내용을 입력하세요... (Enter로 전송, Shift+Enter로 줄바꿈)"
+                    style={{
+                      flex: 1,
+                      padding: '12px 16px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '12px',
+                      color: '#e2e8f0',
+                      fontSize: '14px',
+                      resize: 'none',
+                      minHeight: '48px',
+                      maxHeight: '120px',
+                      outline: 'none',
+                      fontFamily: 'inherit',
+                      lineHeight: '1.5'
+                    }}
+                    rows={1}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <button
+                    onClick={() => {
+                      if (csInput.trim() && !csSending) {
+                        const userMsg = { role: 'user', content: csInput.trim() }
+                        const newMessages = [...csMessages, userMsg]
+                        setCsMessages(newMessages)
+                        setCsInput('')
+                        setCsSending(true)
+                        setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                        fetch('/api/cs-ai', {
+                          method: 'POST',
+                          headers: getAuthHeaders(),
+                          body: JSON.stringify({ messages: newMessages.map(m => ({ role: m.role, content: m.content })) })
+                        })
+                          .then(res => res.json())
+                          .then(data => {
+                            if (data.reply) {
+                              setCsMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+                            } else {
+                              setCsMessages(prev => [...prev, { role: 'assistant', content: '죄송합니다. 답변 생성에 실패했습니다. 다시 시도해주세요.' }])
+                            }
+                            setCsSending(false)
+                            setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                          })
+                          .catch(() => {
+                            setCsMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류가 발생했습니다. 다시 시도해주세요.' }])
+                            setCsSending(false)
+                          })
+                      }
+                    }}
+                    disabled={!csInput.trim() || csSending}
+                    style={{
+                      padding: '12px 20px',
+                      background: csInput.trim() && !csSending
+                        ? 'linear-gradient(135deg, #6366f1, #4f46e5)'
+                        : 'rgba(99,102,241,0.2)',
+                      border: 'none',
+                      borderRadius: '12px',
+                      color: '#fff',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: csInput.trim() && !csSending ? 'pointer' : 'not-allowed',
+                      transition: 'all 0.2s ease',
+                      opacity: csInput.trim() && !csSending ? 1 : 0.5,
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {csSending ? '⏳' : '전송'}
+                  </button>
+                  {csMessages.length > 0 && (
+                    <button
+                      onClick={() => { setCsMessages([]); setCsInput('') }}
+                      style={{
+                        padding: '8px 12px',
+                        background: 'rgba(239,68,68,0.1)',
+                        border: '1px solid rgba(239,68,68,0.25)',
+                        borderRadius: '10px',
+                        color: '#f87171',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      초기화
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
