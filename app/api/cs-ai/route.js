@@ -12,40 +12,53 @@ function getChannelHeaders() {
   }
 }
 
-// 채널톡 대화 목록에서 사용자 이름으로 필터링하여 대화 가져오기
+// 채널톡 대화 목록에서 사용자 이름으로 필터링하여 대화 가져오기 (전체 페이지네이션)
 async function fetchChannelConversations(customerName) {
   if (!process.env.CHANNEL_ACCESS_KEY || !process.env.CHANNEL_ACCESS_SECRET) {
     return { error: '채널톡 API 키가 설정되지 않았습니다.' }
   }
 
   try {
-    // 1. 최근 user-chats 가져오기 (opened + closed)
+    // 1. 모든 user-chats를 페이지네이션으로 가져오며 이름 매칭
     const allChats = []
+    const MAX_PAGES = 50 // 안전 제한: 최대 50페이지 × 100개 = 5000개/상태
 
     for (const state of ['opened', 'closed']) {
-      const chatRes = await fetch(
-        `${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`,
-        { headers: getChannelHeaders() }
-      )
+      let since = undefined
+      let page = 0
 
-      if (!chatRes.ok) {
-        const errText = await chatRes.text()
-        console.error(`채널톡 user-chats(${state}) 조회 실패:`, chatRes.status, errText)
-        continue
-      }
+      while (page < MAX_PAGES) {
+        let url = `${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`
+        if (since) url += `&since=${since}`
 
-      const chatData = await chatRes.json()
-      const chats = chatData.userChats || []
-      const users = chatData.users || []
+        const chatRes = await fetch(url, { headers: getChannelHeaders() })
 
-      // users 배열에서 이름 매칭
-      for (const chat of chats) {
-        const user = users.find(u => u.id === chat.userId)
-        const userName = user?.profile?.name || user?.name || ''
-
-        if (userName && userName.includes(customerName)) {
-          allChats.push({ chat, userName, userId: chat.userId })
+        if (!chatRes.ok) {
+          const errText = await chatRes.text()
+          console.error(`채널톡 user-chats(${state}) p${page} 조회 실패:`, chatRes.status, errText)
+          break
         }
+
+        const chatData = await chatRes.json()
+        const chats = chatData.userChats || []
+        const users = chatData.users || []
+
+        // users 배열에서 이름 매칭
+        for (const chat of chats) {
+          const user = users.find(u => u.id === chat.userId)
+          const userName = user?.profile?.name || user?.name || ''
+
+          if (userName && userName.includes(customerName)) {
+            allChats.push({ chat, userName, userId: chat.userId })
+          }
+        }
+
+        // 더 이상 데이터 없으면 종료
+        if (chats.length < 100) break
+
+        // 다음 페이지 커서 설정 (마지막 채팅의 createdAt 사용)
+        since = chats[chats.length - 1].createdAt
+        page++
       }
     }
 
@@ -56,7 +69,7 @@ async function fetchChannelConversations(customerName) {
     // 2. 매칭된 채팅의 메시지 가져오기
     const allConversations = []
 
-    for (const { chat, userName } of allChats.slice(0, 5)) {
+    for (const { chat, userName } of allChats.slice(0, 10)) {
       const msgRes = await fetch(
         `${CHANNEL_API}/v5/user-chats/${chat.id}/messages?sortOrder=asc&limit=50`,
         { headers: getChannelHeaders() }
@@ -238,25 +251,31 @@ export async function POST(request) {
 역할:
 - 채널톡 대화 내용을 조회하고 분석합니다
 - 고객 문의에 대한 최적의 CS 대응 답변을 생성합니다
-- 회사 CS 정책/매뉴얼에 기반한 정확한 답변을 제공합니다
-- 과거 상담 이력을 참고하여 일관된 톤과 스타일로 답변합니다
+- 과거 실제 상담 이력을 최우선으로 참고하여 답변합니다
 
 사용 가능한 기능:
 1. 채널톡 대화 조회: 특정 소비자/고객의 채널톡 대화 내용을 가져올 수 있습니다
 2. 정책 검색: 회사 CS 대응 정책/매뉴얼을 검색할 수 있습니다
-3. 이력 검색: 과거 유사한 상담에서 어떻게 대응했는지 찾을 수 있습니다
+3. 이력 검색: 과거 유사한 상담에서 실제로 어떻게 대응했는지 찾을 수 있습니다
+
+⚠️ 핵심 판단 원칙 (매우 중요):
+- 정책은 원칙적인 가이드라인일 뿐이며, 실제 상황에서는 애매한 경우가 많습니다
+- 예: "1/3 이하 수강시 2/3 환불"이라는 정책이 있어도, 4강짜리 강의에서 1강이 기준인지 2강이 기준인지는 정책만으로 판단할 수 없습니다
+- 이런 애매한 경우에는 반드시 과거 상담 이력을 검색하여, 동일하거나 유사한 상황에서 실제로 어떻게 대응했는지를 기준으로 삼으세요
+- 과거 이력이 있으면 그 판례를 따르고, 없으면 정책 원칙에 기반하여 답변합니다
 
 대화 내용을 가져온 후 사용자가 대응 방법을 물으면:
-1. 먼저 관련 정책을 자동으로 검색합니다
-2. 과거 유사 상담 이력도 함께 검색합니다
-3. 정책과 이력을 기반으로 구체적인 대응 답변을 작성합니다
+1. 먼저 과거 유사 상담 이력을 검색합니다 (가장 중요)
+2. 관련 정책도 함께 검색합니다
+3. 과거 이력 > 정책 순서로 우선하여 답변을 작성합니다
 
 답변 작성 원칙:
 - 존댓말 사용 (~~습니다, ~~드리겠습니다)
 - 공감 표현으로 시작
 - 구체적인 해결 방안 제시
 - 핵심만 전달 (3-5문장)
-- 과거 상담 사례가 있으면 그 톤과 스타일을 따르세요
+- 과거 상담 사례가 있으면 반드시 그 판단 기준과 톤을 따르세요
+- 과거 사례를 참고했을 경우 "(과거 유사 사례 기반)" 이라고 명시해주세요
 
 채널톡 대화를 보여줄 때는 읽기 쉽게 대화 형식으로 정리해주세요.
 이미지가 포함된 경우 이미지 내용을 분석하여 맥락을 파악합니다.`
