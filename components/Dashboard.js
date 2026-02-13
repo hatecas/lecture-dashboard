@@ -3916,7 +3916,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           </div>
                         </div>
                       ) : sheetApiData ? (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: '#fff' }}>
+                        <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: '#fff' }}>
                           <thead>
                             {/* 첫 번째 행 - 테이블 제목 (sticky) */}
                             {sheetApiData.length > 0 && (
@@ -3933,14 +3933,14 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                     whiteSpace: 'nowrap',
                                     position: 'sticky',
                                     top: 0,
-                                    zIndex: 2
+                                    zIndex: 3
                                   }}>
                                     {cell}
                                   </th>
                                 ))}
                               </tr>
                             )}
-                            {/* 두 번째 행 - 컬럼 헤더 */}
+                            {/* 두 번째 행 - 컬럼 헤더 (sticky) */}
                             {sheetApiData.length > 1 && (
                               <tr>
                                 {sheetApiData[1].map((cell, i) => (
@@ -3952,7 +3952,10 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                     textAlign: 'left',
                                     fontWeight: '600',
                                     color: '#1e293b',
-                                    whiteSpace: 'nowrap'
+                                    whiteSpace: 'nowrap',
+                                    position: 'sticky',
+                                    top: '41px',
+                                    zIndex: 2
                                   }}>
                                     {cell}
                                   </th>
