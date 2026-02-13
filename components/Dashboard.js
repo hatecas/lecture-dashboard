@@ -129,7 +129,15 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [csMessages, setCsMessages] = useState([])
   const [csInput, setCsInput] = useState('')
   const [csSending, setCsSending] = useState(false)
+  const [csImages, setCsImages] = useState([]) // { file, preview, data, mediaType }
+  const [csMode, setCsMode] = useState('chat') // 'chat' | 'policy'
+  const [csPolicies, setCsPolicies] = useState([])
+  const [csPoliciesLoading, setCsPoliciesLoading] = useState(false)
+  const [csEditPolicy, setCsEditPolicy] = useState(null) // 편집 중인 정책
+  const [csNewPolicy, setCsNewPolicy] = useState({ title: '', category: '환불', content: '' })
+  const [csShowAddPolicy, setCsShowAddPolicy] = useState(false)
   const csEndRef = useRef(null)
+  const csFileRef = useRef(null)
 
   // 서버에서 시트 목록 로드
   const loadSavedSheets = async () => {
@@ -3988,264 +3996,510 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           {/* CS AI 탭 */}
           {currentTab === 'cs-ai' && (
             <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)' }}>
-              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                🤖 CS 대응 AI
-                <HelpTooltip text={"고객 문의 내용을 입력하면\nAI가 전문적인 CS 답변을\n자동으로 생성해드립니다.\n환불, 결제, 수강 문의 등\n다양한 상황에 대응할 수 있습니다."} />
-              </h2>
+              {/* 헤더 + 모드 전환 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  🤖 CS 대응 AI
+                  <HelpTooltip text={"고객 문의 내용을 입력하면\nAI가 전문적인 CS 답변을\n자동으로 생성해드립니다.\n\n📋 정책 관리에서 회사 환불정책,\n대응 매뉴얼 등을 등록하면\nAI가 정책에 맞게 답변합니다."} />
+                </h2>
+                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', padding: '3px' }}>
+                  <button onClick={() => setCsMode('chat')} style={{
+                    padding: '8px 16px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+                    background: csMode === 'chat' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                    color: csMode === 'chat' ? '#a5b4fc' : '#64748b'
+                  }}>💬 채팅</button>
+                  <button onClick={() => {
+                    setCsMode('policy')
+                    if (csPolicies.length === 0) {
+                      setCsPoliciesLoading(true)
+                      fetch('/api/cs-policies', { headers: getAuthHeaders() })
+                        .then(r => r.json())
+                        .then(d => setCsPolicies(d.policies || []))
+                        .catch(() => {})
+                        .finally(() => setCsPoliciesLoading(false))
+                    }
+                  }} style={{
+                    padding: '8px 16px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+                    background: csMode === 'policy' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                    color: csMode === 'policy' ? '#a5b4fc' : '#64748b'
+                  }}>📋 정책 관리</button>
+                </div>
+              </div>
 
-              {/* 채팅 영역 */}
-              <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: '16px',
-                border: '1px solid rgba(255,255,255,0.08)',
-                padding: '20px',
-                marginBottom: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '16px'
-              }}>
-                {csMessages.length === 0 ? (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748b', gap: '16px' }}>
-                    <div style={{ fontSize: '64px' }}>🤖</div>
-                    <div style={{ textAlign: 'center' }}>
-                      <p style={{ fontSize: '18px', fontWeight: '600', color: '#94a3b8', marginBottom: '8px' }}>CS 대응 AI</p>
-                      <p style={{ fontSize: '14px', lineHeight: '1.6' }}>고객 문의 내용을 입력하면<br/>전문적인 CS 답변을 생성해드립니다</p>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', marginTop: '8px' }}>
-                      {['환불 요청 고객 대응', '결제 오류 문의', '강의 불만 컴플레인', '수강 방법 문의'].map(example => (
-                        <button
-                          key={example}
-                          onClick={() => setCsInput(example)}
-                          style={{
-                            padding: '8px 16px',
-                            background: 'rgba(99,102,241,0.1)',
-                            border: '1px solid rgba(99,102,241,0.25)',
-                            borderRadius: '20px',
-                            color: '#a5b4fc',
-                            fontSize: '13px',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease'
-                          }}
-                        >
-                          {example}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  csMessages.map((msg, idx) => (
-                    <div key={idx} style={{
-                      display: 'flex',
-                      justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                      gap: '10px'
-                    }}>
-                      {msg.role === 'assistant' && (
+              {/* 채팅 모드 */}
+              {csMode === 'chat' && (
+                <>
+                  {/* 채팅 영역 */}
+                  <div style={{
+                    flex: 1, overflowY: 'auto', background: 'rgba(255,255,255,0.03)', borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.08)', padding: '20px', marginBottom: '16px',
+                    display: 'flex', flexDirection: 'column', gap: '16px'
+                  }}>
+                    {csMessages.length === 0 ? (
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748b', gap: '16px' }}>
+                        <div style={{ fontSize: '64px' }}>🤖</div>
+                        <div style={{ textAlign: 'center' }}>
+                          <p style={{ fontSize: '18px', fontWeight: '600', color: '#94a3b8', marginBottom: '8px' }}>CS 대응 AI</p>
+                          <p style={{ fontSize: '14px', lineHeight: '1.6' }}>고객 문의 내용을 입력하면<br/>전문적인 CS 답변을 생성해드립니다</p>
+                          <p style={{ fontSize: '12px', color: '#475569', marginTop: '8px' }}>이미지도 첨부할 수 있습니다 (스크린샷, 결제내역 등)</p>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', marginTop: '8px' }}>
+                          {['환불 요청 고객 대응', '결제 오류 문의', '강의 불만 컴플레인', '수강 방법 문의'].map(example => (
+                            <button key={example} onClick={() => setCsInput(example)} style={{
+                              padding: '8px 16px', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)',
+                              borderRadius: '20px', color: '#a5b4fc', fontSize: '13px', cursor: 'pointer'
+                            }}>{example}</button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      csMessages.map((msg, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: '10px' }}>
+                          {msg.role === 'assistant' && (
+                            <div style={{
+                              width: '36px', height: '36px', borderRadius: '50%',
+                              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0
+                            }}>🤖</div>
+                          )}
+                          <div style={{
+                            maxWidth: '75%', padding: '14px 18px',
+                            borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                            background: msg.role === 'user' ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'rgba(255,255,255,0.08)',
+                            border: msg.role === 'user' ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                            color: '#e2e8f0', fontSize: '14px', lineHeight: '1.7', whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+                          }}>
+                            {/* 이미지 미리보기 */}
+                            {msg.images && msg.images.length > 0 && (
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: msg.content ? '10px' : 0 }}>
+                                {msg.images.map((img, i) => (
+                                  <img key={i} src={img.preview} alt="" style={{
+                                    maxWidth: '200px', maxHeight: '150px', borderRadius: '8px', objectFit: 'cover'
+                                  }} />
+                                ))}
+                              </div>
+                            )}
+                            {msg.content}
+                            {msg.role === 'assistant' && (
+                              <button onClick={() => { navigator.clipboard.writeText(msg.content) }} style={{
+                                display: 'block', marginTop: '10px', padding: '4px 10px',
+                                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                                borderRadius: '6px', color: '#94a3b8', fontSize: '11px', cursor: 'pointer'
+                              }}>📋 복사</button>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    {csSending && (
+                      <div style={{ display: 'flex', gap: '10px' }}>
                         <div style={{
                           width: '36px', height: '36px', borderRadius: '50%',
                           background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: '18px', flexShrink: 0
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0
                         }}>🤖</div>
-                      )}
-                      <div style={{
-                        maxWidth: '75%',
-                        padding: '14px 18px',
-                        borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                        background: msg.role === 'user'
-                          ? 'linear-gradient(135deg, #6366f1, #4f46e5)'
-                          : 'rgba(255,255,255,0.08)',
-                        border: msg.role === 'user' ? 'none' : '1px solid rgba(255,255,255,0.1)',
-                        color: '#e2e8f0',
-                        fontSize: '14px',
-                        lineHeight: '1.7',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word'
-                      }}>
-                        {msg.content}
-                        {msg.role === 'assistant' && (
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(msg.content)
-                              alert('답변이 복사되었습니다!')
-                            }}
-                            style={{
-                              display: 'block',
-                              marginTop: '10px',
-                              padding: '4px 10px',
-                              background: 'rgba(255,255,255,0.08)',
-                              border: '1px solid rgba(255,255,255,0.15)',
-                              borderRadius: '6px',
-                              color: '#94a3b8',
-                              fontSize: '11px',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            📋 복사
-                          </button>
-                        )}
+                        <div style={{
+                          padding: '14px 18px', borderRadius: '18px 18px 18px 4px',
+                          background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)',
+                          color: '#94a3b8', fontSize: '14px'
+                        }}>답변 생성 중...</div>
                       </div>
-                    </div>
-                  ))
-                )}
-                {csSending && (
-                  <div style={{ display: 'flex', gap: '10px' }}>
+                    )}
+                    <div ref={csEndRef} />
+                  </div>
+
+                  {/* 이미지 미리보기 */}
+                  {csImages.length > 0 && (
                     <div style={{
-                      width: '36px', height: '36px', borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '18px', flexShrink: 0
-                    }}>🤖</div>
-                    <div style={{
-                      padding: '14px 18px',
-                      borderRadius: '18px 18px 18px 4px',
-                      background: 'rgba(255,255,255,0.08)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      color: '#94a3b8',
-                      fontSize: '14px'
+                      display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '8px 12px',
+                      background: 'rgba(255,255,255,0.03)', borderRadius: '12px 12px 0 0',
+                      border: '1px solid rgba(255,255,255,0.08)', borderBottom: 'none'
                     }}>
-                      답변 생성 중...
+                      {csImages.map((img, i) => (
+                        <div key={i} style={{ position: 'relative' }}>
+                          <img src={img.preview} alt="" style={{ width: '60px', height: '60px', borderRadius: '8px', objectFit: 'cover' }} />
+                          <button onClick={() => {
+                            URL.revokeObjectURL(img.preview)
+                            setCsImages(prev => prev.filter((_, idx) => idx !== i))
+                          }} style={{
+                            position: 'absolute', top: '-6px', right: '-6px',
+                            width: '20px', height: '20px', borderRadius: '50%',
+                            background: '#ef4444', border: 'none', color: '#fff',
+                            fontSize: '12px', cursor: 'pointer', display: 'flex',
+                            alignItems: 'center', justifyContent: 'center', lineHeight: 1
+                          }}>x</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 입력 영역 */}
+                  <div style={{
+                    display: 'flex', gap: '10px', flexShrink: 0,
+                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: csImages.length > 0 ? '0 0 16px 16px' : '16px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderTop: csImages.length > 0 ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(255,255,255,0.08)',
+                    padding: '12px'
+                  }}>
+                    <input
+                      type="file"
+                      ref={csFileRef}
+                      accept="image/*"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || [])
+                        for (const file of files) {
+                          const reader = new FileReader()
+                          reader.onload = (ev) => {
+                            const base64 = ev.target.result.split(',')[1]
+                            setCsImages(prev => [...prev, {
+                              file,
+                              preview: URL.createObjectURL(file),
+                              data: base64,
+                              mediaType: file.type
+                            }])
+                          }
+                          reader.readAsDataURL(file)
+                        }
+                        e.target.value = ''
+                      }}
+                    />
+                    <button onClick={() => csFileRef.current?.click()} title="이미지 첨부" style={{
+                      padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '12px', color: '#94a3b8', fontSize: '18px', cursor: 'pointer', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>🖼️</button>
+                    <textarea
+                      value={csInput}
+                      onChange={(e) => setCsInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          if ((csInput.trim() || csImages.length > 0) && !csSending) {
+                            const userMsg = {
+                              role: 'user',
+                              content: csInput.trim(),
+                              images: csImages.map(img => ({ preview: img.preview, data: img.data, mediaType: img.mediaType }))
+                            }
+                            const newMessages = [...csMessages, userMsg]
+                            setCsMessages(newMessages)
+                            setCsInput('')
+                            setCsImages([])
+                            setCsSending(true)
+                            setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                            fetch('/api/cs-ai', {
+                              method: 'POST',
+                              headers: getAuthHeaders(),
+                              body: JSON.stringify({ messages: newMessages.map(m => ({
+                                role: m.role, content: m.content,
+                                images: m.images?.filter(img => img.data).map(img => ({ data: img.data, mediaType: img.mediaType }))
+                              }))})
+                            })
+                              .then(res => res.json())
+                              .then(data => {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: data.reply || '답변 생성에 실패했습니다.' }])
+                                setCsSending(false)
+                                setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                              })
+                              .catch(() => {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류가 발생했습니다.' }])
+                                setCsSending(false)
+                              })
+                          }
+                        }
+                      }}
+                      onPaste={(e) => {
+                        const items = e.clipboardData?.items
+                        if (!items) return
+                        for (const item of items) {
+                          if (item.type.startsWith('image/')) {
+                            e.preventDefault()
+                            const file = item.getAsFile()
+                            const reader = new FileReader()
+                            reader.onload = (ev) => {
+                              const base64 = ev.target.result.split(',')[1]
+                              setCsImages(prev => [...prev, {
+                                file,
+                                preview: URL.createObjectURL(file),
+                                data: base64,
+                                mediaType: file.type
+                              }])
+                            }
+                            reader.readAsDataURL(file)
+                          }
+                        }
+                      }}
+                      placeholder="고객 문의 내용을 입력하세요... (Enter 전송 / 이미지 붙여넣기 가능)"
+                      style={{
+                        flex: 1, padding: '12px 16px', background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#e2e8f0',
+                        fontSize: '14px', resize: 'none', minHeight: '48px', maxHeight: '120px',
+                        outline: 'none', fontFamily: 'inherit', lineHeight: '1.5'
+                      }}
+                      rows={1}
+                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <button
+                        onClick={() => {
+                          if ((csInput.trim() || csImages.length > 0) && !csSending) {
+                            const userMsg = {
+                              role: 'user',
+                              content: csInput.trim(),
+                              images: csImages.map(img => ({ preview: img.preview, data: img.data, mediaType: img.mediaType }))
+                            }
+                            const newMessages = [...csMessages, userMsg]
+                            setCsMessages(newMessages)
+                            setCsInput('')
+                            setCsImages([])
+                            setCsSending(true)
+                            setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                            fetch('/api/cs-ai', {
+                              method: 'POST',
+                              headers: getAuthHeaders(),
+                              body: JSON.stringify({ messages: newMessages.map(m => ({
+                                role: m.role, content: m.content,
+                                images: m.images?.filter(img => img.data).map(img => ({ data: img.data, mediaType: img.mediaType }))
+                              }))})
+                            })
+                              .then(res => res.json())
+                              .then(data => {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: data.reply || '답변 생성에 실패했습니다.' }])
+                                setCsSending(false)
+                                setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                              })
+                              .catch(() => {
+                                setCsMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류가 발생했습니다.' }])
+                                setCsSending(false)
+                              })
+                          }
+                        }}
+                        disabled={(!csInput.trim() && csImages.length === 0) || csSending}
+                        style={{
+                          padding: '12px 20px',
+                          background: (csInput.trim() || csImages.length > 0) && !csSending ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'rgba(99,102,241,0.2)',
+                          border: 'none', borderRadius: '12px', color: '#fff', fontSize: '14px', fontWeight: '600',
+                          cursor: (csInput.trim() || csImages.length > 0) && !csSending ? 'pointer' : 'not-allowed',
+                          opacity: (csInput.trim() || csImages.length > 0) && !csSending ? 1 : 0.5, whiteSpace: 'nowrap'
+                        }}
+                      >{csSending ? '⏳' : '전송'}</button>
+                      {csMessages.length > 0 && (
+                        <button onClick={() => { setCsMessages([]); setCsInput(''); setCsImages([]) }} style={{
+                          padding: '8px 12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                          borderRadius: '10px', color: '#f87171', fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap'
+                        }}>초기화</button>
+                      )}
                     </div>
                   </div>
-                )}
-                <div ref={csEndRef} />
-              </div>
+                </>
+              )}
 
-              {/* 입력 영역 */}
-              <div style={{
-                display: 'flex',
-                gap: '10px',
-                flexShrink: 0,
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: '16px',
-                border: '1px solid rgba(255,255,255,0.08)',
-                padding: '12px'
-              }}>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <textarea
-                    value={csInput}
-                    onChange={(e) => setCsInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        if (csInput.trim() && !csSending) {
-                          const userMsg = { role: 'user', content: csInput.trim() }
-                          const newMessages = [...csMessages, userMsg]
-                          setCsMessages(newMessages)
-                          setCsInput('')
-                          setCsSending(true)
-                          setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-                          fetch('/api/cs-ai', {
-                            method: 'POST',
-                            headers: getAuthHeaders(),
-                            body: JSON.stringify({ messages: newMessages.map(m => ({ role: m.role, content: m.content })) })
-                          })
-                            .then(res => res.json())
-                            .then(data => {
-                              if (data.reply) {
-                                setCsMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
-                              } else {
-                                setCsMessages(prev => [...prev, { role: 'assistant', content: '죄송합니다. 답변 생성에 실패했습니다. 다시 시도해주세요.' }])
+              {/* 정책 관리 모드 */}
+              {csMode === 'policy' && (
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  {/* 정책 추가 버튼 */}
+                  <div style={{ marginBottom: '16px' }}>
+                    {!csShowAddPolicy ? (
+                      <button onClick={() => setCsShowAddPolicy(true)} style={{
+                        padding: '12px 20px', background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                        border: 'none', borderRadius: '12px', color: '#fff', fontSize: '14px', fontWeight: '600', cursor: 'pointer'
+                      }}>+ 새 정책 추가</button>
+                    ) : (
+                      <div style={{
+                        background: 'rgba(255,255,255,0.05)', borderRadius: '16px',
+                        border: '1px solid rgba(99,102,241,0.3)', padding: '20px'
+                      }}>
+                        <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '16px', color: '#a5b4fc' }}>새 정책 추가</h3>
+                        <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                          <input
+                            value={csNewPolicy.title}
+                            onChange={(e) => setCsNewPolicy(p => ({ ...p, title: e.target.value }))}
+                            placeholder="정책 제목 (예: 7일 이내 환불 규정)"
+                            style={{
+                              flex: 1, padding: '10px 14px', background: 'rgba(255,255,255,0.05)',
+                              border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px',
+                              color: '#e2e8f0', fontSize: '14px', outline: 'none'
+                            }}
+                          />
+                          <select
+                            value={csNewPolicy.category}
+                            onChange={(e) => setCsNewPolicy(p => ({ ...p, category: e.target.value }))}
+                            style={{
+                              padding: '10px 14px', background: 'rgba(255,255,255,0.05)',
+                              border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px',
+                              color: '#e2e8f0', fontSize: '14px', outline: 'none'
+                            }}
+                          >
+                            <option value="환불">환불</option>
+                            <option value="결제">결제</option>
+                            <option value="수강">수강</option>
+                            <option value="컴플레인">컴플레인</option>
+                            <option value="일반">일반</option>
+                          </select>
+                        </div>
+                        <textarea
+                          value={csNewPolicy.content}
+                          onChange={(e) => setCsNewPolicy(p => ({ ...p, content: e.target.value }))}
+                          placeholder={"정책 내용을 상세히 입력하세요.\n\n예시:\n- 결제 후 7일 이내, 수강률 20% 미만인 경우 전액 환불\n- 7일 초과 또는 수강률 20% 이상인 경우 환불 불가\n- 환불 처리 기간: 영업일 기준 3-5일\n- 환불 접수: 고객센터 또는 마이페이지에서 신청"}
+                          style={{
+                            width: '100%', padding: '12px 14px', background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px',
+                            color: '#e2e8f0', fontSize: '14px', outline: 'none', resize: 'vertical',
+                            minHeight: '150px', fontFamily: 'inherit', lineHeight: '1.6',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px', justifyContent: 'flex-end' }}>
+                          <button onClick={() => { setCsShowAddPolicy(false); setCsNewPolicy({ title: '', category: '환불', content: '' }) }} style={{
+                            padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '10px', color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                          }}>취소</button>
+                          <button onClick={async () => {
+                            if (!csNewPolicy.title || !csNewPolicy.content) return
+                            try {
+                              const res = await fetch('/api/cs-policies', {
+                                method: 'POST', headers: getAuthHeaders(),
+                                body: JSON.stringify(csNewPolicy)
+                              })
+                              const data = await res.json()
+                              if (data.policy) {
+                                setCsPolicies(prev => [...prev, data.policy])
+                                setCsNewPolicy({ title: '', category: '환불', content: '' })
+                                setCsShowAddPolicy(false)
                               }
-                              setCsSending(false)
-                              setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-                            })
-                            .catch(() => {
-                              setCsMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류가 발생했습니다. 다시 시도해주세요.' }])
-                              setCsSending(false)
-                            })
-                        }
-                      }
-                    }}
-                    placeholder="고객 문의 내용을 입력하세요... (Enter로 전송, Shift+Enter로 줄바꿈)"
-                    style={{
-                      flex: 1,
-                      padding: '12px 16px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '12px',
-                      color: '#e2e8f0',
-                      fontSize: '14px',
-                      resize: 'none',
-                      minHeight: '48px',
-                      maxHeight: '120px',
-                      outline: 'none',
-                      fontFamily: 'inherit',
-                      lineHeight: '1.5'
-                    }}
-                    rows={1}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <button
-                    onClick={() => {
-                      if (csInput.trim() && !csSending) {
-                        const userMsg = { role: 'user', content: csInput.trim() }
-                        const newMessages = [...csMessages, userMsg]
-                        setCsMessages(newMessages)
-                        setCsInput('')
-                        setCsSending(true)
-                        setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-                        fetch('/api/cs-ai', {
-                          method: 'POST',
-                          headers: getAuthHeaders(),
-                          body: JSON.stringify({ messages: newMessages.map(m => ({ role: m.role, content: m.content })) })
-                        })
-                          .then(res => res.json())
-                          .then(data => {
-                            if (data.reply) {
-                              setCsMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
-                            } else {
-                              setCsMessages(prev => [...prev, { role: 'assistant', content: '죄송합니다. 답변 생성에 실패했습니다. 다시 시도해주세요.' }])
-                            }
-                            setCsSending(false)
-                            setTimeout(() => csEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-                          })
-                          .catch(() => {
-                            setCsMessages(prev => [...prev, { role: 'assistant', content: '네트워크 오류가 발생했습니다. 다시 시도해주세요.' }])
-                            setCsSending(false)
-                          })
-                      }
-                    }}
-                    disabled={!csInput.trim() || csSending}
-                    style={{
-                      padding: '12px 20px',
-                      background: csInput.trim() && !csSending
-                        ? 'linear-gradient(135deg, #6366f1, #4f46e5)'
-                        : 'rgba(99,102,241,0.2)',
-                      border: 'none',
-                      borderRadius: '12px',
-                      color: '#fff',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      cursor: csInput.trim() && !csSending ? 'pointer' : 'not-allowed',
-                      transition: 'all 0.2s ease',
-                      opacity: csInput.trim() && !csSending ? 1 : 0.5,
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {csSending ? '⏳' : '전송'}
-                  </button>
-                  {csMessages.length > 0 && (
-                    <button
-                      onClick={() => { setCsMessages([]); setCsInput('') }}
-                      style={{
-                        padding: '8px 12px',
-                        background: 'rgba(239,68,68,0.1)',
-                        border: '1px solid rgba(239,68,68,0.25)',
-                        borderRadius: '10px',
-                        color: '#f87171',
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      초기화
-                    </button>
+                            } catch {}
+                          }} style={{
+                            padding: '10px 24px', background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                            border: 'none', borderRadius: '10px', color: '#fff', fontSize: '14px', fontWeight: '600', cursor: 'pointer'
+                          }}>저장</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 정책 목록 */}
+                  {csPoliciesLoading ? (
+                    <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                      <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+                      <p>정책 로딩 중...</p>
+                    </div>
+                  ) : csPolicies.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
+                      <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
+                      <p style={{ fontSize: '16px', fontWeight: '600', color: '#94a3b8', marginBottom: '8px' }}>등록된 정책이 없습니다</p>
+                      <p style={{ fontSize: '13px', lineHeight: '1.6' }}>환불 정책, 결제 규정, CS 대응 매뉴얼 등을<br/>등록하면 AI가 정책에 맞게 답변합니다</p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {csPolicies.map(policy => (
+                        <div key={policy.id} style={{
+                          background: 'rgba(255,255,255,0.03)', borderRadius: '14px',
+                          border: '1px solid rgba(255,255,255,0.08)', padding: '18px', position: 'relative'
+                        }}>
+                          {csEditPolicy?.id === policy.id ? (
+                            // 편집 모드
+                            <div>
+                              <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                                <input
+                                  value={csEditPolicy.title}
+                                  onChange={(e) => setCsEditPolicy(p => ({ ...p, title: e.target.value }))}
+                                  style={{
+                                    flex: 1, padding: '10px 14px', background: 'rgba(255,255,255,0.05)',
+                                    border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px',
+                                    color: '#e2e8f0', fontSize: '14px', outline: 'none'
+                                  }}
+                                />
+                                <select
+                                  value={csEditPolicy.category}
+                                  onChange={(e) => setCsEditPolicy(p => ({ ...p, category: e.target.value }))}
+                                  style={{
+                                    padding: '10px 14px', background: 'rgba(255,255,255,0.05)',
+                                    border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px',
+                                    color: '#e2e8f0', fontSize: '14px', outline: 'none'
+                                  }}
+                                >
+                                  <option value="환불">환불</option>
+                                  <option value="결제">결제</option>
+                                  <option value="수강">수강</option>
+                                  <option value="컴플레인">컴플레인</option>
+                                  <option value="일반">일반</option>
+                                </select>
+                              </div>
+                              <textarea
+                                value={csEditPolicy.content}
+                                onChange={(e) => setCsEditPolicy(p => ({ ...p, content: e.target.value }))}
+                                style={{
+                                  width: '100%', padding: '12px 14px', background: 'rgba(255,255,255,0.05)',
+                                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px',
+                                  color: '#e2e8f0', fontSize: '14px', outline: 'none', resize: 'vertical',
+                                  minHeight: '120px', fontFamily: 'inherit', lineHeight: '1.6',
+                                  boxSizing: 'border-box'
+                                }}
+                              />
+                              <div style={{ display: 'flex', gap: '8px', marginTop: '12px', justifyContent: 'flex-end' }}>
+                                <button onClick={() => setCsEditPolicy(null)} style={{
+                                  padding: '8px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                                  borderRadius: '8px', color: '#94a3b8', fontSize: '13px', cursor: 'pointer'
+                                }}>취소</button>
+                                <button onClick={async () => {
+                                  try {
+                                    const res = await fetch('/api/cs-policies', {
+                                      method: 'PUT', headers: getAuthHeaders(),
+                                      body: JSON.stringify(csEditPolicy)
+                                    })
+                                    const data = await res.json()
+                                    if (data.policy) {
+                                      setCsPolicies(prev => prev.map(p => p.id === data.policy.id ? data.policy : p))
+                                      setCsEditPolicy(null)
+                                    }
+                                  } catch {}
+                                }} style={{
+                                  padding: '8px 16px', background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                                  border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer'
+                                }}>저장</button>
+                              </div>
+                            </div>
+                          ) : (
+                            // 보기 모드
+                            <>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <span style={{
+                                    padding: '3px 10px', background: 'rgba(99,102,241,0.15)', borderRadius: '6px',
+                                    fontSize: '11px', color: '#a5b4fc', fontWeight: '600'
+                                  }}>{policy.category}</span>
+                                  <h4 style={{ fontSize: '15px', fontWeight: '600', color: '#e2e8f0' }}>{policy.title}</h4>
+                                </div>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button onClick={() => setCsEditPolicy({ ...policy })} style={{
+                                    padding: '4px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                                    borderRadius: '6px', color: '#94a3b8', fontSize: '11px', cursor: 'pointer'
+                                  }}>수정</button>
+                                  <button onClick={async () => {
+                                    if (!confirm('이 정책을 삭제하시겠습니까?')) return
+                                    try {
+                                      await fetch('/api/cs-policies', {
+                                        method: 'DELETE', headers: getAuthHeaders(),
+                                        body: JSON.stringify({ id: policy.id })
+                                      })
+                                      setCsPolicies(prev => prev.filter(p => p.id !== policy.id))
+                                    } catch {}
+                                  }} style={{
+                                    padding: '4px 10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)',
+                                    borderRadius: '6px', color: '#f87171', fontSize: '11px', cursor: 'pointer'
+                                  }}>삭제</button>
+                                </div>
+                              </div>
+                              <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>{policy.content}</p>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
-              </div>
+              )}
             </div>
           )}
 
