@@ -195,9 +195,19 @@ export async function POST(request) {
         })
 
       } catch (error) {
+        let errMsg = '알 수 없는 오류'
+        try {
+          errMsg = [
+            error?.message,
+            error?.stderr,
+            error?.shortMessage,
+            error?.code && `code: ${error.code}`,
+            error?.exitCode != null && `exitCode: ${error.exitCode}`,
+          ].filter(Boolean).join(' | ') || JSON.stringify(error, Object.getOwnPropertyNames(error || {}))
+        } catch (e) { errMsg = String(error) }
         sseEvent(controller, encoder, {
           type: 'error',
-          message: error.message || '알 수 없는 오류가 발생했습니다.'
+          message: errMsg
         })
       } finally {
         controller.close()
