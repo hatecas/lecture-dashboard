@@ -22,44 +22,60 @@ function extractVideoId(url) {
   return null
 }
 
-// Helper: Analyze YouTube URL directly with Gemini
-async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
-  const ai = new GoogleGenAI({ apiKey: geminiKey })
+// Helper: Download YouTube audio via yt-dlp
+async function downloadYoutubeAudio(url, onProgress) {
+  const fs = await import('fs/promises')
+  const os = await import('os')
+  const path = await import('path')
+  const youtubedl = (await import('youtube-dl-exec')).default
 
-  const videoId = extractVideoId(youtubeUrl)
+  const videoId = extractVideoId(url)
   if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
 
-  // Clean URL: Gemini requires plain youtube.com/watch?v= format
-  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`
-
-  onProgress('Gemini에 YouTube URL 전달 중...')
+  const fullUrl = `https://www.youtube.com/watch?v=${videoId}`
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yt-gemini-'))
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: [
-        {
-          fileData: {
-            fileUri: cleanUrl,
-          },
-        },
-        { text: prompt }
-      ],
+    onProgress('YouTube 영상 정보 가져오는 중...')
+    const info = await youtubedl(fullUrl, {
+      dumpSingleJson: true,
+      noWarnings: true,
+      noCheckCertificates: true,
     })
 
-    return response.text
-  } catch (error) {
-    console.error('[Gemini YouTube Error]', {
-      message: error.message,
-      status: error.status,
-      statusText: error.statusText,
-      code: error.code,
-      details: error.details,
-      errorInfo: error.errorInfo,
-      raw: JSON.stringify(error, Object.getOwnPropertyNames(error)),
+    const title = info.title || ''
+    const duration = info.duration || 0
+    onProgress(`영상: "${title}" (${Math.floor(duration / 60)}분 ${duration % 60}초)`)
+
+    onProgress('YouTube 오디오 다운로드 중...')
+    await youtubedl(fullUrl, {
+      format: 'bestaudio',
+      output: path.join(tmpDir, 'audio.%(ext)s'),
+      noWarnings: true,
+      noCheckCertificates: true,
     })
-    throw new Error(`Gemini YouTube 분석 실패: ${error.message || JSON.stringify(error)}`)
+
+    const files = await fs.readdir(tmpDir)
+    if (files.length === 0) throw new Error('다운로드된 파일을 찾을 수 없습니다.')
+
+    const filePath = path.join(tmpDir, files[0])
+    const buffer = await fs.readFile(filePath)
+    const ext = files[0].split('.').pop() || 'webm'
+    const mimeType = ext === 'm4a' ? 'audio/mp4' : ext === 'mp4' ? 'audio/mp4' : `audio/${ext}`
+
+    onProgress(`다운로드 완료: ${(buffer.length / (1024 * 1024)).toFixed(1)}MB`)
+
+    return { buffer, ext, mimeType, title }
+  } finally {
+    await fs.rm(tmpDir, { recursive: true }).catch(() => {})
   }
+}
+
+// Helper: Analyze YouTube video with Gemini (download + File API upload)
+async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
+  const { buffer, ext, mimeType } = await downloadYoutubeAudio(youtubeUrl, onProgress)
+
+  return analyzeFileWithGemini(buffer, `youtube_audio.${ext}`, mimeType, prompt, geminiKey, onProgress)
 }
 
 // Helper: Analyze uploaded file with Gemini (via File API)
