@@ -22,88 +22,80 @@ function extractVideoId(url) {
   return null
 }
 
-// Helper: Run yt-dlp command with auto-retry across cookie strategies
-async function runYtdlp(args, options = {}) {
-  const { execFile } = await import('child_process')
-  const { promisify } = await import('util')
-  const execFileAsync = promisify(execFile)
-  const execOpts = { maxBuffer: 10 * 1024 * 1024, timeout: options.timeout || 60000 }
+// Helper: Fetch YouTube transcript (no auth required)
+async function fetchYoutubeTranscript(videoId, onProgress) {
+  onProgress('YouTube 자막 가져오는 중...')
 
-  // Try: edge cookies → chrome cookies → no cookies (with iOS client fallback)
-  const strategies = [
-    { name: 'edge', extra: ['--cookies-from-browser', 'edge'] },
-    { name: 'chrome', extra: ['--cookies-from-browser', 'chrome'] },
-    { name: 'no-auth', extra: ['--extractor-args', 'youtube:player_client=ios,web_creator'] },
-  ]
-
-  let lastError
-  for (const strategy of strategies) {
-    try {
-      return await execFileAsync('yt-dlp', [
-        ...args, '--no-warnings', '--no-check-certificates', ...strategy.extra,
-      ], execOpts)
-    } catch (error) {
-      lastError = error
-      if (error.code === 'ENOENT') {
-        throw new Error('yt-dlp가 설치되어 있지 않습니다. "winget install yt-dlp" 또는 "pip install yt-dlp"로 설치해주세요.')
-      }
-      // Continue to next strategy
+  const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
     }
+  })
+  if (!res.ok) throw new Error(`YouTube 페이지 로드 실패: ${res.status}`)
+
+  const html = await res.text()
+
+  // Extract video title
+  const titleMatch = html.match(/"title":"(.*?)"/) || html.match(/<title>(.*?)<\/title>/)
+  const title = titleMatch ? titleMatch[1].replace(/\\u0026/g, '&').replace(/ - YouTube$/, '') : ''
+
+  // Find caption tracks
+  const captionMatch = html.match(/"captionTracks":(\[.*?\])/)
+  if (!captionMatch) {
+    throw new Error('이 영상에 자막이 없습니다. 파일 업로드 방식을 이용해주세요.')
   }
-  throw lastError
+
+  const tracks = JSON.parse(captionMatch[1])
+
+  // Prefer Korean → auto-generated → first available
+  const track = tracks.find(t => t.languageCode === 'ko' && t.kind !== 'asr')
+    || tracks.find(t => t.languageCode === 'ko')
+    || tracks.find(t => t.kind === 'asr')
+    || tracks[0]
+
+  if (!track) throw new Error('사용 가능한 자막 트랙이 없습니다.')
+
+  onProgress(`자막 다운로드 중... (${track.name?.simpleText || track.languageCode})`)
+
+  const captionRes = await fetch(track.baseUrl)
+  if (!captionRes.ok) throw new Error('자막 다운로드 실패')
+
+  const xml = await captionRes.text()
+
+  // Parse XML → plain text
+  const segments = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)]
+  const transcript = segments
+    .map(m => m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\n/g, ' '))
+    .join(' ')
+    .trim()
+
+  if (!transcript) throw new Error('자막 내용이 비어있습니다.')
+
+  onProgress(`자막 완료: ${transcript.length.toLocaleString()}자`)
+
+  return { title, transcript }
 }
 
-// Helper: Download YouTube audio via system yt-dlp
-async function downloadYoutubeAudio(url, onProgress) {
-  const fs = await import('fs/promises')
-  const os = await import('os')
-  const path = await import('path')
+// Helper: Analyze YouTube via transcript + Gemini text analysis
+async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
+  const ai = new GoogleGenAI({ apiKey: geminiKey })
 
-  const videoId = extractVideoId(url)
+  const videoId = extractVideoId(youtubeUrl)
   if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
 
-  const fullUrl = `https://www.youtube.com/watch?v=${videoId}`
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yt-gemini-'))
+  const { title, transcript } = await fetchYoutubeTranscript(videoId, onProgress)
 
-  try {
-    onProgress('YouTube 영상 정보 가져오는 중...')
-    const { stdout: infoJson } = await runYtdlp(
-      ['--dump-single-json', fullUrl],
-      { timeout: 30000 }
-    )
+  onProgress('Gemini가 강의 내용을 분석 중...')
 
-    const info = JSON.parse(infoJson)
-    const title = info.title || ''
-    const duration = info.duration || 0
-    onProgress(`영상: "${title}" (${Math.floor(duration / 60)}분 ${duration % 60}초)`)
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: [
+      { text: `[강의 제목: ${title}]\n\n[강의 자막 전문]\n${transcript}\n\n---\n\n${prompt}` }
+    ],
+  })
 
-    onProgress('YouTube 오디오 다운로드 중...')
-    await runYtdlp(
-      ['-f', 'bestaudio', '-o', path.join(tmpDir, 'audio.%(ext)s'), fullUrl],
-      { timeout: 240000 }
-    )
-
-    const files = await fs.readdir(tmpDir)
-    if (files.length === 0) throw new Error('다운로드된 파일을 찾을 수 없습니다.')
-
-    const filePath = path.join(tmpDir, files[0])
-    const buffer = await fs.readFile(filePath)
-    const ext = files[0].split('.').pop() || 'webm'
-    const mimeType = ext === 'm4a' ? 'audio/mp4' : ext === 'mp4' ? 'audio/mp4' : `audio/${ext}`
-
-    onProgress(`다운로드 완료: ${(buffer.length / (1024 * 1024)).toFixed(1)}MB`)
-
-    return { buffer, ext, mimeType, title }
-  } finally {
-    await fs.rm(tmpDir, { recursive: true }).catch(() => {})
-  }
-}
-
-// Helper: Analyze YouTube video with Gemini (download + File API upload)
-async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
-  const { buffer, ext, mimeType } = await downloadYoutubeAudio(youtubeUrl, onProgress)
-
-  return analyzeFileWithGemini(buffer, `youtube_audio.${ext}`, mimeType, prompt, geminiKey, onProgress)
+  return response.text
 }
 
 // Helper: Analyze uploaded file with Gemini (via File API)
