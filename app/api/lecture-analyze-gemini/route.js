@@ -22,80 +22,41 @@ function extractVideoId(url) {
   return null
 }
 
-// Helper: Fetch YouTube transcript (no auth required)
-async function fetchYoutubeTranscript(videoId, onProgress) {
-  onProgress('YouTube 자막 가져오는 중...')
-
-  const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
-    }
-  })
-  if (!res.ok) throw new Error(`YouTube 페이지 로드 실패: ${res.status}`)
-
-  const html = await res.text()
-
-  // Extract video title
-  const titleMatch = html.match(/"title":"(.*?)"/) || html.match(/<title>(.*?)<\/title>/)
-  const title = titleMatch ? titleMatch[1].replace(/\\u0026/g, '&').replace(/ - YouTube$/, '') : ''
-
-  // Find caption tracks
-  const captionMatch = html.match(/"captionTracks":(\[.*?\])/)
-  if (!captionMatch) {
-    throw new Error('이 영상에 자막이 없습니다. 파일 업로드 방식을 이용해주세요.')
-  }
-
-  const tracks = JSON.parse(captionMatch[1])
-
-  // Prefer Korean → auto-generated → first available
-  const track = tracks.find(t => t.languageCode === 'ko' && t.kind !== 'asr')
-    || tracks.find(t => t.languageCode === 'ko')
-    || tracks.find(t => t.kind === 'asr')
-    || tracks[0]
-
-  if (!track) throw new Error('사용 가능한 자막 트랙이 없습니다.')
-
-  onProgress(`자막 다운로드 중... (${track.name?.simpleText || track.languageCode})`)
-
-  const captionRes = await fetch(track.baseUrl)
-  if (!captionRes.ok) throw new Error('자막 다운로드 실패')
-
-  const xml = await captionRes.text()
-
-  // Parse XML → plain text
-  const segments = [...xml.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)]
-  const transcript = segments
-    .map(m => m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\n/g, ' '))
-    .join(' ')
-    .trim()
-
-  if (!transcript) throw new Error('자막 내용이 비어있습니다.')
-
-  onProgress(`자막 완료: ${transcript.length.toLocaleString()}자`)
-
-  return { title, transcript }
-}
-
-// Helper: Analyze YouTube via transcript + Gemini text analysis
+// Helper: Analyze YouTube URL with Gemini via REST API (v1beta)
 async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
-  const ai = new GoogleGenAI({ apiKey: geminiKey })
-
   const videoId = extractVideoId(youtubeUrl)
   if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
 
-  const { title, transcript } = await fetchYoutubeTranscript(videoId, onProgress)
+  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`
 
-  onProgress('Gemini가 강의 내용을 분석 중...')
+  onProgress('Gemini에 YouTube 영상 전달 중...')
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
-    contents: [
-      { text: `[강의 제목: ${title}]\n\n[강의 자막 전문]\n${transcript}\n\n---\n\n${prompt}` }
-    ],
-  })
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { file_data: { file_uri: cleanUrl, mime_type: 'video/*' } },
+            { text: prompt }
+          ]
+        }]
+      })
+    }
+  )
 
-  return response.text
+  const data = await res.json()
+
+  if (!res.ok || data.error) {
+    const errMsg = data.error?.message || JSON.stringify(data.error) || `HTTP ${res.status}`
+    throw new Error(`Gemini API 오류: ${errMsg}`)
+  }
+
+  onProgress('분석 완료!')
+
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '분석 결과가 비어있습니다.'
 }
 
 // Helper: Analyze uploaded file with Gemini (via File API)
