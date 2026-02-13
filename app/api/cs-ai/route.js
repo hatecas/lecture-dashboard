@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { supabase } from '@/lib/supabase'
 
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
@@ -12,6 +13,33 @@ export async function POST(request) {
 
     if (!messages || messages.length === 0) {
       return NextResponse.json({ error: '메시지가 없습니다' }, { status: 400 })
+    }
+
+    // Supabase에서 저장된 CS 정책 로드
+    let policiesText = ''
+    try {
+      const { data: policies } = await supabase
+        .from('cs_policies')
+        .select('title, category, content')
+        .order('category')
+
+      if (policies && policies.length > 0) {
+        policiesText = '\n\n===== 우리 회사 CS 정책 =====\n'
+        const grouped = {}
+        for (const p of policies) {
+          if (!grouped[p.category]) grouped[p.category] = []
+          grouped[p.category].push(p)
+        }
+        for (const [cat, items] of Object.entries(grouped)) {
+          policiesText += `\n[${cat}]\n`
+          for (const item of items) {
+            policiesText += `■ ${item.title}\n${item.content}\n\n`
+          }
+        }
+        policiesText += '===== 정책 끝 =====\n\n반드시 위 회사 정책에 기반하여 답변하세요. 정책에 명시된 내용과 다른 답변을 하지 마세요.'
+      }
+    } catch {
+      // 테이블 없으면 무시
     }
 
     const systemPrompt = `당신은 온라인 강의 플랫폼의 전문 CS(고객상담) 담당자입니다.
@@ -36,8 +64,38 @@ export async function POST(request) {
 - 불만/컴플레인: 진심 어린 사과 + 보상/해결책 제시
 - 기술 문제: 단계별 해결 방법 안내
 
+이미지가 포함된 경우:
+- 이미지 내용을 분석하여 고객 문의 맥락을 파악합니다
+- 스크린샷의 오류 메시지, 결제 내역 등을 읽고 답변에 반영합니다
+
 사용자가 고객 문의 내용을 입력하면, 그에 맞는 CS 답변을 작성해주세요.
-사용자가 추가 지시(톤 변경, 내용 수정 등)를 하면 그에 맞게 조정하세요.`
+사용자가 추가 지시(톤 변경, 내용 수정 등)를 하면 그에 맞게 조정하세요.${policiesText}`
+
+    // 메시지 포맷 변환 (이미지 지원)
+    const apiMessages = messages.map(m => {
+      // 이미지가 포함된 메시지
+      if (m.images && m.images.length > 0) {
+        const content = []
+        // 텍스트가 있으면 먼저 추가
+        if (m.content) {
+          content.push({ type: 'text', text: m.content })
+        }
+        // 이미지 추가
+        for (const img of m.images) {
+          content.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: img.mediaType,
+              data: img.data
+            }
+          })
+        }
+        return { role: m.role, content }
+      }
+      // 텍스트만 있는 메시지
+      return { role: m.role, content: m.content }
+    })
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -50,10 +108,7 @@ export async function POST(request) {
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1500,
         system: systemPrompt,
-        messages: messages.map(m => ({
-          role: m.role,
-          content: m.content
-        }))
+        messages: apiMessages
       })
     })
 
