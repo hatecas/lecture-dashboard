@@ -23,7 +23,7 @@ async function searchUsersByName(query) {
 
     while (page < MAX_PAGES) {
       let url = `${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`
-      if (since) url += `&since=${since}`
+      if (since) url += `&since=${encodeURIComponent(since)}`
 
       const res = await fetch(url, { headers })
       if (!res.ok) break
@@ -39,11 +39,9 @@ async function searchUsersByName(query) {
         }
       }
 
-      // 더 이상 데이터 없으면 종료
-      if (chats.length < 100) break
-
-      // 다음 페이지 커서 설정
-      since = chats[chats.length - 1].createdAt
+      // 응답의 next 커서로 다음 페이지 조회 (Base64 인코딩된 커서)
+      if (!data.next || chats.length === 0) break
+      since = data.next
       page++
     }
   }
