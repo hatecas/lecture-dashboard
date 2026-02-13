@@ -158,8 +158,8 @@ export async function POST(request) {
     const webhookToken = process.env.CHANNEL_WEBHOOK_TOKEN
     const headerToken = request.headers.get('x-signature')
 
-    // 토큰이 설정되어 있으면 검증 (선택사항)
-    if (webhookToken && headerToken && headerToken !== webhookToken) {
+    // 웹훅 토큰 필수 검증
+    if (!webhookToken || !headerToken || headerToken !== webhookToken) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 403 })
     }
 
