@@ -195,8 +195,16 @@ export async function POST(request) {
         })
 
       } catch (error) {
-        const errMsg = error.message || error.stderr || (typeof error === 'string' ? error : JSON.stringify(error))
-        console.error('[Gemini Route Error]', errMsg, error)
+        let errMsg = '알 수 없는 오류'
+        try {
+          errMsg = [
+            error?.message,
+            error?.stderr,
+            error?.shortMessage,
+            error?.code && `code: ${error.code}`,
+            error?.exitCode != null && `exitCode: ${error.exitCode}`,
+          ].filter(Boolean).join(' | ') || JSON.stringify(error, Object.getOwnPropertyNames(error || {}))
+        } catch (e) { errMsg = String(error) }
         sseEvent(controller, encoder, {
           type: 'error',
           message: errMsg
