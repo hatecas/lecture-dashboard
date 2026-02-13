@@ -40,7 +40,9 @@ async function downloadYoutubeAudio(url, onProgress) {
   try {
     onProgress('YouTube 영상 정보 가져오는 중...')
     const { stdout: infoJson } = await execFileAsync('yt-dlp', [
-      '--dump-single-json', '--no-warnings', fullUrl
+      '--dump-single-json', '--no-warnings',
+      '--cookies-from-browser', 'chrome',
+      fullUrl
     ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
 
     const info = JSON.parse(infoJson)
@@ -52,7 +54,9 @@ async function downloadYoutubeAudio(url, onProgress) {
     await execFileAsync('yt-dlp', [
       '-f', 'bestaudio',
       '-o', path.join(tmpDir, 'audio.%(ext)s'),
-      '--no-warnings', fullUrl
+      '--no-warnings',
+      '--cookies-from-browser', 'chrome',
+      fullUrl
     ], { maxBuffer: 10 * 1024 * 1024, timeout: 240000 })
 
     const files = await fs.readdir(tmpDir)
