@@ -150,6 +150,16 @@ async function saveToHistory(customerMessage, aiResponse) {
   }
 }
 
+// 토큰 설정 확인용 (GET /api/channel-webhook)
+export async function GET() {
+  const token = process.env.CHANNEL_WEBHOOK_TOKEN
+  return NextResponse.json({
+    tokenSet: !!token,
+    tokenLength: token ? token.length : 0,
+    tokenPreview: token ? token.slice(0, 4) + '****' + token.slice(-4) : 'NOT SET'
+  })
+}
+
 export async function POST(request) {
   try {
     const body = await request.json()
