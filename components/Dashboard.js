@@ -3940,7 +3940,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                 ))}
                               </tr>
                             )}
-                            {/* 두 번째 행 - 컬럼 헤더 (sticky) */}
+                            {/* 두 번째 행 - 컬럼 헤더 (스크롤) */}
                             {sheetApiData.length > 1 && (
                               <tr>
                                 {sheetApiData[1].map((cell, i) => (
@@ -3952,10 +3952,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                     textAlign: 'left',
                                     fontWeight: '600',
                                     color: '#1e293b',
-                                    whiteSpace: 'nowrap',
-                                    position: 'sticky',
-                                    top: '41px',
-                                    zIndex: 2
+                                    whiteSpace: 'nowrap'
                                   }}>
                                     {cell}
                                   </th>
