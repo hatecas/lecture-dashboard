@@ -22,12 +22,14 @@ function extractVideoId(url) {
   return null
 }
 
-// Helper: Download YouTube audio via yt-dlp
+// Helper: Download YouTube audio via system yt-dlp
 async function downloadYoutubeAudio(url, onProgress) {
+  const { execFile } = await import('child_process')
+  const { promisify } = await import('util')
   const fs = await import('fs/promises')
   const os = await import('os')
   const path = await import('path')
-  const youtubedl = (await import('youtube-dl-exec')).default
+  const execFileAsync = promisify(execFile)
 
   const videoId = extractVideoId(url)
   if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
@@ -37,23 +39,21 @@ async function downloadYoutubeAudio(url, onProgress) {
 
   try {
     onProgress('YouTube 영상 정보 가져오는 중...')
-    const info = await youtubedl(fullUrl, {
-      dumpSingleJson: true,
-      noWarnings: true,
-      noCheckCertificates: true,
-    })
+    const { stdout: infoJson } = await execFileAsync('yt-dlp', [
+      '--dump-single-json', '--no-warnings', fullUrl
+    ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
 
+    const info = JSON.parse(infoJson)
     const title = info.title || ''
     const duration = info.duration || 0
     onProgress(`영상: "${title}" (${Math.floor(duration / 60)}분 ${duration % 60}초)`)
 
     onProgress('YouTube 오디오 다운로드 중...')
-    await youtubedl(fullUrl, {
-      format: 'bestaudio',
-      output: path.join(tmpDir, 'audio.%(ext)s'),
-      noWarnings: true,
-      noCheckCertificates: true,
-    })
+    await execFileAsync('yt-dlp', [
+      '-f', 'bestaudio',
+      '-o', path.join(tmpDir, 'audio.%(ext)s'),
+      '--no-warnings', fullUrl
+    ], { maxBuffer: 10 * 1024 * 1024, timeout: 240000 })
 
     const files = await fs.readdir(tmpDir)
     if (files.length === 0) throw new Error('다운로드된 파일을 찾을 수 없습니다.')
@@ -66,6 +66,11 @@ async function downloadYoutubeAudio(url, onProgress) {
     onProgress(`다운로드 완료: ${(buffer.length / (1024 * 1024)).toFixed(1)}MB`)
 
     return { buffer, ext, mimeType, title }
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw new Error('yt-dlp가 설치되어 있지 않습니다. "winget install yt-dlp" 또는 "pip install yt-dlp"로 설치해주세요.')
+    }
+    throw error
   } finally {
     await fs.rm(tmpDir, { recursive: true }).catch(() => {})
   }
