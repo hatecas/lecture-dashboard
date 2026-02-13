@@ -195,9 +195,11 @@ export async function POST(request) {
         })
 
       } catch (error) {
+        const errMsg = error.message || error.stderr || (typeof error === 'string' ? error : JSON.stringify(error))
+        console.error('[Gemini Route Error]', errMsg, error)
         sseEvent(controller, encoder, {
           type: 'error',
-          message: error.message || '알 수 없는 오류가 발생했습니다.'
+          message: errMsg
         })
       } finally {
         controller.close()
