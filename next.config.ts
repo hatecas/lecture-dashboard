@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '500mb',
     },
   },
-  serverExternalPackages: [],
+  serverExternalPackages: ['@distube/ytdl-core'],
 };
 
 export default nextConfig;

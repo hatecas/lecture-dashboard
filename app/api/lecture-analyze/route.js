@@ -1,4 +1,5 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { getSubtitles } from 'youtube-caption-extractor'
 
 // Long-running route: 5 min timeout for processing large audio files
 export const maxDuration = 300
@@ -30,72 +31,89 @@ function extractVideoId(url) {
   return null
 }
 
-// Helper: Download YouTube audio as buffer using yt-dlp
-async function downloadYoutubeAudio(url, onProgress) {
-  const { execFile } = await import('child_process')
-  const { promisify } = await import('util')
-  const fs = await import('fs/promises')
-  const path = await import('path')
-  const os = await import('os')
-  const execFileAsync = promisify(execFile)
+// Helper: Fetch YouTube captions (same as Gemini route)
+async function fetchYoutubeCaptions(videoId, onProgress) {
+  onProgress('YouTube 자막 가져오는 중...')
+  try {
+    let subtitles = await getSubtitles({ videoID: videoId, lang: 'ko' })
+    if (!subtitles || subtitles.length === 0) {
+      onProgress('한국어 자막 없음, 영어 자막 시도 중...')
+      subtitles = await getSubtitles({ videoID: videoId, lang: 'en' })
+    }
+    if (!subtitles || subtitles.length === 0) return null
+    const transcript = subtitles.map(s => s.text).join(' ')
+    onProgress(`자막 추출 완료: ${transcript.length.toLocaleString()}자`)
+    return transcript
+  } catch (err) {
+    onProgress(`자막 추출 실패: ${err.message}`)
+    return null
+  }
+}
 
+// Helper: Download YouTube audio — try yt-dlp first, fallback to ytdl-core
+async function downloadYoutubeAudio(url, onProgress) {
   const videoId = extractVideoId(url)
   if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
-
   const fullUrl = `https://www.youtube.com/watch?v=${videoId}`
-  const tmpDir = os.tmpdir()
-  const outPath = path.join(tmpDir, `yt_${videoId}`)
 
-  // Get video info first
-  onProgress('YouTube 영상 정보 가져오는 중 (yt-dlp)...')
+  // 1차: yt-dlp 시도 (로컬 환경에서만 동작)
   try {
-    const { stdout: infoJson } = await execFileAsync('yt-dlp', [
-      '--dump-json', '--no-download', fullUrl
-    ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
-    const info = JSON.parse(infoJson)
-    const title = info.title || 'Unknown'
-    const duration = info.duration || 0
-    onProgress(`영상: "${title}" (${Math.floor(duration / 60)}분 ${duration % 60}초)`)
-  } catch { /* info fetch failed, continue anyway */ }
+    const { execFile } = await import('child_process')
+    const { promisify } = await import('util')
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const os = await import('os')
+    const execFileAsync = promisify(execFile)
 
-  // Download audio only
-  onProgress('yt-dlp로 오디오 다운로드 중...')
-  try {
+    const tmpDir = os.tmpdir()
+    const outPath = path.join(tmpDir, `yt_${videoId}`)
+
+    onProgress('yt-dlp로 오디오 다운로드 시도 중...')
     await execFileAsync('yt-dlp', [
-      '-x', '--audio-format', 'mp3',
-      '--audio-quality', '5',
-      '-o', `${outPath}.%(ext)s`,
-      '--no-playlist',
-      fullUrl
+      '-x', '--audio-format', 'mp3', '--audio-quality', '5',
+      '-o', `${outPath}.%(ext)s`, '--no-playlist', fullUrl
     ], { maxBuffer: 10 * 1024 * 1024, timeout: 180000 })
-  } catch (err) {
-    throw new Error(`yt-dlp 오디오 다운로드 실패: ${err.stderr || err.message}`)
-  }
 
-  // Find the output file
-  const expectedPath = `${outPath}.mp3`
-  let audioPath = expectedPath
+    const expectedPath = `${outPath}.mp3`
+    let audioPath = expectedPath
+    try {
+      await fs.access(expectedPath)
+    } catch {
+      const files = await fs.readdir(tmpDir)
+      const match = files.find(f => f.startsWith(`yt_${videoId}.`))
+      if (!match) throw new Error('파일 없음')
+      audioPath = path.join(tmpDir, match)
+    }
 
-  try {
-    await fs.access(expectedPath)
+    const audioBuffer = await fs.readFile(audioPath)
+    const ext = path.extname(audioPath).slice(1) || 'mp3'
+    fs.unlink(audioPath).catch(() => {})
+    onProgress(`yt-dlp 다운로드 완료: ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB`)
+    return { audioBuffer, ext, mimeType: ext === 'mp3' ? 'audio/mpeg' : `audio/${ext}`, title: `yt_${videoId}` }
   } catch {
-    // mp3 conversion might have failed, look for other formats
-    const files = await fs.readdir(tmpDir)
-    const match = files.find(f => f.startsWith(`yt_${videoId}.`))
-    if (!match) throw new Error('다운로드된 오디오 파일을 찾을 수 없습니다.')
-    audioPath = path.join(tmpDir, match)
+    onProgress('yt-dlp 사용 불가, ytdl-core로 폴백...')
   }
 
-  const audioBuffer = await fs.readFile(audioPath)
-  const ext = path.extname(audioPath).slice(1) || 'mp3'
-  const mimeType = ext === 'mp3' ? 'audio/mpeg' : `audio/${ext}`
+  // 2차: ytdl-core 폴백 (Vercel 호환)
+  const ytdl = (await import('@distube/ytdl-core')).default
+  onProgress('YouTube 영상 정보 가져오는 중...')
+  const info = await ytdl.getInfo(fullUrl)
+  const title = info.videoDetails.title
+  const duration = parseInt(info.videoDetails.lengthSeconds || '0')
+  onProgress(`영상: "${title}" (${Math.floor(duration / 60)}분 ${duration % 60}초)`)
 
-  // Cleanup temp file
-  fs.unlink(audioPath).catch(() => {})
+  const format = ytdl.chooseFormat(info.formats, { quality: 'lowestaudio', filter: 'audioonly' })
+    || ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' })
+  if (!format) throw new Error('오디오 포맷을 찾을 수 없습니다.')
 
+  onProgress('오디오 다운로드 중...')
+  const stream = ytdl(fullUrl, { format })
+  const chunks = []
+  for await (const chunk of stream) { chunks.push(chunk) }
+  const audioBuffer = Buffer.concat(chunks)
+  const ext = format.container || 'webm'
   onProgress(`다운로드 완료: ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB`)
-
-  return { audioBuffer, ext, mimeType, title: `yt_${videoId}` }
+  return { audioBuffer, ext, mimeType: format.mimeType?.split(';')[0] || `audio/${ext}`, title }
 }
 
 // Helper: Transcribe audio buffer with Whisper API (handles chunking)
@@ -269,24 +287,38 @@ export async function POST(request) {
         if (!openaiKey) throw new Error('OpenAI API Key가 필요합니다.')
         if (!prompt) throw new Error('분석 프롬프트가 필요합니다.')
 
-        let audioBuffer, fileName, mimeType
+        let audioBuffer, fileName, mimeType, transcript
 
         if (inputMode === 'youtube') {
-          // YouTube 오디오 추출
           const youtubeUrl = formData.get('youtubeUrl')
           if (!youtubeUrl) throw new Error('YouTube URL이 필요합니다.')
 
-          sendProgress('YouTube 처리 중', 10, '영상에서 오디오를 추출합니다...')
+          const videoId = extractVideoId(youtubeUrl)
+          if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
 
-          const result = await downloadYoutubeAudio(youtubeUrl, (msg) => {
-            sendProgress('YouTube 처리 중', 20, msg)
+          // 1차: 자막 추출 시도 (무료, 빠름 — 다운로드 불필요)
+          sendProgress('자막 추출 시도', 10, 'YouTube 자막을 가져오는 중...')
+          const captionText = await fetchYoutubeCaptions(videoId, (msg) => {
+            sendProgress('자막 추출', 15, msg)
           })
 
-          audioBuffer = result.audioBuffer
-          fileName = `audio.${result.ext}`
-          mimeType = result.mimeType
+          if (captionText && captionText.length > 50) {
+            // 자막 성공 → 다운로드/전사 스킵, 바로 GPT 분석
+            sendProgress('자막 분석 중', 30, `자막 ${captionText.length.toLocaleString()}자 확보, GPT-4o로 분석 중...`)
+            transcript = captionText
+          } else {
+            // 2차: 자막 없음 → 오디오 다운로드 + Whisper 전사
+            sendProgress('YouTube 처리 중', 20, '자막 없음, 오디오 다운로드로 전환...')
 
-          sendProgress('오디오 추출 완료', 30, `${result.title} - ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB`)
+            const result = await downloadYoutubeAudio(youtubeUrl, (msg) => {
+              sendProgress('YouTube 처리 중', 25, msg)
+            })
+
+            audioBuffer = result.audioBuffer
+            fileName = `audio.${result.ext}`
+            mimeType = result.mimeType
+            sendProgress('오디오 추출 완료', 30, `${result.title} - ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB`)
+          }
         } else {
           // 파일 업로드
           const audioFile = formData.get('audioFile')
@@ -302,29 +334,31 @@ export async function POST(request) {
           sendProgress('파일 준비 완료', 30, `${fileName} - ${(audioBuffer.length / (1024 * 1024)).toFixed(1)}MB`)
         }
 
-        // Whisper 전사
-        sendProgress('AI 전사 시작', 35, 'Whisper로 음성을 텍스트로 변환합니다...')
+        // Whisper 전사 (자막 경로에서는 이미 transcript가 있으므로 스킵)
+        if (!transcript) {
+          sendProgress('AI 전사 시작', 35, 'Whisper로 음성을 텍스트로 변환합니다...')
 
-        const chunkCount = Math.ceil(audioBuffer.length / (24 * 1024 * 1024))
-        let currentChunk = 0
+          const chunkCount = Math.ceil(audioBuffer.length / (24 * 1024 * 1024))
+          let currentChunk = 0
 
-        const transcript = await transcribeAudio(audioBuffer, fileName, mimeType, openaiKey, (msg) => {
-          if (msg.includes('전사 중')) {
-            currentChunk++
-            const progress = 35 + Math.round((currentChunk / chunkCount) * 40)
-            sendProgress('전사 중', Math.min(progress, 75), msg)
-          } else if (msg.includes('분할')) {
-            sendProgress('전사 준비', 35, msg)
-          } else {
-            sendProgress('전사 중', 70, msg)
+          transcript = await transcribeAudio(audioBuffer, fileName, mimeType, openaiKey, (msg) => {
+            if (msg.includes('전사 중')) {
+              currentChunk++
+              const progress = 35 + Math.round((currentChunk / chunkCount) * 40)
+              sendProgress('전사 중', Math.min(progress, 75), msg)
+            } else if (msg.includes('분할')) {
+              sendProgress('전사 준비', 35, msg)
+            } else {
+              sendProgress('전사 중', 70, msg)
+            }
+          })
+
+          if (!transcript || transcript.trim().length === 0) {
+            throw new Error('전사 결과가 비어있습니다. 오디오 파일을 확인해주세요.')
           }
-        })
 
-        if (!transcript || transcript.trim().length === 0) {
-          throw new Error('전사 결과가 비어있습니다. 오디오 파일을 확인해주세요.')
+          sendProgress('전사 완료', 80, `전사 완료: ${transcript.length.toLocaleString()}자`)
         }
-
-        sendProgress('전사 완료', 80, `전사 완료: ${transcript.length.toLocaleString()}자`)
 
         // GPT 분석
         sendProgress('AI 분석 중', 85, 'GPT-4o가 강의 내용을 분석합니다...')
