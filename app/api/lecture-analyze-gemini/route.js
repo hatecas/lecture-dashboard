@@ -49,16 +49,16 @@ async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgres
 
     return response.text
   } catch (error) {
-    const msg = error.message || ''
-    if (msg.includes('user credentials') || msg.includes('FAILED_PRECONDITION')) {
-      throw new Error(
-        'YouTube 영상에 접근할 수 없습니다. ' +
-        '영상이 "공개" 상태인지 확인해주세요. ' +
-        '비공개/일부공개/연령제한 영상은 Gemini가 접근할 수 없습니다. ' +
-        '또는 파일 업로드 방식을 이용해주세요.'
-      )
-    }
-    throw error
+    console.error('[Gemini YouTube Error]', {
+      message: error.message,
+      status: error.status,
+      statusText: error.statusText,
+      code: error.code,
+      details: error.details,
+      errorInfo: error.errorInfo,
+      raw: JSON.stringify(error, Object.getOwnPropertyNames(error)),
+    })
+    throw new Error(`Gemini YouTube 분석 실패: ${error.message || JSON.stringify(error)}`)
   }
 }
 
