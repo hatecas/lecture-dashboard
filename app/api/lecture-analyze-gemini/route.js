@@ -1,5 +1,6 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { GoogleGenAI } from '@google/genai'
+import { getSubtitles } from 'youtube-caption-extractor'
 
 // Long-running route: 5 min timeout for processing large video files
 export const maxDuration = 300
@@ -22,69 +23,102 @@ function extractVideoId(url) {
   return null
 }
 
-// Helper: Download YouTube audio via system yt-dlp
-async function downloadYoutubeAudio(url, onProgress) {
-  const { execFile } = await import('child_process')
-  const { promisify } = await import('util')
-  const fs = await import('fs/promises')
-  const os = await import('os')
-  const path = await import('path')
-  const execFileAsync = promisify(execFile)
-
-  const videoId = extractVideoId(url)
-  if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
-
-  const fullUrl = `https://www.youtube.com/watch?v=${videoId}`
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yt-gemini-'))
+// Helper: Fetch YouTube captions (auto-generated or manual subtitles)
+async function fetchYoutubeCaptions(videoId, onProgress) {
+  onProgress('YouTube 자막 가져오는 중...')
 
   try {
-    onProgress('YouTube 영상 정보 가져오는 중...')
-    const ytArgs = [
-      '--extractor-args', 'youtube:player_client=ios,web_creator',
-      '--no-warnings', '--no-check-certificates',
-    ]
-    const { stdout: infoJson } = await execFileAsync('yt-dlp', [
-      '--dump-single-json', ...ytArgs, fullUrl
-    ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 })
+    // Try Korean captions first
+    let subtitles = await getSubtitles({ videoID: videoId, lang: 'ko' })
 
-    const info = JSON.parse(infoJson)
-    const title = info.title || ''
-    const duration = info.duration || 0
-    onProgress(`영상: "${title}" (${Math.floor(duration / 60)}분 ${duration % 60}초)`)
-
-    onProgress('YouTube 오디오 다운로드 중...')
-    await execFileAsync('yt-dlp', [
-      '-f', 'bestaudio',
-      '-o', path.join(tmpDir, 'audio.%(ext)s'),
-      ...ytArgs, fullUrl
-    ], { maxBuffer: 10 * 1024 * 1024, timeout: 240000 })
-
-    const files = await fs.readdir(tmpDir)
-    if (files.length === 0) throw new Error('다운로드된 파일을 찾을 수 없습니다.')
-
-    const filePath = path.join(tmpDir, files[0])
-    const buffer = await fs.readFile(filePath)
-    const ext = files[0].split('.').pop() || 'webm'
-    const mimeType = ext === 'm4a' ? 'audio/mp4' : ext === 'mp4' ? 'audio/mp4' : `audio/${ext}`
-
-    onProgress(`다운로드 완료: ${(buffer.length / (1024 * 1024)).toFixed(1)}MB`)
-
-    return { buffer, ext, mimeType, title }
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      throw new Error('yt-dlp가 설치되어 있지 않습니다. "winget install yt-dlp" 또는 "pip install yt-dlp"로 설치해주세요.')
+    if (!subtitles || subtitles.length === 0) {
+      onProgress('한국어 자막 없음, 영어 자막 시도 중...')
+      subtitles = await getSubtitles({ videoID: videoId, lang: 'en' })
     }
-    throw error
-  } finally {
-    await fs.rm(tmpDir, { recursive: true }).catch(() => {})
+
+    if (!subtitles || subtitles.length === 0) {
+      return null
+    }
+
+    const transcript = subtitles.map(s => s.text).join(' ')
+    onProgress(`자막 추출 완료: ${transcript.length.toLocaleString()}자`)
+    return transcript
+  } catch (err) {
+    onProgress(`자막 추출 실패: ${err.message}`)
+    return null
   }
 }
 
-// Helper: Analyze YouTube video with Gemini (download + File API upload)
-async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
-  const { buffer, ext, mimeType } = await downloadYoutubeAudio(youtubeUrl, onProgress)
+// Helper: Analyze text transcript with Gemini (text-only, no video)
+async function analyzeTranscriptWithGemini(transcript, prompt, geminiKey, onProgress) {
+  onProgress('Gemini로 자막 텍스트 분석 중...')
 
-  return analyzeFileWithGemini(buffer, `youtube_audio.${ext}`, mimeType, prompt, geminiKey, onProgress)
+  const maxChars = 120000
+  const truncated = transcript.length > maxChars
+    ? transcript.slice(0, maxChars) + '\n\n...(이하 생략)'
+    : transcript
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: `${prompt}\n\n---\n\n${truncated}` }
+          ]
+        }]
+      })
+    }
+  )
+
+  const data = await res.json()
+
+  if (!res.ok || data.error) {
+    const errMsg = data.error?.message || JSON.stringify(data.error) || `HTTP ${res.status}`
+    throw new Error(`Gemini API 오류: ${errMsg}`)
+  }
+
+  onProgress('분석 완료!')
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '분석 결과가 비어있습니다.'
+}
+
+// Helper: Analyze YouTube URL with Gemini via REST API (v1beta) - fallback
+async function analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, onProgress) {
+  const videoId = extractVideoId(youtubeUrl)
+  if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
+
+  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`
+
+  onProgress('Gemini에 YouTube 영상 직접 전달 중 (폴백)...')
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { file_data: { file_uri: cleanUrl, mime_type: 'video/mp4' } },
+            { text: prompt }
+          ]
+        }]
+      })
+    }
+  )
+
+  const data = await res.json()
+
+  if (!res.ok || data.error) {
+    const errMsg = data.error?.message || JSON.stringify(data.error) || `HTTP ${res.status}`
+    throw new Error(`Gemini API 오류: ${errMsg}`)
+  }
+
+  onProgress('분석 완료!')
+
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '분석 결과가 비어있습니다.'
 }
 
 // Helper: Analyze uploaded file with Gemini (via File API)
@@ -167,11 +201,31 @@ export async function POST(request) {
           const youtubeUrl = formData.get('youtubeUrl')
           if (!youtubeUrl) throw new Error('YouTube URL이 필요합니다.')
 
-          sendProgress('YouTube 분석 시작', 10, 'Gemini가 YouTube 영상을 직접 분석합니다...')
+          const videoId = extractVideoId(youtubeUrl)
+          if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
 
-          analysis = await analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, (msg) => {
-            sendProgress('Gemini 분석 중', 50, msg)
+          // 1차: YouTube 자막 추출 시도 (빠르고 무료)
+          sendProgress('자막 추출 시도', 10, 'YouTube 자막을 가져오는 중...')
+
+          const captionText = await fetchYoutubeCaptions(videoId, (msg) => {
+            sendProgress('자막 추출', 15, msg)
           })
+
+          if (captionText && captionText.length > 50) {
+            // 자막 성공 → 텍스트만으로 Gemini 분석 (빠르고 저렴)
+            sendProgress('자막 분석 중', 30, `자막 ${captionText.length.toLocaleString()}자 확보, Gemini로 분석 중...`)
+
+            analysis = await analyzeTranscriptWithGemini(captionText, prompt, geminiKey, (msg) => {
+              sendProgress('Gemini 분석 중', 70, msg)
+            })
+          } else {
+            // 2차: 자막 실패 → Gemini에 영상 URL 직접 전달 (폴백)
+            sendProgress('영상 분석 전환', 20, '자막을 찾을 수 없어 Gemini 영상 분석으로 전환합니다...')
+
+            analysis = await analyzeYoutubeWithGemini(youtubeUrl, prompt, geminiKey, (msg) => {
+              sendProgress('Gemini 분석 중', 50, msg)
+            })
+          }
 
           sendProgress('분석 완료', 95, '결과를 정리합니다...')
 
