@@ -89,6 +89,9 @@ function extractVideoId(url) {
     // youtube.com/embed/ID
     const embedMatch = parsed.pathname.match(/\/embed\/([^/?]+)/)
     if (embedMatch) return embedMatch[1]
+    // youtube.com/live/ID
+    const liveMatch = parsed.pathname.match(/\/live\/([^/?]+)/)
+    if (liveMatch) return liveMatch[1]
     return null
   } catch {
     return null
