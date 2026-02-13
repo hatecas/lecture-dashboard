@@ -11,29 +11,37 @@ function getChannelHeaders() {
   }
 }
 
-// 채널톡 사용자 검색
-async function searchUsers(query) {
+// 채널톡 user-chats에서 사용자 이름으로 필터링
+async function searchUsersByName(query) {
   const headers = getChannelHeaders()
+  const matchedUsers = []
 
-  // 이름으로 사용자 검색
-  const res = await fetch(`${CHANNEL_API}/v5/users?query=${encodeURIComponent(query)}&limit=10`, {
-    headers
-  })
+  for (const state of ['opened', 'closed']) {
+    const res = await fetch(`${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`, {
+      headers
+    })
 
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`채널톡 사용자 검색 실패: ${res.status} ${err}`)
+    if (!res.ok) continue
+
+    const data = await res.json()
+    const users = data.users || []
+
+    for (const user of users) {
+      const userName = user.profile?.name || user.name || ''
+      if (userName.includes(query) && !matchedUsers.find(u => u.id === user.id)) {
+        matchedUsers.push(user)
+      }
+    }
   }
 
-  const data = await res.json()
-  return data.users || []
+  return matchedUsers
 }
 
 // 특정 사용자의 채팅 목록 조회
 async function getUserChats(userId) {
   const headers = getChannelHeaders()
 
-  const res = await fetch(`${CHANNEL_API}/v5/user-chats?userId=${userId}&limit=10&sortOrder=desc`, {
+  const res = await fetch(`${CHANNEL_API}/v5/users/${userId}/user-chats?sortOrder=desc&limit=10`, {
     headers
   })
 
@@ -82,7 +90,7 @@ export async function POST(request) {
       if (!query) {
         return NextResponse.json({ error: '검색어가 필요합니다' }, { status: 400 })
       }
-      const users = await searchUsers(query)
+      const users = await searchUsersByName(query)
       return NextResponse.json({ users })
     }
 
@@ -108,7 +116,7 @@ export async function POST(request) {
         return NextResponse.json({ error: '소비자 이름/검색어가 필요합니다' }, { status: 400 })
       }
 
-      const users = await searchUsers(query)
+      const users = await searchUsersByName(query)
 
       if (users.length === 0) {
         return NextResponse.json({
