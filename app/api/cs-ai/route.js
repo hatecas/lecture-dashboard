@@ -12,70 +12,74 @@ function getChannelHeaders() {
   }
 }
 
-// 채널톡 사용자 검색 → 대화 가져오기
+// 채널톡 대화 목록에서 사용자 이름으로 필터링하여 대화 가져오기
 async function fetchChannelConversations(customerName) {
   if (!process.env.CHANNEL_ACCESS_KEY || !process.env.CHANNEL_ACCESS_SECRET) {
     return { error: '채널톡 API 키가 설정되지 않았습니다.' }
   }
 
   try {
-    // 1. 사용자 검색
-    const userRes = await fetch(
-      `${CHANNEL_API}/v5/users?query=${encodeURIComponent(customerName)}&limit=5`,
-      { headers: getChannelHeaders() }
-    )
+    // 1. 최근 user-chats 가져오기 (opened + closed)
+    const allChats = []
 
-    if (!userRes.ok) {
-      return { error: `채널톡 사용자 검색 실패 (${userRes.status})` }
-    }
-
-    const userData = await userRes.json()
-    const users = userData.users || []
-
-    if (users.length === 0) {
-      return { conversations: [], message: `"${customerName}" 이름의 소비자를 찾을 수 없습니다.` }
-    }
-
-    // 2. 각 사용자의 채팅 + 메시지 가져오기
-    const allConversations = []
-
-    for (const user of users.slice(0, 3)) {
-      const userName = user.profile?.name || user.name || '알 수 없음'
-
+    for (const state of ['opened', 'closed']) {
       const chatRes = await fetch(
-        `${CHANNEL_API}/v5/user-chats?userId=${user.id}&limit=5&sortOrder=desc`,
+        `${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`,
         { headers: getChannelHeaders() }
       )
 
-      if (!chatRes.ok) continue
+      if (!chatRes.ok) {
+        const errText = await chatRes.text()
+        console.error(`채널톡 user-chats(${state}) 조회 실패:`, chatRes.status, errText)
+        continue
+      }
+
       const chatData = await chatRes.json()
       const chats = chatData.userChats || []
+      const users = chatData.users || []
 
-      for (const chat of chats.slice(0, 3)) {
-        const msgRes = await fetch(
-          `${CHANNEL_API}/v5/user-chats/${chat.id}/messages?sortOrder=asc&limit=50`,
-          { headers: getChannelHeaders() }
-        )
+      // users 배열에서 이름 매칭
+      for (const chat of chats) {
+        const user = users.find(u => u.id === chat.userId)
+        const userName = user?.profile?.name || user?.name || ''
 
-        if (!msgRes.ok) continue
-        const msgData = await msgRes.json()
-        const messages = (msgData.messages || [])
-          .map(msg => ({
-            sender: msg.personType === 'user' ? userName : '상담원',
-            text: msg.plainText || msg.message || '',
-            createdAt: msg.createdAt
-          }))
-          .filter(m => m.text)
-
-        if (messages.length > 0) {
-          allConversations.push({
-            chatId: chat.id,
-            userName,
-            createdAt: chat.createdAt,
-            state: chat.state,
-            messages
-          })
+        if (userName && userName.includes(customerName)) {
+          allChats.push({ chat, userName, userId: chat.userId })
         }
+      }
+    }
+
+    if (allChats.length === 0) {
+      return { conversations: [], message: `"${customerName}" 이름의 소비자 대화를 찾을 수 없습니다.` }
+    }
+
+    // 2. 매칭된 채팅의 메시지 가져오기
+    const allConversations = []
+
+    for (const { chat, userName } of allChats.slice(0, 5)) {
+      const msgRes = await fetch(
+        `${CHANNEL_API}/v5/user-chats/${chat.id}/messages?sortOrder=asc&limit=50`,
+        { headers: getChannelHeaders() }
+      )
+
+      if (!msgRes.ok) continue
+      const msgData = await msgRes.json()
+      const messages = (msgData.messages || [])
+        .map(msg => ({
+          sender: msg.personType === 'user' ? userName : '상담원',
+          text: msg.plainText || msg.message || '',
+          createdAt: msg.createdAt
+        }))
+        .filter(m => m.text)
+
+      if (messages.length > 0) {
+        allConversations.push({
+          chatId: chat.id,
+          userName,
+          createdAt: chat.createdAt,
+          state: chat.state,
+          messages
+        })
       }
     }
 
@@ -86,6 +90,7 @@ async function fetchChannelConversations(customerName) {
         : `"${customerName}" 소비자의 대화 기록이 없습니다.`
     }
   } catch (err) {
+    console.error('채널톡 조회 오류:', err)
     return { error: `채널톡 조회 오류: ${err.message}` }
   }
 }
