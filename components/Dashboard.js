@@ -150,6 +150,29 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const csFileRef = useRef(null)
   const csHistoryFileRef = useRef(null)
 
+  // 무료강의 분석기 상태
+  const [laOpenaiKey, setLaOpenaiKey] = useState('')
+  const [laYoutubeUrl, setLaYoutubeUrl] = useState('')
+  const [laAudioFile, setLaAudioFile] = useState(null)
+  const [laInputMode, setLaInputMode] = useState('youtube') // 'youtube' | 'file'
+  const [laPrompt, setLaPrompt] = useState(`당신은 온라인 교육업계의 무료강의 분석 전문가입니다. 아래는 무료강의(3~6시간 분량)의 전체 전사본입니다.
+
+다음 항목으로 분류하여 한국어로 정리해 주세요:
+
+1. 강의 핵심 요약 (전체 흐름을 3~5문장으로 요약)
+2. 주요 키워드 & 반복 메시지 (강사가 반복적으로 강조한 핵심 키워드/문장)
+3. 판매 전환 포인트 (수강 유도, 할인 언급, 긴급성 강조 등 세일즈 멘트)
+4. 수강생 반응 유도 구간 (질문 유도, 채팅 참여 유도, 감정 자극 등)
+5. 강의 구성 타임라인 (도입-본론-클로징 구조 분석)
+6. 개선 제안 (강의 퀄리티 향상을 위한 제안사항)
+
+각 섹션은 bullet point로 간결하게 작성하세요.`)
+  const [laProcessing, setLaProcessing] = useState(false)
+  const [laProgress, setLaProgress] = useState({ step: '', percent: 0, detail: '' })
+  const [laResult, setLaResult] = useState(null) // { transcript, analysis }
+  const [laError, setLaError] = useState('')
+  const laAudioRef = useRef(null)
+
   // 서버에서 시트 목록 로드
   const loadSavedSheets = async () => {
     try {
@@ -1540,6 +1563,30 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           }} title="CS AI">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🤖</span>
             CS AI
+          </button>
+
+          {/* 무료강의 분석기 메뉴 */}
+          <button onClick={() => { setCurrentTab('lecture-analyzer'); if(isMobile) setMobileMenuOpen(false) }} style={{
+            width: '100%',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+            background: currentTab === 'lecture-analyzer' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'lecture-analyzer' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'lecture-analyzer' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'lecture-analyzer' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
+            alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+            gap: sidebarCollapsed ? '4px' : '10px',
+            transition: 'all 0.3s ease'
+          }} title="무료강의 분석기">
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🎓</span>
+            {sidebarCollapsed ? '강의분석' : '무료강의 분석기'}
           </button>
         </div>
       </div>
@@ -3925,7 +3972,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                                   <th key={i} style={{
                                     padding: '12px 14px',
                                     background: '#1e3a5f',
-                                    borderBottom: '1px solid #ccc',
+                                    borderBottom: 'none',
                                     borderRight: '1px solid rgba(255,255,255,0.2)',
                                     textAlign: 'left',
                                     fontWeight: '700',
@@ -4540,6 +4587,438 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* 무료강의 분석기 탭 */}
+          {currentTab === 'lecture-analyzer' && (
+            <div style={{ padding: isMobile ? '16px' : '32px', maxWidth: '900px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                🎓 무료강의 분석기
+                <HelpTooltip text={"무료강의 영상(3~6시간)을 AI로 분석합니다.\n\nYouTube URL 또는 오디오 파일을 입력하면\nWhisper로 전사 후 GPT가 핵심 내용을 정리합니다.\n\n• OpenAI API Key 필요 (Whisper + GPT)\n• 긴 강의는 자동으로 분할 처리됩니다\n• 오디오만 추출하여 분석하므로 효율적입니다"} />
+              </h2>
+              <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '28px', lineHeight: 1.6 }}>
+                무료강의 영상을 AI가 자동으로 전사하고 핵심 내용을 분석합니다. 3~6시간 분량의 긴 강의도 지원됩니다.
+              </p>
+
+              {/* Step 1: API Key */}
+              <div style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '16px',
+                padding: '24px',
+                marginBottom: '20px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                  <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}>Step 1</span>
+                  <span style={{ fontSize: '15px', fontWeight: '600' }}>API 설정</span>
+                </div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>OpenAI API Key</label>
+                <input
+                  type="password"
+                  value={laOpenaiKey}
+                  onChange={(e) => setLaOpenaiKey(e.target.value)}
+                  placeholder="sk-..."
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '12px',
+                    color: '#fff',
+                    fontSize: '14px'
+                  }}
+                />
+                <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+                  Whisper(전사) + GPT-4o(분석)에 사용됩니다. 비용이 발생합니다.
+                </p>
+              </div>
+
+              {/* Step 2: 입력 방식 선택 */}
+              <div style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '16px',
+                padding: '24px',
+                marginBottom: '20px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                  <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}>Step 2</span>
+                  <span style={{ fontSize: '15px', fontWeight: '600' }}>영상/오디오 입력</span>
+                </div>
+
+                {/* 입력 모드 토글 */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                  <button
+                    onClick={() => setLaInputMode('youtube')}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      background: laInputMode === 'youtube' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${laInputMode === 'youtube' ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                      borderRadius: '10px',
+                      color: laInputMode === 'youtube' ? '#a5b4fc' : '#94a3b8',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    YouTube URL
+                  </button>
+                  <button
+                    onClick={() => setLaInputMode('file')}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      background: laInputMode === 'file' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${laInputMode === 'file' ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                      borderRadius: '10px',
+                      color: laInputMode === 'file' ? '#a5b4fc' : '#94a3b8',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    오디오 파일 업로드
+                  </button>
+                </div>
+
+                {laInputMode === 'youtube' ? (
+                  <>
+                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>YouTube URL</label>
+                    <input
+                      type="text"
+                      value={laYoutubeUrl}
+                      onChange={(e) => setLaYoutubeUrl(e.target.value)}
+                      placeholder="https://www.youtube.com/watch?v=... 또는 https://youtu.be/..."
+                      style={{
+                        width: '100%',
+                        padding: '14px',
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '12px',
+                        color: '#fff',
+                        fontSize: '14px'
+                      }}
+                    />
+                    <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+                      서버에서 오디오를 추출합니다. 긴 영상의 경우 시간이 걸릴 수 있습니다.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>오디오 파일 (mp3, wav, m4a, webm, mp4)</label>
+                    <input
+                      ref={laAudioRef}
+                      type="file"
+                      accept="audio/*,video/*,.mp3,.wav,.m4a,.webm,.mp4,.ogg,.flac"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) setLaAudioFile(file)
+                      }}
+                      style={{ display: 'none' }}
+                    />
+                    <div
+                      onClick={() => laAudioRef.current?.click()}
+                      style={{
+                        border: '2px dashed rgba(255,255,255,0.15)',
+                        borderRadius: '12px',
+                        padding: '32px',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        background: laAudioFile ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.02)',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {laAudioFile ? (
+                        <div>
+                          <div style={{ fontSize: '28px', marginBottom: '8px' }}>🎵</div>
+                          <div style={{ color: '#34d399', fontSize: '14px', fontWeight: '600' }}>{laAudioFile.name}</div>
+                          <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
+                            {(laAudioFile.size / (1024 * 1024)).toFixed(1)} MB
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{ fontSize: '28px', marginBottom: '8px' }}>📂</div>
+                          <div style={{ color: '#94a3b8', fontSize: '14px' }}>클릭하여 오디오 파일을 선택하세요</div>
+                          <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>mp3, wav, m4a, webm, mp4 지원</div>
+                        </div>
+                      )}
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+                      긴 파일은 자동으로 25MB씩 분할하여 처리합니다. 오디오만 업로드하면 더 빠릅니다.
+                    </p>
+                  </>
+                )}
+              </div>
+
+              {/* Step 3: 분석 프롬프트 */}
+              <div style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '16px',
+                padding: '24px',
+                marginBottom: '20px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                  <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}>Step 3</span>
+                  <span style={{ fontSize: '15px', fontWeight: '600' }}>분석 프롬프트</span>
+                </div>
+                <textarea
+                  value={laPrompt}
+                  onChange={(e) => setLaPrompt(e.target.value)}
+                  rows={8}
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '12px',
+                    color: '#fff',
+                    fontSize: '13px',
+                    lineHeight: 1.6,
+                    resize: 'vertical'
+                  }}
+                />
+                <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+                  GPT에게 전달할 분석 명령입니다. 필요에 따라 수정하세요.
+                </p>
+              </div>
+
+              {/* 실행 버튼 */}
+              <button
+                onClick={async () => {
+                  if (!laOpenaiKey) { setLaError('OpenAI API Key를 입력해주세요.'); return }
+                  if (laInputMode === 'youtube' && !laYoutubeUrl) { setLaError('YouTube URL을 입력해주세요.'); return }
+                  if (laInputMode === 'file' && !laAudioFile) { setLaError('오디오 파일을 선택해주세요.'); return }
+
+                  setLaError('')
+                  setLaProcessing(true)
+                  setLaResult(null)
+                  setLaProgress({ step: '준비 중...', percent: 5, detail: '분석을 시작합니다.' })
+
+                  try {
+                    const formData = new FormData()
+                    formData.append('openaiKey', laOpenaiKey)
+                    formData.append('prompt', laPrompt)
+                    formData.append('inputMode', laInputMode)
+
+                    if (laInputMode === 'youtube') {
+                      formData.append('youtubeUrl', laYoutubeUrl)
+                    } else if (laAudioFile) {
+                      formData.append('audioFile', laAudioFile)
+                    }
+
+                    setLaProgress({ step: '서버 전송 중...', percent: 10, detail: laInputMode === 'youtube' ? 'YouTube 오디오 추출을 시작합니다...' : '오디오 파일을 업로드 중입니다...' })
+
+                    const token = localStorage.getItem('authToken')
+                    const response = await fetch('/api/lecture-analyze', {
+                      method: 'POST',
+                      headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                      body: formData
+                    })
+
+                    if (!response.ok) {
+                      const errData = await response.json()
+                      throw new Error(errData.error || '분석 실패')
+                    }
+
+                    // SSE 스트리밍 응답 처리
+                    const reader = response.body.getReader()
+                    const decoder = new TextDecoder()
+                    let buffer = ''
+
+                    while (true) {
+                      const { done, value } = await reader.read()
+                      if (done) break
+
+                      buffer += decoder.decode(value, { stream: true })
+                      const lines = buffer.split('\n')
+                      buffer = lines.pop() || ''
+
+                      for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                          try {
+                            const data = JSON.parse(line.slice(6))
+                            if (data.type === 'progress') {
+                              setLaProgress({ step: data.step, percent: data.percent, detail: data.detail || '' })
+                            } else if (data.type === 'result') {
+                              setLaResult({ transcript: data.transcript, analysis: data.analysis })
+                              setLaProgress({ step: '완료', percent: 100, detail: '분석이 완료되었습니다!' })
+                            } else if (data.type === 'error') {
+                              throw new Error(data.message)
+                            }
+                          } catch (parseErr) {
+                            if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr
+                          }
+                        }
+                      }
+                    }
+                  } catch (err) {
+                    setLaError(err.message || '분석 중 오류가 발생했습니다.')
+                    setLaProgress({ step: '', percent: 0, detail: '' })
+                  } finally {
+                    setLaProcessing(false)
+                  }
+                }}
+                disabled={laProcessing}
+                style={{
+                  width: '100%',
+                  padding: '16px',
+                  background: laProcessing ? 'rgba(99,102,241,0.2)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                  border: 'none',
+                  borderRadius: '14px',
+                  color: '#fff',
+                  fontSize: '16px',
+                  fontWeight: '700',
+                  cursor: laProcessing ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  marginBottom: '20px'
+                }}
+              >
+                {laProcessing ? '⏳ 분석 진행 중...' : '🚀 분석 시작 (OpenAI 비용 발생)'}
+              </button>
+
+              {/* 에러 메시지 */}
+              {laError && (
+                <div style={{
+                  padding: '14px 18px',
+                  background: 'rgba(239,68,68,0.1)',
+                  border: '1px solid rgba(239,68,68,0.25)',
+                  borderRadius: '12px',
+                  color: '#f87171',
+                  fontSize: '14px',
+                  marginBottom: '20px'
+                }}>
+                  {laError}
+                </div>
+              )}
+
+              {/* 진행 상황 */}
+              {laProcessing && laProgress.step && (
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '16px',
+                  padding: '24px',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: '600', color: '#a5b4fc' }}>{laProgress.step}</span>
+                    <span style={{ fontSize: '13px', color: '#94a3b8' }}>{laProgress.percent}%</span>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.06)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${laProgress.percent}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                      borderRadius: '4px',
+                      transition: 'width 0.5s ease'
+                    }} />
+                  </div>
+                  {laProgress.detail && (
+                    <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>{laProgress.detail}</p>
+                  )}
+                </div>
+              )}
+
+              {/* 분석 결과 */}
+              {laResult && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {/* 분석 결과 */}
+                  <div style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '16px',
+                    padding: '24px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                      <h3 style={{ fontSize: '16px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        📊 AI 분석 결과
+                      </h3>
+                      <button
+                        onClick={() => {
+                          const text = `--- AI 분석 결과 ---\n\n${laResult.analysis}\n\n--- 전체 전사본 ---\n\n${laResult.transcript}`
+                          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+                          const url = URL.createObjectURL(blob)
+                          const a = document.createElement('a')
+                          a.href = url
+                          a.download = `무료강의_분석_${new Date().toISOString().slice(0, 10)}.txt`
+                          a.click()
+                          URL.revokeObjectURL(url)
+                        }}
+                        style={{
+                          padding: '8px 14px',
+                          background: 'rgba(16,185,129,0.1)',
+                          border: '1px solid rgba(16,185,129,0.25)',
+                          borderRadius: '8px',
+                          color: '#34d399',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          fontWeight: '500'
+                        }}
+                      >
+                        📥 전체 다운로드
+                      </button>
+                    </div>
+                    <div style={{
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '12px',
+                      padding: '20px',
+                      maxHeight: '500px',
+                      overflowY: 'auto',
+                      fontSize: '14px',
+                      color: '#e2e8f0',
+                      lineHeight: 1.8,
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {laResult.analysis}
+                    </div>
+                  </div>
+
+                  {/* 전사본 (접기/펼치기) */}
+                  <details style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '16px',
+                    padding: '24px'
+                  }}>
+                    <summary style={{
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      fontWeight: '700',
+                      color: '#e2e8f0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      listStyle: 'none'
+                    }}>
+                      📝 전체 전사본 (클릭하여 펼치기)
+                      <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>
+                        {laResult.transcript ? `${laResult.transcript.length.toLocaleString()}자` : ''}
+                      </span>
+                    </summary>
+                    <div style={{
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '12px',
+                      padding: '20px',
+                      marginTop: '16px',
+                      maxHeight: '400px',
+                      overflowY: 'auto',
+                      fontSize: '13px',
+                      color: '#94a3b8',
+                      lineHeight: 1.8,
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {laResult.transcript}
+                    </div>
+                  </details>
+                </div>
+              )}
             </div>
           )}
         </div>

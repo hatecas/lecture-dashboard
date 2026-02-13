@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '500mb',
+    },
+  },
+  // Disable body size limit for API routes (large audio file upload)
+  serverExternalPackages: ['@distube/ytdl-core'],
 };
 
 export default nextConfig;
