@@ -374,38 +374,52 @@ export async function POST(request) {
           }
 
           // 1차: YouTube 자막 추출 시도 (빠르고 무료)
+          console.log(`[lecture-analyze-gemini] 1차: 자막 추출 시도 (videoId: ${videoId})`)
           sendProgress('자막 추출 시도', 10, 'YouTube 자막을 가져오는 중...')
 
           const captionText = await fetchYoutubeCaptions(videoId, (msg) => {
+            console.log(`[lecture-analyze-gemini] 자막: ${msg}`)
             sendProgress('자막 추출', 15, msg)
           })
 
+          console.log(`[lecture-analyze-gemini] 자막 결과: ${captionText ? `${captionText.length}자` : 'null'}`)
+
           if (captionText && captionText.length > 50) {
             // 자막 성공 → 텍스트만으로 Gemini 분석 (빠르고 저렴)
+            console.log(`[lecture-analyze-gemini] 자막 성공 → Gemini 텍스트 분석`)
             sendProgress('자막 분석 중', 30, `자막 ${captionText.length.toLocaleString()}자 확보, Gemini로 분석 중...`)
 
             analysis = await analyzeTranscriptWithGemini(captionText, prompt, geminiKey, (msg) => {
+              console.log(`[lecture-analyze-gemini] Gemini 텍스트 분석: ${msg}`)
               sendProgress('Gemini 분석 중', 70, msg)
             })
           } else {
             // 2차: 자막 실패 → Gemini SDK로 YouTube URL 직접 분석 시도
+            console.log(`[lecture-analyze-gemini] 2차: Gemini SDK로 YouTube URL 직접 분석 시도`)
             sendProgress('영상 분석 전환', 20, '자막을 찾을 수 없어 Gemini에 영상을 직접 전달합니다...')
 
             try {
               analysis = await analyzeYoutubeWithGeminiSDK(youtubeUrl, prompt, geminiKey, (msg) => {
+                console.log(`[lecture-analyze-gemini] SDK 분석: ${msg}`)
                 sendProgress('Gemini 분석 중', 50, msg)
               })
+              console.log(`[lecture-analyze-gemini] SDK 분석 성공!`)
             } catch (sdkErr) {
               // 3차: SDK 실패 → 오디오 다운로드 후 Gemini File API로 분석
+              console.error(`[lecture-analyze-gemini] SDK 분석 실패:`, sdkErr.message, sdkErr.stack)
               sendProgress('오디오 다운로드 전환', 25, `영상 직접 분석 실패 (${sdkErr.message}), 오디오 다운로드로 전환합니다...`)
 
+              console.log(`[lecture-analyze-gemini] 3차: 오디오 다운로드 시도`)
               const audio = await downloadYoutubeAudio(youtubeUrl, (msg) => {
+                console.log(`[lecture-analyze-gemini] 다운로드: ${msg}`)
                 sendProgress('오디오 다운로드', 35, msg)
               })
 
+              console.log(`[lecture-analyze-gemini] 다운로드 완료: ${(audio.audioBuffer.length / (1024 * 1024)).toFixed(1)}MB, Gemini File API 업로드`)
               sendProgress('Gemini 업로드 중', 55, `오디오 ${(audio.audioBuffer.length / (1024 * 1024)).toFixed(1)}MB를 Gemini에 업로드합니다...`)
 
               analysis = await analyzeFileWithGemini(audio.audioBuffer, `audio.${audio.ext}`, audio.mimeType, prompt, geminiKey, (msg) => {
+                console.log(`[lecture-analyze-gemini] File API: ${msg}`)
                 const percent = msg.includes('업로드') ? 60 : msg.includes('처리 중') ? 70 : 85
                 sendProgress('Gemini 분석 중', percent, msg)
               })
@@ -452,6 +466,11 @@ export async function POST(request) {
         })
 
       } catch (error) {
+        console.error(`[lecture-analyze-gemini] 최종 에러:`, error)
+        console.error(`[lecture-analyze-gemini] 에러 메시지:`, error?.message)
+        console.error(`[lecture-analyze-gemini] 에러 스택:`, error?.stack)
+        console.error(`[lecture-analyze-gemini] 에러 status:`, error?.status, error?.statusCode)
+        console.error(`[lecture-analyze-gemini] 에러 전체:`, JSON.stringify(error, Object.getOwnPropertyNames(error || {}), 2))
         let errMsg = '알 수 없는 오류'
         try {
           errMsg = [
