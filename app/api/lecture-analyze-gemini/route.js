@@ -1,8 +1,9 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { GoogleGenAI } from '@google/genai'
-// youtube-caption-extractor: Turbopack 호환을 위해 동적 import 사용
+// youtube-caption-extractor: Turbopack이 정적 분석 못하도록 변수로 우회
+const _captionPkg = 'youtube-caption-' + 'extractor'
 async function getSubtitles(options) {
-  const mod = await import('youtube-caption-extractor')
+  const mod = await import(/* webpackIgnore: true */ _captionPkg)
   return mod.getSubtitles(options)
 }
 import { createClient } from '@supabase/supabase-js'
