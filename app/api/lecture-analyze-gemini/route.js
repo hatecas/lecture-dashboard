@@ -175,6 +175,33 @@ ${reduceInput}`
   return finalAnalysis || '분석 결과가 비어있습니다.'
 }
 
+// Helper: Analyze YouTube URL directly with Gemini SDK
+async function analyzeYoutubeWithGeminiSDK(youtubeUrl, prompt, geminiKey, onProgress) {
+  const videoId = extractVideoId(youtubeUrl)
+  if (!videoId) throw new Error('유효하지 않은 YouTube URL입니다.')
+  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`
+
+  onProgress('Gemini SDK로 YouTube 영상 직접 분석 중...')
+
+  const ai = await getGoogleGenAI(geminiKey)
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: [
+      {
+        parts: [
+          { fileData: { fileUri: cleanUrl, mimeType: 'video/mp4' } },
+          { text: prompt }
+        ]
+      }
+    ],
+  })
+
+  const text = response.text
+  if (!text) throw new Error('분석 결과가 비어있습니다.')
+  onProgress('분석 완료!')
+  return text
+}
+
 // Helper: Download YouTube audio — try yt-dlp first, fallback to ytdl-core
 async function downloadYoutubeAudio(url, onProgress) {
   const videoId = extractVideoId(url)
@@ -361,19 +388,28 @@ export async function POST(request) {
               sendProgress('Gemini 분석 중', 70, msg)
             })
           } else {
-            // 2차: 자막 실패 → 오디오 다운로드 후 Gemini File API로 분석
-            sendProgress('영상 분석 전환', 20, '자막을 찾을 수 없어 오디오 다운로드 후 분석합니다...')
+            // 2차: 자막 실패 → Gemini SDK로 YouTube URL 직접 분석 시도
+            sendProgress('영상 분석 전환', 20, '자막을 찾을 수 없어 Gemini에 영상을 직접 전달합니다...')
 
-            const audio = await downloadYoutubeAudio(youtubeUrl, (msg) => {
-              sendProgress('오디오 다운로드', 30, msg)
-            })
+            try {
+              analysis = await analyzeYoutubeWithGeminiSDK(youtubeUrl, prompt, geminiKey, (msg) => {
+                sendProgress('Gemini 분석 중', 50, msg)
+              })
+            } catch (sdkErr) {
+              // 3차: SDK 실패 → 오디오 다운로드 후 Gemini File API로 분석
+              sendProgress('오디오 다운로드 전환', 25, `영상 직접 분석 실패 (${sdkErr.message}), 오디오 다운로드로 전환합니다...`)
 
-            sendProgress('Gemini 업로드 중', 50, `오디오 ${(audio.audioBuffer.length / (1024 * 1024)).toFixed(1)}MB를 Gemini에 업로드합니다...`)
+              const audio = await downloadYoutubeAudio(youtubeUrl, (msg) => {
+                sendProgress('오디오 다운로드', 35, msg)
+              })
 
-            analysis = await analyzeFileWithGemini(audio.audioBuffer, `audio.${audio.ext}`, audio.mimeType, prompt, geminiKey, (msg) => {
-              const percent = msg.includes('업로드') ? 55 : msg.includes('처리 중') ? 65 : 80
-              sendProgress('Gemini 분석 중', percent, msg)
-            })
+              sendProgress('Gemini 업로드 중', 55, `오디오 ${(audio.audioBuffer.length / (1024 * 1024)).toFixed(1)}MB를 Gemini에 업로드합니다...`)
+
+              analysis = await analyzeFileWithGemini(audio.audioBuffer, `audio.${audio.ext}`, audio.mimeType, prompt, geminiKey, (msg) => {
+                const percent = msg.includes('업로드') ? 60 : msg.includes('처리 중') ? 70 : 85
+                sendProgress('Gemini 분석 중', percent, msg)
+              })
+            }
           }
 
           // 캐시 저장 (fire-and-forget)
