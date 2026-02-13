@@ -2,6 +2,46 @@ import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { supabase } from '@/lib/supabase'
 
+// 유사 상담 이력 검색
+async function findSimilarHistory(inquiry) {
+  try {
+    // 키워드 추출 (2글자 이상 단어)
+    const keywords = inquiry
+      .replace(/[^\w\sㄱ-ㅎㅏ-ㅣ가-힣]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 2)
+      .slice(0, 5) // 상위 5개 키워드
+
+    if (keywords.length === 0) return []
+
+    // 각 키워드로 검색하여 합침
+    const orFilter = keywords.map(k => `customer_inquiry.ilike.%${k}%`).join(',')
+
+    const { data } = await supabase
+      .from('cs_history')
+      .select('customer_inquiry, agent_response, category, result')
+      .or(orFilter)
+      .limit(10)
+
+    if (!data || data.length === 0) return []
+
+    // 키워드 매칭 수로 관련도 점수 매기기
+    const scored = data.map(item => {
+      const text = (item.customer_inquiry + ' ' + item.agent_response).toLowerCase()
+      const score = keywords.reduce((s, k) => s + (text.includes(k.toLowerCase()) ? 1 : 0), 0)
+      return { ...item, score }
+    })
+
+    // 점수 높은 순으로 상위 5개
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map(({ score, ...rest }) => rest)
+  } catch {
+    return []
+  }
+}
+
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
@@ -15,7 +55,7 @@ export async function POST(request) {
       return NextResponse.json({ error: '메시지가 없습니다' }, { status: 400 })
     }
 
-    // Supabase에서 저장된 CS 정책 로드
+    // 1. Supabase에서 저장된 CS 정책 로드
     let policiesText = ''
     try {
       const { data: policies } = await supabase
@@ -36,10 +76,26 @@ export async function POST(request) {
             policiesText += `■ ${item.title}\n${item.content}\n\n`
           }
         }
-        policiesText += '===== 정책 끝 =====\n\n반드시 위 회사 정책에 기반하여 답변하세요. 정책에 명시된 내용과 다른 답변을 하지 마세요.'
+        policiesText += '===== 정책 끝 =====\n'
       }
     } catch {
       // 테이블 없으면 무시
+    }
+
+    // 2. 유사 상담 이력 검색 (마지막 user 메시지 기준)
+    let historyText = ''
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
+    if (lastUserMsg?.content) {
+      const similar = await findSimilarHistory(lastUserMsg.content)
+      if (similar.length > 0) {
+        historyText = '\n\n===== 과거 유사 상담 사례 =====\n'
+        similar.forEach((item, i) => {
+          historyText += `\n[사례 ${i + 1}] (${item.category}${item.result ? ' / ' + item.result : ''})\n`
+          historyText += `고객: ${item.customer_inquiry}\n`
+          historyText += `답변: ${item.agent_response}\n`
+        })
+        historyText += '\n===== 사례 끝 =====\n\n위 과거 사례들의 톤, 말투, 대응 방식을 참고하여 답변하세요. 우리 팀이 실제로 했던 답변 스타일을 최대한 따라하세요.'
+      }
     }
 
     const systemPrompt = `당신은 온라인 강의 플랫폼의 전문 CS(고객상담) 담당자입니다.
@@ -56,31 +112,22 @@ export async function POST(request) {
 3. 구체적인 해결 방안 제시
 4. 추가 문의 안내로 마무리
 5. 너무 길지 않게 핵심만 전달 (3-5문장)
-
-고객 문의 유형별 대응:
-- 환불 요청: 환불 정책 안내 + 처리 절차 설명
-- 결제 오류: 확인 절차 안내 + 대안 제시
-- 수강 문의: 강의 정보 제공 + 추천
-- 불만/컴플레인: 진심 어린 사과 + 보상/해결책 제시
-- 기술 문제: 단계별 해결 방법 안내
+6. 과거 상담 사례가 제공되면 그 톤과 스타일을 최우선으로 따르세요
 
 이미지가 포함된 경우:
 - 이미지 내용을 분석하여 고객 문의 맥락을 파악합니다
 - 스크린샷의 오류 메시지, 결제 내역 등을 읽고 답변에 반영합니다
 
 사용자가 고객 문의 내용을 입력하면, 그에 맞는 CS 답변을 작성해주세요.
-사용자가 추가 지시(톤 변경, 내용 수정 등)를 하면 그에 맞게 조정하세요.${policiesText}`
+사용자가 추가 지시(톤 변경, 내용 수정 등)를 하면 그에 맞게 조정하세요.${policiesText}${historyText}`
 
     // 메시지 포맷 변환 (이미지 지원)
     const apiMessages = messages.map(m => {
-      // 이미지가 포함된 메시지
       if (m.images && m.images.length > 0) {
         const content = []
-        // 텍스트가 있으면 먼저 추가
         if (m.content) {
           content.push({ type: 'text', text: m.content })
         }
-        // 이미지 추가
         for (const img of m.images) {
           content.push({
             type: 'image',
@@ -93,7 +140,6 @@ export async function POST(request) {
         }
         return { role: m.role, content }
       }
-      // 텍스트만 있는 메시지
       return { role: m.role, content: m.content }
     })
 

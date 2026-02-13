@@ -136,8 +136,17 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [csEditPolicy, setCsEditPolicy] = useState(null) // 편집 중인 정책
   const [csNewPolicy, setCsNewPolicy] = useState({ title: '', category: '환불', content: '' })
   const [csShowAddPolicy, setCsShowAddPolicy] = useState(false)
+  const [csHistory, setCsHistory] = useState([])
+  const [csHistoryLoading, setCsHistoryLoading] = useState(false)
+  const [csHistoryTotal, setCsHistoryTotal] = useState(0)
+  const [csHistoryPage, setCsHistoryPage] = useState(1)
+  const [csHistorySearch, setCsHistorySearch] = useState('')
+  const [csShowAddHistory, setCsShowAddHistory] = useState(false)
+  const [csNewHistory, setCsNewHistory] = useState({ category: '일반', customer_inquiry: '', agent_response: '', tags: '', result: '' })
+  const [csUploadingHistory, setCsUploadingHistory] = useState(false)
   const csEndRef = useRef(null)
   const csFileRef = useRef(null)
+  const csHistoryFileRef = useRef(null)
 
   // 서버에서 시트 목록 로드
   const loadSavedSheets = async () => {
@@ -4023,6 +4032,21 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     background: csMode === 'policy' ? 'rgba(99,102,241,0.3)' : 'transparent',
                     color: csMode === 'policy' ? '#a5b4fc' : '#64748b'
                   }}>📋 정책 관리</button>
+                  <button onClick={() => {
+                    setCsMode('history')
+                    if (csHistory.length === 0) {
+                      setCsHistoryLoading(true)
+                      fetch('/api/cs-history?limit=50', { headers: getAuthHeaders() })
+                        .then(r => r.json())
+                        .then(d => { setCsHistory(d.history || []); setCsHistoryTotal(d.total || 0) })
+                        .catch(() => {})
+                        .finally(() => setCsHistoryLoading(false))
+                    }
+                  }} style={{
+                    padding: '8px 16px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+                    background: csMode === 'history' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                    color: csMode === 'history' ? '#a5b4fc' : '#64748b'
+                  }}>📚 상담 이력</button>
                 </div>
               </div>
 
@@ -4497,6 +4521,288 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                         </div>
                       ))}
                     </div>
+                  )}
+                </div>
+              )}
+
+              {/* 상담 이력 모드 */}
+              {csMode === 'history' && (
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  {/* 상단 액션바 */}
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button onClick={() => setCsShowAddHistory(true)} style={{
+                      padding: '10px 18px', background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                      border: 'none', borderRadius: '10px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer'
+                    }}>+ 직접 추가</button>
+
+                    <input type="file" ref={csHistoryFileRef} accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        setCsUploadingHistory(true)
+                        try {
+                          const XLSX = (await import('xlsx')).default
+                          const buffer = await file.arrayBuffer()
+                          const wb = XLSX.read(buffer, { type: 'array' })
+                          const ws = wb.Sheets[wb.SheetNames[0]]
+                          const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+
+                          if (rows.length === 0) { alert('데이터가 없습니다'); return }
+
+                          // 컬럼 자동 매핑 (유연하게)
+                          const findCol = (row, names) => {
+                            for (const n of names) {
+                              const key = Object.keys(row).find(k => k.includes(n))
+                              if (key) return key
+                            }
+                            return null
+                          }
+                          const sample = rows[0]
+                          const inquiryCol = findCol(sample, ['문의', '질문', '고객', 'inquiry', 'question', '내용'])
+                          const responseCol = findCol(sample, ['답변', '응답', '대응', 'response', 'answer', '처리'])
+                          const categoryCol = findCol(sample, ['카테고리', '분류', '유형', 'category', 'type'])
+                          const tagsCol = findCol(sample, ['태그', '키워드', 'tag', 'keyword'])
+                          const resultCol = findCol(sample, ['결과', '처리결과', 'result', '상태'])
+
+                          if (!inquiryCol || !responseCol) {
+                            alert('엑셀에 문의/질문 컬럼과 답변/응답 컬럼이 필요합니다.\n\n인식 가능한 컬럼명:\n- 문의: 문의, 질문, 고객, inquiry, question, 내용\n- 답변: 답변, 응답, 대응, response, answer, 처리')
+                            return
+                          }
+
+                          const items = rows.map(r => ({
+                            customer_inquiry: String(r[inquiryCol] || '').trim(),
+                            agent_response: String(r[responseCol] || '').trim(),
+                            category: categoryCol ? String(r[categoryCol] || '일반').trim() : '일반',
+                            tags: tagsCol ? String(r[tagsCol] || '').trim() : '',
+                            result: resultCol ? String(r[resultCol] || '').trim() : ''
+                          })).filter(i => i.customer_inquiry && i.agent_response)
+
+                          if (items.length === 0) { alert('유효한 데이터가 없습니다'); return }
+
+                          const res = await fetch('/api/cs-history', {
+                            method: 'POST', headers: getAuthHeaders(),
+                            body: JSON.stringify({ bulk: true, items })
+                          })
+                          const data = await res.json()
+                          if (data.success) {
+                            alert(`${data.count}건의 상담 이력이 업로드되었습니다!`)
+                            // 새로고침
+                            const refreshRes = await fetch('/api/cs-history?limit=50', { headers: getAuthHeaders() })
+                            const refreshData = await refreshRes.json()
+                            setCsHistory(refreshData.history || [])
+                            setCsHistoryTotal(refreshData.total || 0)
+                            setCsHistoryPage(1)
+                          } else {
+                            alert('업로드 실패: ' + (data.error || ''))
+                          }
+                        } catch (err) {
+                          alert('파일 처리 오류: ' + err.message)
+                        } finally {
+                          setCsUploadingHistory(false)
+                          e.target.value = ''
+                        }
+                      }}
+                    />
+                    <button onClick={() => csHistoryFileRef.current?.click()} disabled={csUploadingHistory} style={{
+                      padding: '10px 18px', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
+                      borderRadius: '10px', color: '#34d399', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+                      opacity: csUploadingHistory ? 0.5 : 1
+                    }}>{csUploadingHistory ? '⏳ 업로드 중...' : '📤 엑셀 업로드'}</button>
+
+                    <div style={{ flex: 1 }} />
+
+                    <input
+                      value={csHistorySearch}
+                      onChange={(e) => setCsHistorySearch(e.target.value)}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter') {
+                          setCsHistoryLoading(true)
+                          const res = await fetch(`/api/cs-history?limit=50&search=${encodeURIComponent(csHistorySearch)}`, { headers: getAuthHeaders() })
+                          const data = await res.json()
+                          setCsHistory(data.history || [])
+                          setCsHistoryTotal(data.total || 0)
+                          setCsHistoryPage(1)
+                          setCsHistoryLoading(false)
+                        }
+                      }}
+                      placeholder="검색 (Enter)"
+                      style={{
+                        padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '10px', color: '#e2e8f0', fontSize: '13px', outline: 'none', width: '200px'
+                      }}
+                    />
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>총 {csHistoryTotal}건</span>
+                  </div>
+
+                  {/* 직접 추가 폼 */}
+                  {csShowAddHistory && (
+                    <div style={{
+                      background: 'rgba(255,255,255,0.05)', borderRadius: '16px',
+                      border: '1px solid rgba(99,102,241,0.3)', padding: '20px', marginBottom: '16px'
+                    }}>
+                      <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '16px', color: '#a5b4fc' }}>상담 이력 직접 추가</h3>
+                      <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                        <select value={csNewHistory.category} onChange={(e) => setCsNewHistory(p => ({ ...p, category: e.target.value }))} style={{
+                          padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '10px', color: '#e2e8f0', fontSize: '14px', outline: 'none'
+                        }}>
+                          <option value="환불">환불</option>
+                          <option value="결제">결제</option>
+                          <option value="수강">수강</option>
+                          <option value="컴플레인">컴플레인</option>
+                          <option value="기술문의">기술문의</option>
+                          <option value="일반">일반</option>
+                        </select>
+                        <input value={csNewHistory.tags} onChange={(e) => setCsNewHistory(p => ({ ...p, tags: e.target.value }))} placeholder="태그 (예: 진상, VIP, 재구매)"
+                          style={{ flex: 1, padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#e2e8f0', fontSize: '14px', outline: 'none' }}
+                        />
+                        <input value={csNewHistory.result} onChange={(e) => setCsNewHistory(p => ({ ...p, result: e.target.value }))} placeholder="처리결과 (예: 환불완료, 해결)"
+                          style={{ width: '160px', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#e2e8f0', fontSize: '14px', outline: 'none' }}
+                        />
+                      </div>
+                      <textarea value={csNewHistory.customer_inquiry} onChange={(e) => setCsNewHistory(p => ({ ...p, customer_inquiry: e.target.value }))}
+                        placeholder="고객 문의 내용" style={{
+                          width: '100%', padding: '12px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '10px', color: '#e2e8f0', fontSize: '14px', outline: 'none', resize: 'vertical', minHeight: '80px',
+                          fontFamily: 'inherit', lineHeight: '1.6', marginBottom: '10px', boxSizing: 'border-box'
+                        }}
+                      />
+                      <textarea value={csNewHistory.agent_response} onChange={(e) => setCsNewHistory(p => ({ ...p, agent_response: e.target.value }))}
+                        placeholder="실제 답변 (우리가 했던 답변)" style={{
+                          width: '100%', padding: '12px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '10px', color: '#e2e8f0', fontSize: '14px', outline: 'none', resize: 'vertical', minHeight: '80px',
+                          fontFamily: 'inherit', lineHeight: '1.6', boxSizing: 'border-box'
+                        }}
+                      />
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '12px', justifyContent: 'flex-end' }}>
+                        <button onClick={() => { setCsShowAddHistory(false); setCsNewHistory({ category: '일반', customer_inquiry: '', agent_response: '', tags: '', result: '' }) }} style={{
+                          padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '10px', color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                        }}>취소</button>
+                        <button onClick={async () => {
+                          if (!csNewHistory.customer_inquiry || !csNewHistory.agent_response) return
+                          const res = await fetch('/api/cs-history', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(csNewHistory) })
+                          const data = await res.json()
+                          if (data.item) {
+                            setCsHistory(prev => [data.item, ...prev])
+                            setCsHistoryTotal(prev => prev + 1)
+                            setCsNewHistory({ category: '일반', customer_inquiry: '', agent_response: '', tags: '', result: '' })
+                            setCsShowAddHistory(false)
+                          }
+                        }} style={{
+                          padding: '10px 24px', background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                          border: 'none', borderRadius: '10px', color: '#fff', fontSize: '14px', fontWeight: '600', cursor: 'pointer'
+                        }}>저장</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 엑셀 형식 안내 */}
+                  <div style={{
+                    background: 'rgba(99,102,241,0.08)', borderRadius: '12px', padding: '14px 18px',
+                    border: '1px solid rgba(99,102,241,0.15)', marginBottom: '16px', fontSize: '12px', color: '#94a3b8', lineHeight: '1.7'
+                  }}>
+                    💡 <strong style={{ color: '#a5b4fc' }}>엑셀 업로드 형식:</strong> &quot;문의&quot;(또는 질문/고객) 컬럼 + &quot;답변&quot;(또는 응답/대응) 컬럼 필수. 선택: 카테고리, 태그, 결과 컬럼.
+                    업로드하면 AI가 유사 상담을 자동으로 찾아서 답변 스타일을 학습합니다.
+                  </div>
+
+                  {/* 이력 목록 */}
+                  {csHistoryLoading ? (
+                    <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                      <div style={{ fontSize: '32px', marginBottom: '12px' }}>⏳</div>
+                      <p>상담 이력 로딩 중...</p>
+                    </div>
+                  ) : csHistory.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
+                      <div style={{ fontSize: '48px', marginBottom: '16px' }}>📚</div>
+                      <p style={{ fontSize: '16px', fontWeight: '600', color: '#94a3b8', marginBottom: '8px' }}>상담 이력이 없습니다</p>
+                      <p style={{ fontSize: '13px', lineHeight: '1.6' }}>기존 상담 데이터를 엑셀로 업로드하거나<br/>직접 추가하여 AI를 학습시키세요</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {csHistory.map(item => (
+                          <div key={item.id} style={{
+                            background: 'rgba(255,255,255,0.03)', borderRadius: '12px',
+                            border: '1px solid rgba(255,255,255,0.08)', padding: '16px'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <span style={{
+                                  padding: '2px 8px', background: 'rgba(99,102,241,0.15)', borderRadius: '5px',
+                                  fontSize: '11px', color: '#a5b4fc', fontWeight: '600'
+                                }}>{item.category}</span>
+                                {item.tags && item.tags.split(',').map((tag, i) => (
+                                  <span key={i} style={{
+                                    padding: '2px 8px', background: 'rgba(245,158,11,0.12)', borderRadius: '5px',
+                                    fontSize: '11px', color: '#fbbf24'
+                                  }}>{tag.trim()}</span>
+                                ))}
+                                {item.result && (
+                                  <span style={{
+                                    padding: '2px 8px', background: 'rgba(16,185,129,0.12)', borderRadius: '5px',
+                                    fontSize: '11px', color: '#34d399'
+                                  }}>{item.result}</span>
+                                )}
+                              </div>
+                              <button onClick={async () => {
+                                if (!confirm('이 이력을 삭제하시겠습니까?')) return
+                                await fetch('/api/cs-history', { method: 'DELETE', headers: getAuthHeaders(), body: JSON.stringify({ id: item.id }) })
+                                setCsHistory(prev => prev.filter(h => h.id !== item.id))
+                                setCsHistoryTotal(prev => prev - 1)
+                              }} style={{
+                                padding: '2px 8px', background: 'transparent', border: '1px solid rgba(239,68,68,0.2)',
+                                borderRadius: '5px', color: '#f87171', fontSize: '11px', cursor: 'pointer'
+                              }}>삭제</button>
+                            </div>
+                            <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                              <div style={{ color: '#f87171', marginBottom: '6px' }}>
+                                <strong>고객:</strong> <span style={{ color: '#cbd5e1' }}>{item.customer_inquiry.length > 200 ? item.customer_inquiry.substring(0, 200) + '...' : item.customer_inquiry}</span>
+                              </div>
+                              <div style={{ color: '#34d399' }}>
+                                <strong>답변:</strong> <span style={{ color: '#94a3b8' }}>{item.agent_response.length > 200 ? item.agent_response.substring(0, 200) + '...' : item.agent_response}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 페이지네이션 */}
+                      {csHistoryTotal > 50 && (
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '16px' }}>
+                          <button disabled={csHistoryPage <= 1} onClick={async () => {
+                            const newPage = csHistoryPage - 1
+                            setCsHistoryLoading(true)
+                            const res = await fetch(`/api/cs-history?limit=50&page=${newPage}&search=${encodeURIComponent(csHistorySearch)}`, { headers: getAuthHeaders() })
+                            const data = await res.json()
+                            setCsHistory(data.history || [])
+                            setCsHistoryPage(newPage)
+                            setCsHistoryLoading(false)
+                          }} style={{
+                            padding: '8px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '8px', color: '#94a3b8', fontSize: '13px', cursor: csHistoryPage <= 1 ? 'not-allowed' : 'pointer',
+                            opacity: csHistoryPage <= 1 ? 0.3 : 1
+                          }}>이전</button>
+                          <span style={{ padding: '8px 14px', fontSize: '13px', color: '#64748b' }}>
+                            {csHistoryPage} / {Math.ceil(csHistoryTotal / 50)}
+                          </span>
+                          <button disabled={csHistoryPage >= Math.ceil(csHistoryTotal / 50)} onClick={async () => {
+                            const newPage = csHistoryPage + 1
+                            setCsHistoryLoading(true)
+                            const res = await fetch(`/api/cs-history?limit=50&page=${newPage}&search=${encodeURIComponent(csHistorySearch)}`, { headers: getAuthHeaders() })
+                            const data = await res.json()
+                            setCsHistory(data.history || [])
+                            setCsHistoryPage(newPage)
+                            setCsHistoryLoading(false)
+                          }} style={{
+                            padding: '8px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '8px', color: '#94a3b8', fontSize: '13px',
+                            cursor: csHistoryPage >= Math.ceil(csHistoryTotal / 50) ? 'not-allowed' : 'pointer',
+                            opacity: csHistoryPage >= Math.ceil(csHistoryTotal / 50) ? 0.3 : 1
+                          }}>다음</button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
