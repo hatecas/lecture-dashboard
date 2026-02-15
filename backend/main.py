@@ -4,8 +4,10 @@ import io
 import json
 import asyncio
 import hashlib
+import logging
 import subprocess
 import tempfile
+import traceback
 import shutil
 import queue as queue_mod
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +16,9 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from youtube_transcript_api import YouTubeTranscriptApi
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("lecture-backend")
 
 app = FastAPI()
 
@@ -100,6 +105,8 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
     process = None
     try:
         out_path = os.path.join(tmp_dir, f"yt_{video_id}")
+        logger.info(f"[yt-dlp] 오디오 다운로드 시작: {full_url}")
+        logger.info(f"[yt-dlp] 임시 디렉토리: {tmp_dir}")
 
         # --newline: 진행률을 줄 단위로 출력
         process = subprocess.Popen([
@@ -111,6 +118,8 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
 
         for line in process.stdout:
             line = line.strip()
+            if line:
+                logger.info(f"[yt-dlp] {line}")
             # "[download]  45.2% of  150.00MiB at  2.50MiB/s ETA 00:35"
             m = re.search(
                 r'\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\s*\w+)'
@@ -133,7 +142,9 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
                 send_progress("오디오 변환 중 (mp3)...", 100)
 
         process.wait()
+        logger.info(f"[yt-dlp] 프로세스 종료 코드: {process.returncode}")
         if process.returncode != 0:
+            logger.error(f"[yt-dlp] 다운로드 실패 (exit code: {process.returncode})")
             return None
 
         # 생성된 파일 찾기
@@ -143,6 +154,7 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
         else:
             files = [f for f in os.listdir(tmp_dir) if f.startswith(f"yt_{video_id}.")]
             if not files:
+                logger.error(f"[yt-dlp] 다운로드된 파일을 찾을 수 없음: {tmp_dir}")
                 return None
             audio_path = os.path.join(tmp_dir, files[0])
 
@@ -150,10 +162,13 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
             audio_bytes = f.read()
 
         ext = os.path.splitext(audio_path)[1].lstrip(".") or "mp3"
+        logger.info(f"[yt-dlp] 다운로드 완료: {audio_path} ({len(audio_bytes) / (1024*1024):.1f}MB, ext={ext})")
         send_progress(f"다운로드 완료 ({len(audio_bytes) / (1024*1024):.1f}MB)", 100)
         return (audio_bytes, ext)
 
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+        logger.error(f"[yt-dlp] 예외 발생: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
         return None
     finally:
         if process and process.poll() is None:
@@ -282,25 +297,37 @@ async def analyze_lecture(
                     audio_bytes, ext = audio_result
                     file_size_mb = len(audio_bytes) / (1024 * 1024)
                     mime_type = "audio/mpeg" if ext == "mp3" else f"audio/{ext}"
+                    logger.info(f"[분석] 오디오 준비 완료: {file_size_mb:.1f}MB, mime={mime_type}")
 
                     yield sse_event({"type": "progress", "step": "Gemini 업로드 중", "percent": 40, "detail": f"오디오 {file_size_mb:.1f}MB를 Gemini에 업로드합니다..."})
 
-                    # Gemini File API로 업로드
-                    uploaded_file = genai.upload_file(
-                        io.BytesIO(audio_bytes),
-                        mime_type=mime_type,
-                    )
+                    # Gemini File API로 업로드 (임시 파일 경로 사용)
+                    tmp_upload = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+                    try:
+                        tmp_upload.write(audio_bytes)
+                        tmp_upload.close()
+                        logger.info(f"[Gemini] 임시 파일 생성: {tmp_upload.name}")
+                        uploaded_file = genai.upload_file(
+                            tmp_upload.name,
+                            mime_type=mime_type,
+                        )
+                        logger.info(f"[Gemini] 업로드 완료: name={uploaded_file.name}, state={uploaded_file.state.name}")
+                    finally:
+                        os.unlink(tmp_upload.name)
 
                     yield sse_event({"type": "progress", "step": "파일 처리 대기 중", "percent": 50, "detail": "Gemini가 오디오를 처리하는 중..."})
 
                     while uploaded_file.state.name == "PROCESSING":
                         await asyncio.sleep(3)
                         uploaded_file = genai.get_file(uploaded_file.name)
+                        logger.info(f"[Gemini] 파일 처리 상태: {uploaded_file.state.name}")
 
                     if uploaded_file.state.name == "FAILED":
+                        logger.error("[Gemini] 오디오 처리 실패")
                         yield sse_event({"type": "error", "message": "Gemini 오디오 처리에 실패했습니다."})
                         return
 
+                    logger.info("[Gemini] 파일 처리 완료, 분석 시작")
                     yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 70, "detail": "오디오를 분석 중..."})
 
                     # Gemini 분석을 스레드에서 실행, keepalive 전송
@@ -310,9 +337,11 @@ async def analyze_lecture(
                     while not gen_task.done():
                         await asyncio.sleep(10)
                         ka += 1
+                        logger.info(f"[Gemini] 분석 진행 중... ({ka * 10}초)")
                         yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(70 + ka * 2, 90), "detail": f"AI가 오디오를 분석 중입니다... ({ka * 10}초)"})
                     response = await gen_task
                     analysis = response.text
+                    logger.info(f"[Gemini] 분석 완료 (결과 길이: {len(analysis)}자)")
 
             else:
                 # 파일 업로드 방식
@@ -324,14 +353,25 @@ async def analyze_lecture(
 
                 file_content = await videoFile.read()
                 file_size_mb = len(file_content) / (1024 * 1024)
+                file_mime = videoFile.content_type or "video/mp4"
+                logger.info(f"[분석] 파일 업로드: {videoFile.filename} ({file_size_mb:.1f}MB, mime={file_mime})")
 
                 yield sse_event({"type": "progress", "step": "Gemini 업로드 중", "percent": 20, "detail": f"{videoFile.filename} - {file_size_mb:.1f}MB"})
 
-                # Gemini File API로 분석
-                uploaded_file = genai.upload_file(
-                    io.BytesIO(file_content),
-                    mime_type=videoFile.content_type or "video/mp4",
-                )
+                # Gemini File API로 분석 (임시 파일 경로 사용)
+                suffix = os.path.splitext(videoFile.filename or "file.mp4")[1] or ".mp4"
+                tmp_upload = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                try:
+                    tmp_upload.write(file_content)
+                    tmp_upload.close()
+                    logger.info(f"[Gemini] 임시 파일 생성: {tmp_upload.name}")
+                    uploaded_file = genai.upload_file(
+                        tmp_upload.name,
+                        mime_type=file_mime,
+                    )
+                    logger.info(f"[Gemini] 업로드 완료: name={uploaded_file.name}, state={uploaded_file.state.name}")
+                finally:
+                    os.unlink(tmp_upload.name)
 
                 yield sse_event({"type": "progress", "step": "파일 처리 대기 중", "percent": 40, "detail": "Gemini가 파일을 처리하는 중..."})
 
@@ -339,11 +379,14 @@ async def analyze_lecture(
                 while uploaded_file.state.name == "PROCESSING":
                     await asyncio.sleep(3)
                     uploaded_file = genai.get_file(uploaded_file.name)
+                    logger.info(f"[Gemini] 파일 처리 상태: {uploaded_file.state.name}")
 
                 if uploaded_file.state.name == "FAILED":
+                    logger.error("[Gemini] 파일 처리 실패")
                     yield sse_event({"type": "error", "message": "Gemini 파일 처리에 실패했습니다."})
                     return
 
+                logger.info("[Gemini] 파일 처리 완료, 분석 시작")
                 yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 60, "detail": "영상을 분석 중..."})
 
                 # Gemini 분석을 스레드에서 실행, keepalive 전송
@@ -353,9 +396,11 @@ async def analyze_lecture(
                 while not gen_task.done():
                     await asyncio.sleep(10)
                     ka += 1
+                    logger.info(f"[Gemini] 분석 진행 중... ({ka * 10}초)")
                     yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(60 + ka * 2, 90), "detail": f"AI가 영상을 분석 중입니다... ({ka * 10}초)"})
                 response = await gen_task
                 analysis = response.text
+                logger.info(f"[Gemini] 분석 완료 (결과 길이: {len(analysis)}자)")
 
             if analysis:
                 yield sse_event({"type": "progress", "step": "분석 완료", "percent": 95, "detail": "결과를 정리합니다..."})
@@ -364,7 +409,9 @@ async def analyze_lecture(
                 yield sse_event({"type": "error", "message": "분석 결과가 비어있습니다."})
 
         except Exception as e:
-            yield sse_event({"type": "error", "message": str(e)})
+            logger.error(f"[분석] 예외 발생: {type(e).__name__}: {e}")
+            logger.error(traceback.format_exc())
+            yield sse_event({"type": "error", "message": f"{type(e).__name__}: {e}"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
