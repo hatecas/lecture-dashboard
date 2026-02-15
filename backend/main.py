@@ -94,34 +94,56 @@ def fetch_youtube_captions(video_id: str) -> str | None:
 
 
 def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = None) -> tuple[bytes, str] | None:
-    """yt-dlp로 YouTube 오디오 다운로드. 진행상황을 progress_q에 전달."""
+    """yt-dlp로 YouTube 오디오 다운로드 → 실패 시 pytubefix 폴백. 진행상황을 progress_q에 전달."""
     full_url = f"https://www.youtube.com/watch?v={video_id}"
-    tmp_dir = tempfile.mkdtemp()
 
     def send_progress(detail: str, dl_percent: float = -1):
         if progress_q:
             progress_q.put({"detail": detail, "dl_percent": dl_percent})
 
+    # 1차 시도: yt-dlp
+    result = _download_with_ytdlp(video_id, full_url, send_progress)
+    if result:
+        return result
+
+    # 2차 시도: pytubefix (순수 Python, 외부 바이너리 불필요)
+    logger.info("[pytubefix] yt-dlp 실패, pytubefix로 재시도")
+    send_progress("yt-dlp 실패, 대체 방법으로 재시도...", 0)
+    result = _download_with_pytubefix(video_id, full_url, send_progress)
+    if result:
+        return result
+
+    return None
+
+
+def _download_with_ytdlp(video_id: str, full_url: str, send_progress) -> tuple[bytes, str] | None:
+    """yt-dlp를 사용한 오디오 다운로드"""
+    tmp_dir = tempfile.mkdtemp()
     process = None
     try:
         out_path = os.path.join(tmp_dir, f"yt_{video_id}")
         logger.info(f"[yt-dlp] 오디오 다운로드 시작: {full_url}")
-        logger.info(f"[yt-dlp] 임시 디렉토리: {tmp_dir}")
 
-        # -x: 오디오만 추출 (mp3 변환 없이 원본 포맷 유지 → 빠름)
-        # --newline: 진행률을 줄 단위로 출력
+        # 서버 환경에서 YouTube 차단을 우회하기 위한 옵션 추가
         process = subprocess.Popen([
             "yt-dlp",
             "-x",
             "-o", f"{out_path}.%(ext)s",
-            "--no-playlist", "--newline", full_url
+            "--no-playlist", "--newline",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "--extractor-args", "youtube:player_client=web",
+            "--no-check-certificates",
+            "--socket-timeout", "30",
+            full_url
         ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
+        last_error = ""
         for line in process.stdout:
             line = line.strip()
             if line:
                 logger.info(f"[yt-dlp] {line}")
-            # "[download]  45.2% of  150.00MiB at  2.50MiB/s ETA 00:35"
+            if "ERROR" in line:
+                last_error = line
             m = re.search(
                 r'\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\s*\w+)'
                 r'(?:\s+at\s+([\d.]+\s*\w+/s))?'
@@ -145,10 +167,9 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
         process.wait()
         logger.info(f"[yt-dlp] 프로세스 종료 코드: {process.returncode}")
         if process.returncode != 0:
-            logger.error(f"[yt-dlp] 다운로드 실패 (exit code: {process.returncode})")
+            logger.error(f"[yt-dlp] 다운로드 실패 (exit code: {process.returncode}): {last_error}")
             return None
 
-        # 생성된 파일 찾기 (원본 포맷이므로 확장자가 다양할 수 있음)
         files = [f for f in os.listdir(tmp_dir) if f.startswith(f"yt_{video_id}.")]
         if not files:
             logger.error(f"[yt-dlp] 다운로드된 파일을 찾을 수 없음: {tmp_dir}")
@@ -165,12 +186,44 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
 
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
         logger.error(f"[yt-dlp] 예외 발생: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
         return None
     finally:
         if process and process.poll() is None:
             process.kill()
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _download_with_pytubefix(video_id: str, full_url: str, send_progress) -> tuple[bytes, str] | None:
+    """pytubefix를 사용한 오디오 다운로드 (yt-dlp 실패 시 폴백)"""
+    try:
+        from pytubefix import YouTube
+
+        send_progress("pytubefix로 오디오 다운로드 중...", 10)
+        yt = YouTube(full_url)
+
+        # 오디오 전용 스트림 선택 (최고 비트레이트)
+        audio_stream = yt.streams.filter(only_audio=True).order_by("abr").desc().first()
+        if not audio_stream:
+            logger.error("[pytubefix] 오디오 스트림을 찾을 수 없음")
+            return None
+
+        logger.info(f"[pytubefix] 오디오 스트림 선택: {audio_stream.mime_type}, {audio_stream.abr}")
+        send_progress(f"오디오 다운로드 중 ({audio_stream.abr})...", 30)
+
+        # 메모리에 다운로드
+        buffer = io.BytesIO()
+        audio_stream.stream_to_buffer(buffer)
+        audio_bytes = buffer.getvalue()
+
+        ext = audio_stream.subtype or "mp4"  # webm, mp4 등
+        logger.info(f"[pytubefix] 다운로드 완료: {len(audio_bytes) / (1024*1024):.1f}MB, ext={ext}")
+        send_progress(f"다운로드 완료 ({len(audio_bytes) / (1024*1024):.1f}MB)", 100)
+        return (audio_bytes, ext)
+
+    except Exception as e:
+        logger.error(f"[pytubefix] 예외 발생: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        return None
 
 
 def split_transcript(transcript: str, max_chars: int = 100000) -> list[str]:
@@ -287,7 +340,7 @@ async def analyze_lecture(
                     if not audio_result:
                         yield sse_event({
                             "type": "error",
-                            "message": "자막도 없고 오디오 다운로드도 실패했습니다.\n\n해결 방법:\n1. yt-dlp 설치: PowerShell에서 'winget install yt-dlp' 실행\n2. 파일 업로드 모드로 전환하여 영상/오디오 파일을 직접 업로드"
+                            "message": "자막도 없고 오디오 다운로드도 실패했습니다.\n\n이 영상은 YouTube에서 서버 다운로드를 차단하고 있을 수 있습니다.\n\n해결 방법:\n파일 업로드 모드로 전환하여 영상/오디오 파일을 직접 업로드해주세요."
                         })
                         return
 
