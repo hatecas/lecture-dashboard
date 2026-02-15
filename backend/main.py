@@ -108,10 +108,11 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
         logger.info(f"[yt-dlp] 오디오 다운로드 시작: {full_url}")
         logger.info(f"[yt-dlp] 임시 디렉토리: {tmp_dir}")
 
+        # -x: 오디오만 추출 (mp3 변환 없이 원본 포맷 유지 → 빠름)
         # --newline: 진행률을 줄 단위로 출력
         process = subprocess.Popen([
             "yt-dlp",
-            "-x", "--audio-format", "mp3", "--audio-quality", "5",
+            "-x",
             "-o", f"{out_path}.%(ext)s",
             "--no-playlist", "--newline", full_url
         ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -139,7 +140,7 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
                     parts.append(f"남은 시간 {eta}")
                 send_progress(" · ".join(parts), pct)
             elif "[ExtractAudio]" in line:
-                send_progress("오디오 변환 중 (mp3)...", 100)
+                send_progress("오디오 추출 중...", 100)
 
         process.wait()
         logger.info(f"[yt-dlp] 프로세스 종료 코드: {process.returncode}")
@@ -147,16 +148,12 @@ def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = N
             logger.error(f"[yt-dlp] 다운로드 실패 (exit code: {process.returncode})")
             return None
 
-        # 생성된 파일 찾기
-        expected = f"{out_path}.mp3"
-        if os.path.exists(expected):
-            audio_path = expected
-        else:
-            files = [f for f in os.listdir(tmp_dir) if f.startswith(f"yt_{video_id}.")]
-            if not files:
-                logger.error(f"[yt-dlp] 다운로드된 파일을 찾을 수 없음: {tmp_dir}")
-                return None
-            audio_path = os.path.join(tmp_dir, files[0])
+        # 생성된 파일 찾기 (원본 포맷이므로 확장자가 다양할 수 있음)
+        files = [f for f in os.listdir(tmp_dir) if f.startswith(f"yt_{video_id}.")]
+        if not files:
+            logger.error(f"[yt-dlp] 다운로드된 파일을 찾을 수 없음: {tmp_dir}")
+            return None
+        audio_path = os.path.join(tmp_dir, files[0])
 
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
@@ -296,8 +293,11 @@ async def analyze_lecture(
 
                     audio_bytes, ext = audio_result
                     file_size_mb = len(audio_bytes) / (1024 * 1024)
-                    mime_type = "audio/mpeg" if ext == "mp3" else f"audio/{ext}"
-                    logger.info(f"[분석] 오디오 준비 완료: {file_size_mb:.1f}MB, mime={mime_type}")
+                    mime_map = {"mp3": "audio/mpeg", "m4a": "audio/mp4", "webm": "audio/webm",
+                                "opus": "audio/ogg", "ogg": "audio/ogg", "wav": "audio/wav",
+                                "flac": "audio/flac", "aac": "audio/aac"}
+                    mime_type = mime_map.get(ext, f"audio/{ext}")
+                    logger.info(f"[분석] 오디오 준비 완료: {file_size_mb:.1f}MB, ext={ext}, mime={mime_type}")
 
                     yield sse_event({"type": "progress", "step": "Gemini 업로드 중", "percent": 40, "detail": f"오디오 {file_size_mb:.1f}MB를 Gemini에 업로드합니다..."})
 
