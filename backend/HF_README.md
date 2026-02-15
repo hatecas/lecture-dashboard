@@ -3,6 +3,7 @@ title: Lecture Dashboard Backend
 emoji: 🎓
 colorFrom: blue
 colorTo: purple
-sdk: docker
-app_port: 7860
+sdk: gradio
+python_version: "3.11"
+app_file: app.py
 ---
