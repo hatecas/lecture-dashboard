@@ -6,6 +6,8 @@ import hashlib
 import subprocess
 import tempfile
 import shutil
+import queue as queue_mod
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,21 +87,53 @@ def fetch_youtube_captions(video_id: str) -> str | None:
         return None
 
 
-def download_youtube_audio(video_id: str) -> tuple[bytes, str] | None:
-    """yt-dlp로 YouTube 오디오 다운로드. (bytes, 확장자) 반환"""
+def download_youtube_audio(video_id: str, progress_q: queue_mod.Queue | None = None) -> tuple[bytes, str] | None:
+    """yt-dlp로 YouTube 오디오 다운로드. 진행상황을 progress_q에 전달."""
     full_url = f"https://www.youtube.com/watch?v={video_id}"
     tmp_dir = tempfile.mkdtemp()
 
+    def send_progress(detail: str, dl_percent: float = -1):
+        if progress_q:
+            progress_q.put({"detail": detail, "dl_percent": dl_percent})
+
+    process = None
     try:
         out_path = os.path.join(tmp_dir, f"yt_{video_id}")
 
-        # yt-dlp 실행
-        subprocess.run([
+        # --newline: 진행률을 줄 단위로 출력
+        process = subprocess.Popen([
             "yt-dlp",
             "-x", "--audio-format", "mp3", "--audio-quality", "5",
             "-o", f"{out_path}.%(ext)s",
-            "--no-playlist", full_url
-        ], check=True, capture_output=True, timeout=300)
+            "--no-playlist", "--newline", full_url
+        ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+        for line in process.stdout:
+            line = line.strip()
+            # "[download]  45.2% of  150.00MiB at  2.50MiB/s ETA 00:35"
+            m = re.search(
+                r'\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\s*\w+)'
+                r'(?:\s+at\s+([\d.]+\s*\w+/s))?'
+                r'(?:\s+ETA\s+(\S+))?',
+                line
+            )
+            if m:
+                pct = float(m.group(1))
+                size = m.group(2)
+                speed = m.group(3) or ""
+                eta = m.group(4) or ""
+                parts = [f"다운로드 {pct:.1f}% ({size})"]
+                if speed:
+                    parts.append(speed)
+                if eta:
+                    parts.append(f"남은 시간 {eta}")
+                send_progress(" · ".join(parts), pct)
+            elif "[ExtractAudio]" in line:
+                send_progress("오디오 변환 중 (mp3)...", 100)
+
+        process.wait()
+        if process.returncode != 0:
+            return None
 
         # 생성된 파일 찾기
         expected = f"{out_path}.mp3"
@@ -115,11 +149,14 @@ def download_youtube_audio(video_id: str) -> tuple[bytes, str] | None:
             audio_bytes = f.read()
 
         ext = os.path.splitext(audio_path)[1].lstrip(".") or "mp3"
+        send_progress(f"다운로드 완료 ({len(audio_bytes) / (1024*1024):.1f}MB)", 100)
         return (audio_bytes, ext)
 
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return None
     finally:
+        if process and process.poll() is None:
+            process.kill()
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
@@ -200,9 +237,33 @@ async def analyze_lecture(
                     yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 70, "detail": "분석 진행 중..."})
                 else:
                     # 자막 없음 → yt-dlp로 오디오 다운로드 후 Gemini File API 분석
-                    yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": 20, "detail": "자막 없음, yt-dlp로 오디오를 다운로드합니다..."})
+                    yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": 15, "detail": "자막 없음, yt-dlp로 오디오를 다운로드합니다..."})
 
-                    audio_result = await asyncio.to_thread(download_youtube_audio, video_id)
+                    progress_q = queue_mod.Queue()
+                    loop = asyncio.get_event_loop()
+                    executor = ThreadPoolExecutor(max_workers=1)
+                    future = loop.run_in_executor(executor, download_youtube_audio, video_id, progress_q)
+
+                    # 다운로드 진행률을 실시간 SSE로 전송
+                    while not future.done():
+                        await asyncio.sleep(0.5)
+                        while True:
+                            try:
+                                prog = progress_q.get_nowait()
+                                dl_pct = prog.get("dl_percent", 0)
+                                # 다운로드 0~100% → 전체 진행률 15~35%
+                                overall = 15 + int(max(0, min(dl_pct, 100)) * 0.2)
+                                yield sse_event({
+                                    "type": "progress",
+                                    "step": "오디오 다운로드",
+                                    "percent": overall,
+                                    "detail": prog.get("detail", "")
+                                })
+                            except queue_mod.Empty:
+                                break
+
+                    audio_result = await future
+                    executor.shutdown(wait=False)
 
                     if not audio_result:
                         yield sse_event({
