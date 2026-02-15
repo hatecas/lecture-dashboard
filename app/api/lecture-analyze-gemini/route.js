@@ -4,8 +4,8 @@ import { Agent } from 'undici'
 // Python 백엔드 URL (환경변수로 설정)
 const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000'
 
-// Long-running route: 30 min timeout
-export const maxDuration = 1800
+// Vercel Hobby 플랜 최대 300초 (로컬에선 제한 없음)
+export const maxDuration = 300
 
 // undici body timeout을 30분으로 설정 (기본 5분이라 긴 분석 시 끊김)
 const longTimeoutDispatcher = new Agent({
