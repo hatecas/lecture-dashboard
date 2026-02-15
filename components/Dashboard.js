@@ -1568,11 +1568,11 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           <button onClick={() => { setCurrentTab('lecture-analyzer'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'lecture-analyzer' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            background: currentTab === 'lecture-analyzer' ? 'rgba(99,102,241,0.2)' : laProcessing ? 'rgba(99,102,241,0.08)' : 'transparent',
             backdropFilter: currentTab === 'lecture-analyzer' ? 'blur(10px)' : 'none',
             border: 'none',
-            borderLeft: currentTab === 'lecture-analyzer' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'lecture-analyzer' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            borderLeft: currentTab === 'lecture-analyzer' ? '3px solid #818cf8' : laProcessing ? '3px solid #6366f1' : '3px solid transparent',
+            color: currentTab === 'lecture-analyzer' ? '#a5b4fc' : laProcessing ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
             fontSize: sidebarCollapsed ? '11px' : '14px',
             fontWeight: '500',
             cursor: 'pointer',
@@ -1582,16 +1582,74 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             alignItems: 'center',
             justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
             gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
+            transition: 'all 0.3s ease',
+            position: 'relative'
           }} title="무료강의 분석기">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🎓</span>
             {sidebarCollapsed ? '강의분석' : '무료강의 분석기'}
+            {laProcessing && (
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#818cf8',
+                animation: 'laPulse 1.5s ease-in-out infinite',
+                marginLeft: sidebarCollapsed ? '0' : 'auto',
+                position: sidebarCollapsed ? 'absolute' : 'static',
+                top: sidebarCollapsed ? '6px' : 'auto',
+                right: sidebarCollapsed ? '6px' : 'auto'
+              }} />
+            )}
           </button>
         </div>
       </div>
 
       {/* 메인 컨텐츠 */}
-      <div style={{ flex: 1, overflow: 'auto', width: '100%' }}>
+      <div style={{ flex: 1, overflow: 'auto', width: '100%', position: 'relative' }}>
+        {/* 강의 분석 중 플로팅 진행 바 (다른 탭에서 보임) */}
+        {laProcessing && currentTab !== 'lecture-analyzer' && (
+          <div
+            onClick={() => setCurrentTab('lecture-analyzer')}
+            style={{
+              position: 'sticky',
+              top: isMobile ? '49px' : '0',
+              zIndex: 99,
+              background: 'rgba(99,102,241,0.15)',
+              backdropFilter: 'blur(12px)',
+              borderBottom: '1px solid rgba(99,102,241,0.3)',
+              padding: '10px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              cursor: 'pointer',
+              transition: 'background 0.2s'
+            }}
+          >
+            <span style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#818cf8',
+              animation: 'laPulse 1.5s ease-in-out infinite',
+              flexShrink: 0
+            }} />
+            <span style={{ fontSize: '13px', color: '#a5b4fc', fontWeight: '600' }}>
+              🎓 강의 분석 중
+            </span>
+            <div style={{ flex: 1, height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+              <div style={{
+                width: `${laProgress.percent}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #6366f1, #818cf8)',
+                borderRadius: '2px',
+                transition: 'width 0.5s ease'
+              }} />
+            </div>
+            <span style={{ fontSize: '12px', color: '#94a3b8', flexShrink: 0 }}>{laProgress.percent}%</span>
+            <span style={{ fontSize: '11px', color: '#64748b', flexShrink: 0 }}>클릭하여 확인</span>
+          </div>
+        )}
+
         {/* 모바일 헤더 */}
         {isMobile && (
           <div style={{

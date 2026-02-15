@@ -31,6 +31,11 @@ body {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+@keyframes laPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
 /* 모바일 반응형 */
 @media (max-width: 768px) {
   select {
