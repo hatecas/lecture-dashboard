@@ -1,5 +1,6 @@
 import os
 import re
+import io
 import json
 import asyncio
 import hashlib
@@ -286,7 +287,7 @@ async def analyze_lecture(
 
                     # Gemini File API로 업로드
                     uploaded_file = genai.upload_file(
-                        data=audio_bytes,
+                        io.BytesIO(audio_bytes),
                         mime_type=mime_type,
                     )
 
@@ -328,7 +329,7 @@ async def analyze_lecture(
 
                 # Gemini File API로 분석
                 uploaded_file = genai.upload_file(
-                    data=file_content,
+                    io.BytesIO(file_content),
                     mime_type=videoFile.content_type or "video/mp4",
                 )
 
