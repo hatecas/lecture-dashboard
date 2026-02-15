@@ -4838,12 +4838,23 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
                     setLaProgress({ step: '서버 전송 중...', percent: 10, detail: laInputMode === 'youtube' ? 'YouTube URL을 서버에 전달합니다...' : '파일을 서버에 업로드합니다...' })
 
-                    const token = localStorage.getItem('authToken')
-                    const response = await fetch('/api/lecture-analyze-gemini', {
-                      method: 'POST',
-                      headers: { 'Authorization': token ? `Bearer ${token}` : '' },
-                      body: formData
-                    })
+                    // NEXT_PUBLIC_PYTHON_BACKEND_URL이 설정되면 Python 백엔드 직접 호출 (Vercel 300초 타임아웃 우회)
+                    // 미설정 시 기존 Vercel 프록시 경유 (타임아웃 제한 있음)
+                    const directBackendUrl = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL
+                    let response
+                    if (directBackendUrl) {
+                      response = await fetch(`${directBackendUrl}/api/analyze`, {
+                        method: 'POST',
+                        body: formData
+                      })
+                    } else {
+                      const token = localStorage.getItem('authToken')
+                      response = await fetch('/api/lecture-analyze-gemini', {
+                        method: 'POST',
+                        headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                        body: formData
+                      })
+                    }
 
                     if (!response.ok) {
                       const errData = await response.json()
