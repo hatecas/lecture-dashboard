@@ -32,6 +32,8 @@ app.add_middleware(
 
 # 환경변수에서 Gemini API 키 로드
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# YouTube 다운로드용 프록시 (선택사항, 봇 감지 우회용)
+YTDLP_PROXY = os.environ.get("YTDLP_PROXY", "")
 
 
 def get_gemini_model():
@@ -56,6 +58,7 @@ def extract_video_id(url: str) -> str | None:
 def fetch_youtube_captions(video_id: str) -> str | None:
     """YouTube 자막 추출 (한국어 우선, 영어 폴백)"""
     try:
+        logger.info(f"[자막] YouTube 자막 추출 시도: {video_id}")
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
         # 한국어 자막 시도
@@ -64,9 +67,10 @@ def fetch_youtube_captions(video_id: str) -> str | None:
             entries = transcript.fetch()
             text = ' '.join(entry['text'] for entry in entries)
             if len(text) > 50:
+                logger.info(f"[자막] 한국어 자막 확보: {len(text)}자")
                 return text
-        except Exception:
-            pass
+        except Exception as e:
+            logger.info(f"[자막] 한국어 자막 없음: {e}")
 
         # 영어 자막 시도
         try:
@@ -74,22 +78,27 @@ def fetch_youtube_captions(video_id: str) -> str | None:
             entries = transcript.fetch()
             text = ' '.join(entry['text'] for entry in entries)
             if len(text) > 50:
+                logger.info(f"[자막] 영어 자막 확보: {len(text)}자")
                 return text
-        except Exception:
-            pass
+        except Exception as e:
+            logger.info(f"[자막] 영어 자막 없음: {e}")
 
         # 자동생성 자막 시도
         try:
             for t in transcript_list:
+                logger.info(f"[자막] 사용 가능: {t.language} ({t.language_code}, auto={t.is_generated})")
                 entries = t.fetch()
                 text = ' '.join(entry['text'] for entry in entries)
                 if len(text) > 50:
+                    logger.info(f"[자막] 자막 확보 ({t.language_code}): {len(text)}자")
                     return text
-        except Exception:
-            pass
+        except Exception as e:
+            logger.info(f"[자막] 자동생성 자막 실패: {e}")
 
+        logger.warning(f"[자막] 사용 가능한 자막 없음: {video_id}")
         return None
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[자막] 자막 추출 실패: {type(e).__name__}: {e}")
         return None
 
 
@@ -124,18 +133,27 @@ def _download_with_ytdlp(video_id: str, full_url: str, send_progress) -> tuple[b
         out_path = os.path.join(tmp_dir, f"yt_{video_id}")
         logger.info(f"[yt-dlp] 오디오 다운로드 시작: {full_url}")
 
-        # 서버 환경에서 YouTube 차단을 우회하기 위한 옵션 추가
-        process = subprocess.Popen([
+        # 서버 환경에서 YouTube 봇 감지 우회를 위한 옵션
+        cmd = [
             "yt-dlp",
             "-x",
             "-o", f"{out_path}.%(ext)s",
             "--no-playlist", "--newline",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "--extractor-args", "youtube:player_client=web",
+            "--extractor-args", "youtube:player_client=web_creator,mweb,tv",
             "--no-check-certificates",
+            "--no-cache-dir",
+            "--geo-bypass",
             "--socket-timeout", "30",
             full_url
-        ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        ]
+        # 프록시가 설정되어 있으면 사용
+        if YTDLP_PROXY:
+            cmd.insert(-1, "--proxy")
+            cmd.insert(-1, YTDLP_PROXY)
+            logger.info(f"[yt-dlp] 프록시 사용: {YTDLP_PROXY}")
+
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
         last_error = ""
         for line in process.stdout:
@@ -199,7 +217,16 @@ def _download_with_pytubefix(video_id: str, full_url: str, send_progress) -> tup
         from pytubefix import YouTube
 
         send_progress("pytubefix로 오디오 다운로드 중...", 10)
-        yt = YouTube(full_url)
+        # PO token으로 봇 감지 우회 시도
+        try:
+            kwargs = {"use_po_token": True}
+            if YTDLP_PROXY:
+                kwargs["proxies"] = {"https": YTDLP_PROXY, "http": YTDLP_PROXY}
+            yt = YouTube(full_url, **kwargs)
+        except TypeError:
+            # use_po_token을 지원하지 않는 이전 버전
+            logger.info("[pytubefix] use_po_token 미지원, 기본 모드로 시도")
+            yt = YouTube(full_url)
 
         # 오디오 전용 스트림 선택 (최고 비트레이트)
         audio_stream = yt.streams.filter(only_audio=True).order_by("abr").desc().first()
