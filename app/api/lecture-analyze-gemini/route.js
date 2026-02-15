@@ -1,9 +1,6 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { Agent } from 'undici'
 
-// Python 백엔드 URL (환경변수로 설정)
-const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000'
-
 // Vercel Hobby 플랜 최대 300초 (로컬에선 제한 없음)
 export const maxDuration = 300
 
@@ -14,6 +11,10 @@ const longTimeoutDispatcher = new Agent({
 })
 
 export async function POST(request) {
+  // Python 백엔드 URL (런타임에 환경변수 읽기)
+  const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000'
+  console.log('[lecture-analyze-gemini] PYTHON_BACKEND_URL:', PYTHON_BACKEND_URL)
+
   // API 인증 검증
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
