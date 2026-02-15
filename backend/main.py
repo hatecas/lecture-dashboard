@@ -297,6 +297,11 @@ def sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "lecture-backend"}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "has_api_key": bool(GEMINI_API_KEY)}
