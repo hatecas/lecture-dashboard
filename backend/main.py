@@ -253,6 +253,30 @@ def _download_with_pytubefix(video_id: str, full_url: str, send_progress) -> tup
         return None
 
 
+def gemini_analyze_youtube_direct(model, video_id: str, prompt: str) -> str | None:
+    """Gemini에 YouTube URL을 직접 전달하여 분석 (다운로드 불필요, 봇 감지 없음)"""
+    youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+    logger.info(f"[Gemini-Direct] YouTube URL 직접 분석 시도: {youtube_url}")
+    try:
+        response = model.generate_content([
+            genai.protos.Part(
+                file_data=genai.protos.FileData(
+                    file_uri=youtube_url,
+                    mime_type="video/mp4"
+                )
+            ),
+            prompt
+        ])
+        if response.text and len(response.text) > 50:
+            logger.info(f"[Gemini-Direct] 분석 성공: {len(response.text)}자")
+            return response.text
+        logger.warning("[Gemini-Direct] 분석 결과가 너무 짧음")
+        return None
+    except Exception as e:
+        logger.warning(f"[Gemini-Direct] 실패: {type(e).__name__}: {e}")
+        return None
+
+
 def split_transcript(transcript: str, max_chars: int = 100000) -> list[str]:
     """긴 텍스트를 문장 경계에서 분할"""
     if len(transcript) <= max_chars:
@@ -335,93 +359,107 @@ async def analyze_lecture(
                         yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(30 + ka * 3, 85), "detail": f"AI가 텍스트를 분석 중입니다... ({ka * 10}초)"})
                     analysis = await gen_task
                 else:
-                    # 자막 없음 → yt-dlp로 오디오 다운로드 후 Gemini File API 분석
-                    yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": 15, "detail": "자막 없음, yt-dlp로 오디오를 다운로드합니다..."})
+                    # 자막 없음 → 2단계: Gemini에 YouTube URL 직접 전달 (다운로드 불필요)
+                    yield sse_event({"type": "progress", "step": "Gemini 직접 분석", "percent": 20, "detail": "YouTube 영상을 Gemini에 직접 전달합니다..."})
 
-                    progress_q = queue_mod.Queue()
-                    loop = asyncio.get_event_loop()
-                    executor = ThreadPoolExecutor(max_workers=1)
-                    future = loop.run_in_executor(executor, download_youtube_audio, video_id, progress_q)
-
-                    # 다운로드 진행률을 실시간 SSE로 전송
-                    while not future.done():
-                        await asyncio.sleep(0.5)
-                        while True:
-                            try:
-                                prog = progress_q.get_nowait()
-                                dl_pct = prog.get("dl_percent", 0)
-                                # 다운로드 0~100% → 전체 진행률 15~35%
-                                overall = 15 + int(max(0, min(dl_pct, 100)) * 0.2)
-                                yield sse_event({
-                                    "type": "progress",
-                                    "step": "오디오 다운로드",
-                                    "percent": overall,
-                                    "detail": prog.get("detail", "")
-                                })
-                            except queue_mod.Empty:
-                                break
-
-                    audio_result = await future
-                    executor.shutdown(wait=False)
-
-                    if not audio_result:
-                        yield sse_event({
-                            "type": "error",
-                            "message": "자막도 없고 오디오 다운로드도 실패했습니다.\n\n이 영상은 YouTube에서 서버 다운로드를 차단하고 있을 수 있습니다.\n\n해결 방법:\n파일 업로드 모드로 전환하여 영상/오디오 파일을 직접 업로드해주세요."
-                        })
-                        return
-
-                    audio_bytes, ext = audio_result
-                    file_size_mb = len(audio_bytes) / (1024 * 1024)
-                    mime_map = {"mp3": "audio/mpeg", "m4a": "audio/mp4", "webm": "audio/webm",
-                                "opus": "audio/ogg", "ogg": "audio/ogg", "wav": "audio/wav",
-                                "flac": "audio/flac", "aac": "audio/aac"}
-                    mime_type = mime_map.get(ext, f"audio/{ext}")
-                    logger.info(f"[분석] 오디오 준비 완료: {file_size_mb:.1f}MB, ext={ext}, mime={mime_type}")
-
-                    yield sse_event({"type": "progress", "step": "Gemini 업로드 중", "percent": 40, "detail": f"오디오 {file_size_mb:.1f}MB를 Gemini에 업로드합니다..."})
-
-                    # Gemini File API로 업로드 (임시 파일 경로 사용)
-                    tmp_upload = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
-                    try:
-                        tmp_upload.write(audio_bytes)
-                        tmp_upload.close()
-                        logger.info(f"[Gemini] 임시 파일 생성: {tmp_upload.name}")
-                        uploaded_file = genai.upload_file(
-                            tmp_upload.name,
-                            mime_type=mime_type,
-                        )
-                        logger.info(f"[Gemini] 업로드 완료: name={uploaded_file.name}, state={uploaded_file.state.name}")
-                    finally:
-                        os.unlink(tmp_upload.name)
-
-                    yield sse_event({"type": "progress", "step": "파일 처리 대기 중", "percent": 50, "detail": "Gemini가 오디오를 처리하는 중..."})
-
-                    while uploaded_file.state.name == "PROCESSING":
-                        await asyncio.sleep(3)
-                        uploaded_file = genai.get_file(uploaded_file.name)
-                        logger.info(f"[Gemini] 파일 처리 상태: {uploaded_file.state.name}")
-
-                    if uploaded_file.state.name == "FAILED":
-                        logger.error("[Gemini] 오디오 처리 실패")
-                        yield sse_event({"type": "error", "message": "Gemini 오디오 처리에 실패했습니다."})
-                        return
-
-                    logger.info("[Gemini] 파일 처리 완료, 분석 시작")
-                    yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 70, "detail": "오디오를 분석 중..."})
-
-                    # Gemini 분석을 스레드에서 실행, keepalive 전송
                     gen_task = asyncio.create_task(
-                        asyncio.to_thread(model.generate_content, [uploaded_file, prompt]))
+                        asyncio.to_thread(gemini_analyze_youtube_direct, model, video_id, prompt))
                     ka = 0
                     while not gen_task.done():
                         await asyncio.sleep(10)
                         ka += 1
-                        logger.info(f"[Gemini] 분석 진행 중... ({ka * 10}초)")
-                        yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(70 + ka * 2, 90), "detail": f"AI가 오디오를 분석 중입니다... ({ka * 10}초)"})
-                    response = await gen_task
-                    analysis = response.text
-                    logger.info(f"[Gemini] 분석 완료 (결과 길이: {len(analysis)}자)")
+                        yield sse_event({"type": "progress", "step": "Gemini 직접 분석 중", "percent": min(20 + ka * 5, 80), "detail": f"AI가 영상을 직접 분석 중입니다... ({ka * 10}초)"})
+                    direct_result = await gen_task
+
+                    if direct_result:
+                        analysis = direct_result
+                    else:
+                        # 3단계: Gemini 직접 분석 실패 → 오디오 다운로드 시도
+                        yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": 25, "detail": "직접 분석 실패, 오디오를 다운로드합니다..."})
+
+                        progress_q = queue_mod.Queue()
+                        loop = asyncio.get_event_loop()
+                        executor = ThreadPoolExecutor(max_workers=1)
+                        future = loop.run_in_executor(executor, download_youtube_audio, video_id, progress_q)
+
+                        # 다운로드 진행률을 실시간 SSE로 전송
+                        while not future.done():
+                            await asyncio.sleep(0.5)
+                            while True:
+                                try:
+                                    prog = progress_q.get_nowait()
+                                    dl_pct = prog.get("dl_percent", 0)
+                                    overall = 25 + int(max(0, min(dl_pct, 100)) * 0.15)
+                                    yield sse_event({
+                                        "type": "progress",
+                                        "step": "오디오 다운로드",
+                                        "percent": overall,
+                                        "detail": prog.get("detail", "")
+                                    })
+                                except queue_mod.Empty:
+                                    break
+
+                        audio_result = await future
+                        executor.shutdown(wait=False)
+
+                        if not audio_result:
+                            yield sse_event({
+                                "type": "error",
+                                "message": "자막도 없고 오디오 다운로드도 실패했습니다.\n\n이 영상은 YouTube에서 서버 다운로드를 차단하고 있을 수 있습니다.\n\n해결 방법:\n파일 업로드 모드로 전환하여 영상/오디오 파일을 직접 업로드해주세요."
+                            })
+                            return
+
+                        audio_bytes, ext = audio_result
+                        file_size_mb = len(audio_bytes) / (1024 * 1024)
+                        mime_map = {"mp3": "audio/mpeg", "m4a": "audio/mp4", "webm": "audio/webm",
+                                    "opus": "audio/ogg", "ogg": "audio/ogg", "wav": "audio/wav",
+                                    "flac": "audio/flac", "aac": "audio/aac"}
+                        mime_type = mime_map.get(ext, f"audio/{ext}")
+                        logger.info(f"[분석] 오디오 준비 완료: {file_size_mb:.1f}MB, ext={ext}, mime={mime_type}")
+
+                        yield sse_event({"type": "progress", "step": "Gemini 업로드 중", "percent": 50, "detail": f"오디오 {file_size_mb:.1f}MB를 Gemini에 업로드합니다..."})
+
+                        # Gemini File API로 업로드 (임시 파일 경로 사용)
+                        tmp_upload = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+                        try:
+                            tmp_upload.write(audio_bytes)
+                            tmp_upload.close()
+                            logger.info(f"[Gemini] 임시 파일 생성: {tmp_upload.name}")
+                            uploaded_file = genai.upload_file(
+                                tmp_upload.name,
+                                mime_type=mime_type,
+                            )
+                            logger.info(f"[Gemini] 업로드 완료: name={uploaded_file.name}, state={uploaded_file.state.name}")
+                        finally:
+                            os.unlink(tmp_upload.name)
+
+                        yield sse_event({"type": "progress", "step": "파일 처리 대기 중", "percent": 60, "detail": "Gemini가 오디오를 처리하는 중..."})
+
+                        while uploaded_file.state.name == "PROCESSING":
+                            await asyncio.sleep(3)
+                            uploaded_file = genai.get_file(uploaded_file.name)
+                            logger.info(f"[Gemini] 파일 처리 상태: {uploaded_file.state.name}")
+
+                        if uploaded_file.state.name == "FAILED":
+                            logger.error("[Gemini] 오디오 처리 실패")
+                            yield sse_event({"type": "error", "message": "Gemini 오디오 처리에 실패했습니다."})
+                            return
+
+                        logger.info("[Gemini] 파일 처리 완료, 분석 시작")
+                        yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 75, "detail": "오디오를 분석 중..."})
+
+                        # Gemini 분석을 스레드에서 실행, keepalive 전송
+                        gen_task = asyncio.create_task(
+                            asyncio.to_thread(model.generate_content, [uploaded_file, prompt]))
+                        ka = 0
+                        while not gen_task.done():
+                            await asyncio.sleep(10)
+                            ka += 1
+                            logger.info(f"[Gemini] 분석 진행 중... ({ka * 10}초)")
+                            yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(75 + ka * 2, 90), "detail": f"AI가 오디오를 분석 중입니다... ({ka * 10}초)"})
+                        response = await gen_task
+                        analysis = response.text
+                        logger.info(f"[Gemini] 분석 완료 (결과 길이: {len(analysis)}자)")
 
             else:
                 # 파일 업로드 방식
