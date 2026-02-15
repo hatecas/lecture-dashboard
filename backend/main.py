@@ -71,47 +71,33 @@ def extract_video_id(url: str) -> str | None:
 
 
 def fetch_youtube_captions(video_id: str) -> str | None:
-    """YouTube 자막 추출 (한국어 우선, 영어 폴백)"""
+    """YouTube 자막 추출 (한국어 우선, 영어 폴백) - youtube-transcript-api v1.x"""
     try:
-        logger.info(f"[자막] YouTube 자막 추출 시도: {video_id} (쿠키: {'있음' if YOUTUBE_COOKIES_PATH else '없음'})")
-        if YOUTUBE_COOKIES_PATH:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id, cookies=YOUTUBE_COOKIES_PATH)
-        else:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        logger.info(f"[자막] YouTube 자막 추출 시도: {video_id}")
+        ytt_api = YouTubeTranscriptApi()
 
-        # 한국어 자막 시도
+        # 한국어/영어 자막 우선 시도
         try:
-            transcript = transcript_list.find_transcript(['ko'])
-            entries = transcript.fetch()
-            text = ' '.join(entry['text'] for entry in entries)
+            transcript = ytt_api.fetch(video_id, languages=['ko', 'en'])
+            text = ' '.join(snippet.text for snippet in transcript)
             if len(text) > 50:
-                logger.info(f"[자막] 한국어 자막 확보: {len(text)}자")
+                logger.info(f"[자막] 자막 확보 (ko/en): {len(text)}자")
                 return text
         except Exception as e:
-            logger.info(f"[자막] 한국어 자막 없음: {e}")
+            logger.info(f"[자막] ko/en 자막 실패: {e}")
 
-        # 영어 자막 시도
+        # 사용 가능한 아무 자막이라도 시도
         try:
-            transcript = transcript_list.find_transcript(['en'])
-            entries = transcript.fetch()
-            text = ' '.join(entry['text'] for entry in entries)
-            if len(text) > 50:
-                logger.info(f"[자막] 영어 자막 확보: {len(text)}자")
-                return text
-        except Exception as e:
-            logger.info(f"[자막] 영어 자막 없음: {e}")
-
-        # 자동생성 자막 시도
-        try:
+            transcript_list = ytt_api.list(video_id)
             for t in transcript_list:
                 logger.info(f"[자막] 사용 가능: {t.language} ({t.language_code}, auto={t.is_generated})")
-                entries = t.fetch()
-                text = ' '.join(entry['text'] for entry in entries)
+                fetched = t.fetch()
+                text = ' '.join(snippet.text for snippet in fetched)
                 if len(text) > 50:
                     logger.info(f"[자막] 자막 확보 ({t.language_code}): {len(text)}자")
                     return text
         except Exception as e:
-            logger.info(f"[자막] 자동생성 자막 실패: {e}")
+            logger.info(f"[자막] 전체 자막 탐색 실패: {e}")
 
         logger.warning(f"[자막] 사용 가능한 자막 없음: {video_id}")
         return None
