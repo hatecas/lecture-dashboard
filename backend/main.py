@@ -3,6 +3,9 @@ import re
 import json
 import asyncio
 import hashlib
+import subprocess
+import tempfile
+import shutil
 from fastapi import FastAPI, UploadFile, Form, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -82,6 +85,44 @@ def fetch_youtube_captions(video_id: str) -> str | None:
         return None
 
 
+def download_youtube_audio(video_id: str) -> tuple[bytes, str] | None:
+    """yt-dlp로 YouTube 오디오 다운로드. (bytes, 확장자) 반환"""
+    full_url = f"https://www.youtube.com/watch?v={video_id}"
+    tmp_dir = tempfile.mkdtemp()
+
+    try:
+        out_path = os.path.join(tmp_dir, f"yt_{video_id}")
+
+        # yt-dlp 실행
+        subprocess.run([
+            "yt-dlp",
+            "-x", "--audio-format", "mp3", "--audio-quality", "5",
+            "-o", f"{out_path}.%(ext)s",
+            "--no-playlist", full_url
+        ], check=True, capture_output=True, timeout=300)
+
+        # 생성된 파일 찾기
+        expected = f"{out_path}.mp3"
+        if os.path.exists(expected):
+            audio_path = expected
+        else:
+            files = [f for f in os.listdir(tmp_dir) if f.startswith(f"yt_{video_id}.")]
+            if not files:
+                return None
+            audio_path = os.path.join(tmp_dir, files[0])
+
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+
+        ext = os.path.splitext(audio_path)[1].lstrip(".") or "mp3"
+        return (audio_bytes, ext)
+
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def split_transcript(transcript: str, max_chars: int = 100000) -> list[str]:
     """긴 텍스트를 문장 경계에서 분할"""
     if len(transcript) <= max_chars:
@@ -154,18 +195,48 @@ async def analyze_lecture(
                 if caption_text and len(caption_text) > 50:
                     yield sse_event({"type": "progress", "step": "자막 분석 중", "percent": 30, "detail": f"자막 {len(caption_text):,}자 확보, Gemini로 분석 중..."})
 
-                    # 텍스트 분석
                     analysis = await analyze_transcript(model, caption_text, prompt, lambda step, pct, detail: None)
 
-                    # 진행상황을 위한 간단한 분석
                     yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 70, "detail": "분석 진행 중..."})
                 else:
-                    # 자막 없음 → 파일 업로드 방식으로 전환 안내
-                    yield sse_event({
-                        "type": "error",
-                        "message": "이 영상에서 자막을 찾을 수 없습니다.\n\n해결 방법:\n1. 파일 업로드 모드로 전환하여 영상/오디오 파일을 직접 업로드\n2. 자막이 있는 YouTube 영상을 사용"
-                    })
-                    return
+                    # 자막 없음 → yt-dlp로 오디오 다운로드 후 Gemini File API 분석
+                    yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": 20, "detail": "자막 없음, yt-dlp로 오디오를 다운로드합니다..."})
+
+                    audio_result = await asyncio.to_thread(download_youtube_audio, video_id)
+
+                    if not audio_result:
+                        yield sse_event({
+                            "type": "error",
+                            "message": "자막도 없고 오디오 다운로드도 실패했습니다.\n\n해결 방법:\n1. yt-dlp 설치: PowerShell에서 'winget install yt-dlp' 실행\n2. 파일 업로드 모드로 전환하여 영상/오디오 파일을 직접 업로드"
+                        })
+                        return
+
+                    audio_bytes, ext = audio_result
+                    file_size_mb = len(audio_bytes) / (1024 * 1024)
+                    mime_type = "audio/mpeg" if ext == "mp3" else f"audio/{ext}"
+
+                    yield sse_event({"type": "progress", "step": "Gemini 업로드 중", "percent": 40, "detail": f"오디오 {file_size_mb:.1f}MB를 Gemini에 업로드합니다..."})
+
+                    # Gemini File API로 업로드
+                    uploaded_file = genai.upload_file(
+                        data=audio_bytes,
+                        mime_type=mime_type,
+                    )
+
+                    yield sse_event({"type": "progress", "step": "파일 처리 대기 중", "percent": 50, "detail": "Gemini가 오디오를 처리하는 중..."})
+
+                    while uploaded_file.state.name == "PROCESSING":
+                        await asyncio.sleep(3)
+                        uploaded_file = genai.get_file(uploaded_file.name)
+
+                    if uploaded_file.state.name == "FAILED":
+                        yield sse_event({"type": "error", "message": "Gemini 오디오 처리에 실패했습니다."})
+                        return
+
+                    yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 70, "detail": "오디오를 분석 중..."})
+
+                    response = model.generate_content([uploaded_file, prompt])
+                    analysis = response.text
 
             else:
                 # 파일 업로드 방식
