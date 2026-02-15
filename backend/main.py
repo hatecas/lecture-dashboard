@@ -232,9 +232,15 @@ async def analyze_lecture(
                 if caption_text and len(caption_text) > 50:
                     yield sse_event({"type": "progress", "step": "자막 분석 중", "percent": 30, "detail": f"자막 {len(caption_text):,}자 확보, Gemini로 분석 중..."})
 
-                    analysis = await analyze_transcript(model, caption_text, prompt, lambda step, pct, detail: None)
-
-                    yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 70, "detail": "분석 진행 중..."})
+                    # Gemini 분석을 스레드에서 실행, keepalive 전송
+                    gen_task = asyncio.create_task(
+                        asyncio.to_thread(analyze_transcript_sync, model, caption_text, prompt))
+                    ka = 0
+                    while not gen_task.done():
+                        await asyncio.sleep(10)
+                        ka += 1
+                        yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(30 + ka * 3, 85), "detail": f"AI가 텍스트를 분석 중입니다... ({ka * 10}초)"})
+                    analysis = await gen_task
                 else:
                     # 자막 없음 → yt-dlp로 오디오 다운로드 후 Gemini File API 분석
                     yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": 15, "detail": "자막 없음, yt-dlp로 오디오를 다운로드합니다..."})
@@ -296,7 +302,15 @@ async def analyze_lecture(
 
                     yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 70, "detail": "오디오를 분석 중..."})
 
-                    response = model.generate_content([uploaded_file, prompt])
+                    # Gemini 분석을 스레드에서 실행, keepalive 전송
+                    gen_task = asyncio.create_task(
+                        asyncio.to_thread(model.generate_content, [uploaded_file, prompt]))
+                    ka = 0
+                    while not gen_task.done():
+                        await asyncio.sleep(10)
+                        ka += 1
+                        yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(70 + ka * 2, 90), "detail": f"AI가 오디오를 분석 중입니다... ({ka * 10}초)"})
+                    response = await gen_task
                     analysis = response.text
 
             else:
@@ -321,7 +335,6 @@ async def analyze_lecture(
                 yield sse_event({"type": "progress", "step": "파일 처리 대기 중", "percent": 40, "detail": "Gemini가 파일을 처리하는 중..."})
 
                 # 파일 처리 대기
-                import time
                 while uploaded_file.state.name == "PROCESSING":
                     await asyncio.sleep(3)
                     uploaded_file = genai.get_file(uploaded_file.name)
@@ -332,7 +345,15 @@ async def analyze_lecture(
 
                 yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": 60, "detail": "영상을 분석 중..."})
 
-                response = model.generate_content([uploaded_file, prompt])
+                # Gemini 분석을 스레드에서 실행, keepalive 전송
+                gen_task = asyncio.create_task(
+                    asyncio.to_thread(model.generate_content, [uploaded_file, prompt]))
+                ka = 0
+                while not gen_task.done():
+                    await asyncio.sleep(10)
+                    ka += 1
+                    yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(60 + ka * 2, 90), "detail": f"AI가 영상을 분석 중입니다... ({ka * 10}초)"})
+                response = await gen_task
                 analysis = response.text
 
             if analysis:
@@ -347,8 +368,8 @@ async def analyze_lecture(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-async def analyze_transcript(model, transcript: str, prompt: str, on_progress) -> str:
-    """텍스트 자막을 Gemini로 분석 (긴 텍스트는 Map-Reduce)"""
+def analyze_transcript_sync(model, transcript: str, prompt: str) -> str:
+    """텍스트 자막을 Gemini로 분석 (동기 - 스레드에서 실행용, 긴 텍스트는 Map-Reduce)"""
     CHUNK_LIMIT = 100000
 
     if len(transcript) <= CHUNK_LIMIT:

@@ -1,10 +1,17 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { Agent } from 'undici'
 
 // Python 백엔드 URL (환경변수로 설정)
 const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000'
 
-// Long-running route: 5 min timeout
-export const maxDuration = 300
+// Long-running route: 30 min timeout
+export const maxDuration = 1800
+
+// undici body timeout을 30분으로 설정 (기본 5분이라 긴 분석 시 끊김)
+const longTimeoutDispatcher = new Agent({
+  bodyTimeout: 30 * 60 * 1000,
+  headersTimeout: 30 * 60 * 1000,
+})
 
 export async function POST(request) {
   // API 인증 검증
@@ -20,10 +27,11 @@ export async function POST(request) {
     // FormData를 그대로 Python 백엔드로 전달
     const formData = await request.formData()
 
-    // Python 백엔드로 프록시
+    // Python 백엔드로 프록시 (bodyTimeout 30분)
     const backendResponse = await fetch(`${PYTHON_BACKEND_URL}/api/analyze`, {
       method: 'POST',
       body: formData,
+      dispatcher: longTimeoutDispatcher,
     })
 
     if (!backendResponse.ok && !backendResponse.headers.get('content-type')?.includes('text/event-stream')) {
