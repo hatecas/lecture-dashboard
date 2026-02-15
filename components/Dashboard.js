@@ -151,9 +151,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const csHistoryFileRef = useRef(null)
 
   // 무료강의 분석기 상태
-  const [laEngine, setLaEngine] = useState('gemini') // 'gemini' | 'openai'
-  const [laGeminiKey, setLaGeminiKey] = useState('')
-  const [laOpenaiKey, setLaOpenaiKey] = useState('')
   const [laYoutubeUrl, setLaYoutubeUrl] = useState('')
   const [laAudioFile, setLaAudioFile] = useState(null)
   const [laInputMode, setLaInputMode] = useState('youtube') // 'youtube' | 'file'
@@ -171,7 +168,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 각 섹션은 bullet point로 간결하게 작성하세요.`)
   const [laProcessing, setLaProcessing] = useState(false)
   const [laProgress, setLaProgress] = useState({ step: '', percent: 0, detail: '' })
-  const [laResult, setLaResult] = useState(null) // { transcript, analysis }
+  const [laResult, setLaResult] = useState(null) // { analysis }
   const [laError, setLaError] = useState('')
   const laAudioRef = useRef(null)
 
@@ -4597,13 +4594,13 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             <div style={{ padding: isMobile ? '16px' : '32px', maxWidth: '900px' }}>
               <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 🎓 무료강의 분석기
-                <HelpTooltip text={"무료강의 영상(3~6시간)을 AI로 분석합니다.\n\n[Gemini 모드] YouTube URL을 넣으면 영상을 통째로 분석합니다.\n• Gemini API Key 필요 (무료 티어 가능)\n• 전사 과정 없이 영상을 직접 분석\n• YouTube URL이면 비용 0원 (무료 티어)\n\n[OpenAI 모드] Whisper 전사 후 GPT가 분석합니다.\n• OpenAI API Key 필요 (유료)\n• 긴 강의는 자동으로 분할 처리"} />
+                <HelpTooltip text={"무료강의 영상(3~6시간)을 Gemini AI로 분석합니다.\n\n• YouTube URL 또는 파일 업로드\n• 자막 자동 추출 → Gemini 분석\n• API Key는 서버 환경변수로 관리 (입력 불필요)"} />
               </h2>
               <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '28px', lineHeight: 1.6 }}>
-                무료강의 영상을 AI가 자동으로 분석합니다. Gemini는 영상을 통째로 분석하고, OpenAI는 전사 후 분석합니다.
+                무료강의 영상을 Gemini AI가 자동으로 분석합니다. API Key는 서버에서 관리되므로 별도 입력이 필요 없습니다.
               </p>
 
-              {/* Step 1: AI 엔진 선택 */}
+              {/* Step 1: 입력 방식 선택 */}
               <div style={{
                 background: 'rgba(255,255,255,0.03)',
                 border: '1px solid rgba(255,255,255,0.08)',
@@ -4613,107 +4610,6 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
                   <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}>Step 1</span>
-                  <span style={{ fontSize: '15px', fontWeight: '600' }}>AI 엔진 선택</span>
-                </div>
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
-                  <button
-                    onClick={() => setLaEngine('gemini')}
-                    style={{
-                      flex: 1,
-                      padding: '14px',
-                      background: laEngine === 'gemini' ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${laEngine === 'gemini' ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      textAlign: 'left'
-                    }}
-                  >
-                    <div style={{ fontSize: '15px', fontWeight: '700', color: laEngine === 'gemini' ? '#60a5fa' : '#94a3b8', marginBottom: '4px' }}>
-                      Gemini
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
-                      영상 통째로 분석 / 무료 티어 가능 / 빠름
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setLaEngine('openai')}
-                    style={{
-                      flex: 1,
-                      padding: '14px',
-                      background: laEngine === 'openai' ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${laEngine === 'openai' ? 'rgba(16,185,129,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      textAlign: 'left'
-                    }}
-                  >
-                    <div style={{ fontSize: '15px', fontWeight: '700', color: laEngine === 'openai' ? '#34d399' : '#94a3b8', marginBottom: '4px' }}>
-                      OpenAI
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
-                      Whisper 전사 + GPT 분석 / 유료 / 전사본 제공
-                    </div>
-                  </button>
-                </div>
-
-                {/* API Key 입력 */}
-                {laEngine === 'gemini' ? (
-                  <>
-                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>Gemini API Key</label>
-                    <input
-                      type="password"
-                      value={laGeminiKey}
-                      onChange={(e) => setLaGeminiKey(e.target.value)}
-                      placeholder="AIza..."
-                      style={{
-                        width: '100%',
-                        padding: '14px',
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '12px',
-                        color: '#fff',
-                        fontSize: '14px'
-                      }}
-                    />
-                    <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
-                      Google AI Studio에서 무료로 발급 가능합니다. 무료 티어: 15회/분, 1500회/일
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>OpenAI API Key</label>
-                    <input
-                      type="password"
-                      value={laOpenaiKey}
-                      onChange={(e) => setLaOpenaiKey(e.target.value)}
-                      placeholder="sk-..."
-                      style={{
-                        width: '100%',
-                        padding: '14px',
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '12px',
-                        color: '#fff',
-                        fontSize: '14px'
-                      }}
-                    />
-                    <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
-                      Whisper(전사) + GPT-4o(분석)에 사용됩니다. 비용이 발생합니다.
-                    </p>
-                  </>
-                )}
-              </div>
-
-              {/* Step 2: 입력 방식 선택 */}
-              <div style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '16px',
-                padding: '24px',
-                marginBottom: '20px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                  <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}>Step 2</span>
                   <span style={{ fontSize: '15px', fontWeight: '600' }}>영상/오디오 입력</span>
                 </div>
 
@@ -4749,7 +4645,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                       cursor: 'pointer'
                     }}
                   >
-                    {laEngine === 'gemini' ? '영상/오디오 파일 업로드' : '오디오 파일 업로드'}
+                    영상/오디오 파일 업로드
                   </button>
                 </div>
 
@@ -4772,15 +4668,13 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                       }}
                     />
                     <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
-                      {laEngine === 'gemini'
-                        ? 'Gemini가 YouTube URL을 직접 분석합니다. 다운로드/전사 과정이 없어 빠릅니다.'
-                        : '서버에서 오디오를 추출합니다. 긴 영상의 경우 시간이 걸릴 수 있습니다.'}
+                      YouTube 자막을 자동 추출하여 Gemini가 분석합니다.
                     </p>
                   </>
                 ) : (
                   <>
                     <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>
-                      {laEngine === 'gemini' ? '영상/오디오 파일 (mp4, mp3, wav, m4a, webm)' : '오디오 파일 (mp3, wav, m4a, webm, mp4)'}
+                      영상/오디오 파일 (mp4, mp3, wav, m4a, webm)
                     </label>
                     <input
                       ref={laAudioRef}
@@ -4806,7 +4700,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     >
                       {laAudioFile ? (
                         <div>
-                          <div style={{ fontSize: '28px', marginBottom: '8px' }}>{laEngine === 'gemini' ? '🎬' : '🎵'}</div>
+                          <div style={{ fontSize: '28px', marginBottom: '8px' }}>🎬</div>
                           <div style={{ color: '#34d399', fontSize: '14px', fontWeight: '600' }}>{laAudioFile.name}</div>
                           <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
                             {(laAudioFile.size / (1024 * 1024)).toFixed(1)} MB
@@ -4817,21 +4711,19 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           <div style={{ fontSize: '28px', marginBottom: '8px' }}>📂</div>
                           <div style={{ color: '#94a3b8', fontSize: '14px' }}>클릭하여 파일을 선택하세요</div>
                           <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
-                            {laEngine === 'gemini' ? 'mp4, mp3, wav, m4a, webm 지원 (최대 2GB)' : 'mp3, wav, m4a, webm, mp4 지원'}
+                            mp4, mp3, wav, m4a, webm 지원 (최대 2GB)
                           </div>
                         </div>
                       )}
                     </div>
                     <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
-                      {laEngine === 'gemini'
-                        ? 'Gemini File API로 업로드 후 영상을 직접 분석합니다.'
-                        : '긴 파일은 자동으로 25MB씩 분할하여 처리합니다. 오디오만 업로드하면 더 빠릅니다.'}
+                      Gemini File API로 업로드 후 영상을 직접 분석합니다.
                     </p>
                   </>
                 )}
               </div>
 
-              {/* Step 3: 분석 프롬프트 */}
+              {/* Step 2: 분석 프롬프트 */}
               <div style={{
                 background: 'rgba(255,255,255,0.03)',
                 border: '1px solid rgba(255,255,255,0.08)',
@@ -4840,7 +4732,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 marginBottom: '20px'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                  <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}>Step 3</span>
+                  <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}>Step 2</span>
                   <span style={{ fontSize: '15px', fontWeight: '600' }}>분석 프롬프트</span>
                 </div>
                 <textarea
@@ -4867,159 +4759,81 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {/* 실행 버튼 */}
               <button
                 onClick={async () => {
-                  // Gemini 모드
-                  if (laEngine === 'gemini') {
-                    if (!laGeminiKey) { setLaError('Gemini API Key를 입력해주세요.'); return }
-                    if (laInputMode === 'youtube' && !laYoutubeUrl) { setLaError('YouTube URL을 입력해주세요.'); return }
-                    if (laInputMode === 'file' && !laAudioFile) { setLaError('파일을 선택해주세요.'); return }
+                  if (laInputMode === 'youtube' && !laYoutubeUrl) { setLaError('YouTube URL을 입력해주세요.'); return }
+                  if (laInputMode === 'file' && !laAudioFile) { setLaError('파일을 선택해주세요.'); return }
 
-                    setLaError('')
-                    setLaProcessing(true)
-                    setLaResult(null)
-                    setLaProgress({ step: '준비 중...', percent: 5, detail: 'Gemini 분석을 시작합니다.' })
+                  setLaError('')
+                  setLaProcessing(true)
+                  setLaResult(null)
+                  setLaProgress({ step: '준비 중...', percent: 5, detail: 'Gemini 분석을 시작합니다.' })
 
-                    try {
-                      const formData = new FormData()
-                      formData.append('geminiKey', laGeminiKey)
-                      formData.append('prompt', laPrompt)
-                      formData.append('inputMode', laInputMode)
+                  try {
+                    const formData = new FormData()
+                    formData.append('prompt', laPrompt)
+                    formData.append('inputMode', laInputMode)
 
-                      if (laInputMode === 'youtube') {
-                        formData.append('youtubeUrl', laYoutubeUrl)
-                      } else if (laAudioFile) {
-                        formData.append('videoFile', laAudioFile)
-                      }
+                    if (laInputMode === 'youtube') {
+                      formData.append('youtubeUrl', laYoutubeUrl)
+                    } else if (laAudioFile) {
+                      formData.append('videoFile', laAudioFile)
+                    }
 
-                      setLaProgress({ step: 'Gemini 전송 중...', percent: 10, detail: laInputMode === 'youtube' ? 'YouTube URL을 Gemini에 전달합니다...' : '파일을 Gemini에 업로드합니다...' })
+                    setLaProgress({ step: '서버 전송 중...', percent: 10, detail: laInputMode === 'youtube' ? 'YouTube URL을 서버에 전달합니다...' : '파일을 서버에 업로드합니다...' })
 
-                      const token = localStorage.getItem('authToken')
-                      const response = await fetch('/api/lecture-analyze-gemini', {
-                        method: 'POST',
-                        headers: { 'Authorization': token ? `Bearer ${token}` : '' },
-                        body: formData
-                      })
+                    const token = localStorage.getItem('authToken')
+                    const response = await fetch('/api/lecture-analyze-gemini', {
+                      method: 'POST',
+                      headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                      body: formData
+                    })
 
-                      if (!response.ok) {
-                        const errData = await response.json()
-                        throw new Error(errData.error || '분석 실패')
-                      }
+                    if (!response.ok) {
+                      const errData = await response.json()
+                      throw new Error(errData.error || '분석 실패')
+                    }
 
-                      const reader = response.body.getReader()
-                      const decoder = new TextDecoder()
-                      let buffer = ''
+                    const reader = response.body.getReader()
+                    const decoder = new TextDecoder()
+                    let buffer = ''
 
-                      while (true) {
-                        const { done, value } = await reader.read()
-                        if (done) break
+                    while (true) {
+                      const { done, value } = await reader.read()
+                      if (done) break
 
-                        buffer += decoder.decode(value, { stream: true })
-                        const lines = buffer.split('\n')
-                        buffer = lines.pop() || ''
+                      buffer += decoder.decode(value, { stream: true })
+                      const lines = buffer.split('\n')
+                      buffer = lines.pop() || ''
 
-                        for (const line of lines) {
-                          if (line.startsWith('data: ')) {
-                            try {
-                              const data = JSON.parse(line.slice(6))
-                              if (data.type === 'progress') {
-                                setLaProgress({ step: data.step, percent: data.percent, detail: data.detail || '' })
-                              } else if (data.type === 'result') {
-                                setLaResult({ transcript: null, analysis: data.analysis })
-                                setLaProgress({ step: '완료', percent: 100, detail: '분석이 완료되었습니다!' })
-                              } else if (data.type === 'error') {
-                                throw new Error(data.message)
-                              }
-                            } catch (parseErr) {
-                              if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr
+                      for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                          try {
+                            const data = JSON.parse(line.slice(6))
+                            if (data.type === 'progress') {
+                              setLaProgress({ step: data.step, percent: data.percent, detail: data.detail || '' })
+                            } else if (data.type === 'result') {
+                              setLaResult({ analysis: data.analysis })
+                              setLaProgress({ step: '완료', percent: 100, detail: '분석이 완료되었습니다!' })
+                            } else if (data.type === 'error') {
+                              throw new Error(data.message)
                             }
+                          } catch (parseErr) {
+                            if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr
                           }
                         }
                       }
-                    } catch (err) {
-                      setLaError(err.message || '분석 중 오류가 발생했습니다.')
-                      setLaProgress({ step: '', percent: 0, detail: '' })
-                    } finally {
-                      setLaProcessing(false)
                     }
-                  } else {
-                    // OpenAI 모드 (기존)
-                    if (!laOpenaiKey) { setLaError('OpenAI API Key를 입력해주세요.'); return }
-                    if (laInputMode === 'youtube' && !laYoutubeUrl) { setLaError('YouTube URL을 입력해주세요.'); return }
-                    if (laInputMode === 'file' && !laAudioFile) { setLaError('오디오 파일을 선택해주세요.'); return }
-
-                    setLaError('')
-                    setLaProcessing(true)
-                    setLaResult(null)
-                    setLaProgress({ step: '준비 중...', percent: 5, detail: '분석을 시작합니다.' })
-
-                    try {
-                      const formData = new FormData()
-                      formData.append('openaiKey', laOpenaiKey)
-                      formData.append('prompt', laPrompt)
-                      formData.append('inputMode', laInputMode)
-
-                      if (laInputMode === 'youtube') {
-                        formData.append('youtubeUrl', laYoutubeUrl)
-                      } else if (laAudioFile) {
-                        formData.append('audioFile', laAudioFile)
-                      }
-
-                      setLaProgress({ step: '서버 전송 중...', percent: 10, detail: laInputMode === 'youtube' ? 'YouTube 오디오 추출을 시작합니다...' : '오디오 파일을 업로드 중입니다...' })
-
-                      const token = localStorage.getItem('authToken')
-                      const response = await fetch('/api/lecture-analyze', {
-                        method: 'POST',
-                        headers: { 'Authorization': token ? `Bearer ${token}` : '' },
-                        body: formData
-                      })
-
-                      if (!response.ok) {
-                        const errData = await response.json()
-                        throw new Error(errData.error || '분석 실패')
-                      }
-
-                      const reader = response.body.getReader()
-                      const decoder = new TextDecoder()
-                      let buffer = ''
-
-                      while (true) {
-                        const { done, value } = await reader.read()
-                        if (done) break
-
-                        buffer += decoder.decode(value, { stream: true })
-                        const lines = buffer.split('\n')
-                        buffer = lines.pop() || ''
-
-                        for (const line of lines) {
-                          if (line.startsWith('data: ')) {
-                            try {
-                              const data = JSON.parse(line.slice(6))
-                              if (data.type === 'progress') {
-                                setLaProgress({ step: data.step, percent: data.percent, detail: data.detail || '' })
-                              } else if (data.type === 'result') {
-                                setLaResult({ transcript: data.transcript, analysis: data.analysis })
-                                setLaProgress({ step: '완료', percent: 100, detail: '분석이 완료되었습니다!' })
-                              } else if (data.type === 'error') {
-                                throw new Error(data.message)
-                              }
-                            } catch (parseErr) {
-                              if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr
-                            }
-                          }
-                        }
-                      }
-                    } catch (err) {
-                      setLaError(err.message || '분석 중 오류가 발생했습니다.')
-                      setLaProgress({ step: '', percent: 0, detail: '' })
-                    } finally {
-                      setLaProcessing(false)
-                    }
+                  } catch (err) {
+                    setLaError(err.message || '분석 중 오류가 발생했습니다.')
+                    setLaProgress({ step: '', percent: 0, detail: '' })
+                  } finally {
+                    setLaProcessing(false)
                   }
                 }}
                 disabled={laProcessing}
                 style={{
                   width: '100%',
                   padding: '16px',
-                  background: laProcessing ? 'rgba(99,102,241,0.2)' : laEngine === 'gemini' ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                  background: laProcessing ? 'rgba(99,102,241,0.2)' : 'linear-gradient(135deg, #3b82f6, #6366f1)',
                   border: 'none',
                   borderRadius: '14px',
                   color: '#fff',
@@ -5033,7 +4847,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   marginBottom: '20px'
                 }}
               >
-                {laProcessing ? '⏳ 분석 진행 중...' : laEngine === 'gemini' ? '🚀 Gemini로 분석 시작 (무료 티어 가능)' : '🚀 분석 시작 (OpenAI 비용 발생)'}
+                {laProcessing ? '⏳ 분석 진행 중...' : '🚀 Gemini로 분석 시작'}
               </button>
 
               {/* 에러 메시지 */}
@@ -5045,7 +4859,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   borderRadius: '12px',
                   color: '#f87171',
                   fontSize: '14px',
-                  marginBottom: '20px'
+                  marginBottom: '20px',
+                  whiteSpace: 'pre-wrap'
                 }}>
                   {laError}
                 </div>
@@ -5068,7 +4883,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     <div style={{
                       width: `${laProgress.percent}%`,
                       height: '100%',
-                      background: laEngine === 'gemini' ? 'linear-gradient(90deg, #3b82f6, #6366f1)' : 'linear-gradient(90deg, #6366f1, #a855f7)',
+                      background: 'linear-gradient(90deg, #3b82f6, #6366f1)',
                       borderRadius: '4px',
                       transition: 'width 0.5s ease'
                     }} />
@@ -5081,101 +4896,55 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
               {/* 분석 결과 */}
               {laResult && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  {/* 분석 결과 */}
-                  <div style={{
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: '16px',
-                    padding: '24px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                      <h3 style={{ fontSize: '16px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        📊 AI 분석 결과
-                        {laEngine === 'gemini' && <span style={{ fontSize: '11px', background: 'rgba(59,130,246,0.15)', color: '#60a5fa', padding: '2px 8px', borderRadius: '6px' }}>Gemini</span>}
-                        {laEngine === 'openai' && <span style={{ fontSize: '11px', background: 'rgba(16,185,129,0.15)', color: '#34d399', padding: '2px 8px', borderRadius: '6px' }}>OpenAI</span>}
-                      </h3>
-                      <button
-                        onClick={() => {
-                          const text = laResult.transcript
-                            ? `--- AI 분석 결과 ---\n\n${laResult.analysis}\n\n--- 전체 전사본 ---\n\n${laResult.transcript}`
-                            : `--- AI 분석 결과 (Gemini) ---\n\n${laResult.analysis}`
-                          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-                          const url = URL.createObjectURL(blob)
-                          const a = document.createElement('a')
-                          a.href = url
-                          a.download = `무료강의_분석_${new Date().toISOString().slice(0, 10)}.txt`
-                          a.click()
-                          URL.revokeObjectURL(url)
-                        }}
-                        style={{
-                          padding: '8px 14px',
-                          background: 'rgba(16,185,129,0.1)',
-                          border: '1px solid rgba(16,185,129,0.25)',
-                          borderRadius: '8px',
-                          color: '#34d399',
-                          fontSize: '13px',
-                          cursor: 'pointer',
-                          fontWeight: '500'
-                        }}
-                      >
-                        📥 다운로드
-                      </button>
-                    </div>
-                    <div style={{
-                      background: 'rgba(0,0,0,0.3)',
-                      borderRadius: '12px',
-                      padding: '20px',
-                      maxHeight: '500px',
-                      overflowY: 'auto',
-                      fontSize: '14px',
-                      color: '#e2e8f0',
-                      lineHeight: 1.8,
-                      whiteSpace: 'pre-wrap'
-                    }}>
-                      {laResult.analysis}
-                    </div>
-                  </div>
-
-                  {/* 전사본 (OpenAI 모드에서만 표시) */}
-                  {laResult.transcript && (
-                    <details style={{
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      borderRadius: '16px',
-                      padding: '24px'
-                    }}>
-                      <summary style={{
-                        cursor: 'pointer',
-                        fontSize: '16px',
-                        fontWeight: '700',
-                        color: '#e2e8f0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        listStyle: 'none'
-                      }}>
-                        📝 전체 전사본 (클릭하여 펼치기)
-                        <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>
-                          {laResult.transcript ? `${laResult.transcript.length.toLocaleString()}자` : ''}
-                        </span>
-                      </summary>
-                      <div style={{
-                        background: 'rgba(0,0,0,0.3)',
-                        borderRadius: '12px',
-                        padding: '20px',
-                        marginTop: '16px',
-                        maxHeight: '400px',
-                        overflowY: 'auto',
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '16px',
+                  padding: '24px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      📊 AI 분석 결과
+                      <span style={{ fontSize: '11px', background: 'rgba(59,130,246,0.15)', color: '#60a5fa', padding: '2px 8px', borderRadius: '6px' }}>Gemini</span>
+                    </h3>
+                    <button
+                      onClick={() => {
+                        const text = `--- AI 분석 결과 (Gemini) ---\n\n${laResult.analysis}`
+                        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `무료강의_분석_${new Date().toISOString().slice(0, 10)}.txt`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                      style={{
+                        padding: '8px 14px',
+                        background: 'rgba(16,185,129,0.1)',
+                        border: '1px solid rgba(16,185,129,0.25)',
+                        borderRadius: '8px',
+                        color: '#34d399',
                         fontSize: '13px',
-                        color: '#94a3b8',
-                        lineHeight: 1.8,
-                        whiteSpace: 'pre-wrap'
-                      }}>
-                        {laResult.transcript}
-                      </div>
-                    </details>
-                  )}
+                        cursor: 'pointer',
+                        fontWeight: '500'
+                      }}
+                    >
+                      📥 다운로드
+                    </button>
+                  </div>
+                  <div style={{
+                    background: 'rgba(0,0,0,0.3)',
+                    borderRadius: '12px',
+                    padding: '20px',
+                    maxHeight: '500px',
+                    overflowY: 'auto',
+                    fontSize: '14px',
+                    color: '#e2e8f0',
+                    lineHeight: 1.8,
+                    whiteSpace: 'pre-wrap'
+                  }}>
+                    {laResult.analysis}
+                  </div>
                 </div>
               )}
             </div>
