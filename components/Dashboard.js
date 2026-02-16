@@ -152,8 +152,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
   // 무료강의 분석기 상태
   const [laYoutubeUrl, setLaYoutubeUrl] = useState('')
-  const [laAudioFile, setLaAudioFile] = useState(null)
-  const [laInputMode, setLaInputMode] = useState('youtube') // 'youtube' | 'file'
+  const [laVideoTitle, setLaVideoTitle] = useState('')
+  const [laVideoDuration, setLaVideoDuration] = useState(null) // 영상 길이(초)
   const [laPrompt, setLaPrompt] = useState(`당신은 온라인 교육업계의 무료강의 분석 전문가입니다. 이 영상은 무료강의(3~6시간 분량)입니다.
 
 다음 항목으로 분류하여 한국어로 정리해 주세요:
@@ -170,7 +170,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [laProgress, setLaProgress] = useState({ step: '', percent: 0, detail: '' })
   const [laResult, setLaResult] = useState(null) // { analysis }
   const [laError, setLaError] = useState('')
-  const laAudioRef = useRef(null)
+  const [laHistory, setLaHistory] = useState([]) // 분석 히스토리
+  const [laViewItem, setLaViewItem] = useState(null) // 히스토리 보기 모달
 
   // 서버에서 시트 목록 로드
   const loadSavedSheets = async () => {
@@ -1565,7 +1566,19 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           </button>
 
           {/* 무료강의 분석기 메뉴 */}
-          <button onClick={() => { setCurrentTab('lecture-analyzer'); if(isMobile) setMobileMenuOpen(false) }} style={{
+          <button onClick={async () => {
+            setCurrentTab('lecture-analyzer');
+            if(isMobile) setMobileMenuOpen(false);
+            try {
+              const res = await fetch('/api/lecture-history', {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'list' })
+              })
+              const data = await res.json()
+              if (data.success) setLaHistory(data.items)
+            } catch {}
+          }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'lecture-analyzer' ? 'rgba(99,102,241,0.2)' : laProcessing ? 'rgba(99,102,241,0.08)' : 'transparent',
@@ -4652,13 +4665,13 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             <div style={{ padding: isMobile ? '16px' : '32px', maxWidth: '900px' }}>
               <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 🎓 무료강의 분석기
-                <HelpTooltip text={"무료강의 영상(3~6시간)을 Gemini AI로 분석합니다.\n\n• YouTube URL 또는 파일 업로드\n• 자막 자동 추출 → Gemini 분석\n• API Key는 서버 환경변수로 관리 (입력 불필요)"} />
+                <HelpTooltip text={"무료강의 영상(3~6시간)을 Gemini AI로 분석합니다.\n\n• YouTube URL 입력\n• 자막 자동 추출 → Gemini 분석\n• API Key는 서버 환경변수로 관리 (입력 불필요)"} />
               </h2>
               <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '28px', lineHeight: 1.6 }}>
-                무료강의 영상을 Gemini AI가 자동으로 분석합니다. API Key는 서버에서 관리되므로 별도 입력이 필요 없습니다.
+                YouTube 영상 링크를 입력하면 Gemini AI가 자동으로 분석합니다.
               </p>
 
-              {/* Step 1: 입력 방식 선택 */}
+              {/* Step 1: YouTube URL 입력 */}
               <div style={{
                 background: 'rgba(255,255,255,0.03)',
                 border: '1px solid rgba(255,255,255,0.08)',
@@ -4668,116 +4681,41 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
                   <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}>Step 1</span>
-                  <span style={{ fontSize: '15px', fontWeight: '600' }}>영상/오디오 입력</span>
+                  <span style={{ fontSize: '15px', fontWeight: '600' }}>YouTube 링크 입력</span>
                 </div>
 
-                {/* 입력 모드 토글 */}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                  <button
-                    onClick={() => setLaInputMode('youtube')}
-                    style={{
-                      flex: 1,
-                      padding: '10px',
-                      background: laInputMode === 'youtube' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${laInputMode === 'youtube' ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                      borderRadius: '10px',
-                      color: laInputMode === 'youtube' ? '#a5b4fc' : '#94a3b8',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    YouTube URL
-                  </button>
-                  <button
-                    onClick={() => setLaInputMode('file')}
-                    style={{
-                      flex: 1,
-                      padding: '10px',
-                      background: laInputMode === 'file' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${laInputMode === 'file' ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                      borderRadius: '10px',
-                      color: laInputMode === 'file' ? '#a5b4fc' : '#94a3b8',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    영상/오디오 파일 업로드
-                  </button>
-                </div>
-
-                {laInputMode === 'youtube' ? (
-                  <>
-                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>YouTube URL</label>
-                    <input
-                      type="text"
-                      value={laYoutubeUrl}
-                      onChange={(e) => setLaYoutubeUrl(e.target.value)}
-                      placeholder="https://www.youtube.com/watch?v=... 또는 https://youtu.be/..."
-                      style={{
-                        width: '100%',
-                        padding: '14px',
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '12px',
-                        color: '#fff',
-                        fontSize: '14px'
-                      }}
-                    />
-                    <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
-                      YouTube 자막을 자동 추출하여 Gemini가 분석합니다.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>
-                      영상/오디오 파일 (mp4, mp3, wav, m4a, webm)
-                    </label>
-                    <input
-                      ref={laAudioRef}
-                      type="file"
-                      accept="audio/*,video/*,.mp3,.wav,.m4a,.webm,.mp4,.ogg,.flac"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) setLaAudioFile(file)
-                      }}
-                      style={{ display: 'none' }}
-                    />
-                    <div
-                      onClick={() => laAudioRef.current?.click()}
-                      style={{
-                        border: '2px dashed rgba(255,255,255,0.15)',
-                        borderRadius: '12px',
-                        padding: '32px',
-                        textAlign: 'center',
-                        cursor: 'pointer',
-                        background: laAudioFile ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.02)',
-                        transition: 'all 0.2s'
-                      }}
-                    >
-                      {laAudioFile ? (
-                        <div>
-                          <div style={{ fontSize: '28px', marginBottom: '8px' }}>🎬</div>
-                          <div style={{ color: '#34d399', fontSize: '14px', fontWeight: '600' }}>{laAudioFile.name}</div>
-                          <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
-                            {(laAudioFile.size / (1024 * 1024)).toFixed(1)} MB
-                          </div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div style={{ fontSize: '28px', marginBottom: '8px' }}>📂</div>
-                          <div style={{ color: '#94a3b8', fontSize: '14px' }}>클릭하여 파일을 선택하세요</div>
-                          <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px' }}>
-                            mp4, mp3, wav, m4a, webm 지원 (최대 2GB)
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
-                      Gemini File API로 업로드 후 영상을 직접 분석합니다.
-                    </p>
-                  </>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>YouTube URL</label>
+                <input
+                  type="text"
+                  value={laYoutubeUrl}
+                  onChange={(e) => {
+                    setLaYoutubeUrl(e.target.value)
+                    setLaVideoTitle('')
+                    setLaVideoDuration(null)
+                  }}
+                  placeholder="https://www.youtube.com/watch?v=... 또는 https://youtu.be/..."
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '12px',
+                    color: '#fff',
+                    fontSize: '14px'
+                  }}
+                />
+                <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>
+                  YouTube 자막을 자동 추출하여 Gemini가 분석합니다.
+                </p>
+                {laVideoTitle && (
+                  <div style={{ marginTop: '12px', padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: '10px', border: '1px solid rgba(99,102,241,0.15)' }}>
+                    <div style={{ fontSize: '13px', color: '#a5b4fc', fontWeight: '600' }}>{laVideoTitle}</div>
+                    {laVideoDuration && (
+                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                        영상 길이: {Math.floor(laVideoDuration / 3600) > 0 ? `${Math.floor(laVideoDuration / 3600)}시간 ` : ''}{Math.floor((laVideoDuration % 3600) / 60)}분
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -4817,29 +4755,55 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {/* 실행 버튼 */}
               <button
                 onClick={async () => {
-                  if (laInputMode === 'youtube' && !laYoutubeUrl) { setLaError('YouTube URL을 입력해주세요.'); return }
-                  if (laInputMode === 'file' && !laAudioFile) { setLaError('파일을 선택해주세요.'); return }
+                  if (!laYoutubeUrl) { setLaError('YouTube URL을 입력해주세요.'); return }
 
                   setLaError('')
                   setLaProcessing(true)
                   setLaResult(null)
-                  setLaProgress({ step: '준비 중...', percent: 5, detail: 'Gemini 분석을 시작합니다.' })
+                  setLaProgress({ step: '영상 정보 확인 중...', percent: 3, detail: 'YouTube 영상 정보를 가져오는 중...' })
 
                   try {
-                    const formData = new FormData()
-                    formData.append('prompt', laPrompt)
-                    formData.append('inputMode', laInputMode)
+                    // 영상 정보 가져오기 (제목, 길이)
+                    let videoTitle = laVideoTitle
+                    let videoDuration = laVideoDuration
+                    try {
+                      const infoRes = await fetch('/api/youtube-info', {
+                        method: 'POST',
+                        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: laYoutubeUrl })
+                      })
+                      if (infoRes.ok) {
+                        const infoData = await infoRes.json()
+                        if (infoData.title) {
+                          videoTitle = infoData.title
+                          setLaVideoTitle(infoData.title)
+                        }
+                        if (infoData.duration) {
+                          videoDuration = infoData.duration
+                          setLaVideoDuration(infoData.duration)
+                        }
+                      }
+                    } catch {}
 
-                    if (laInputMode === 'youtube') {
-                      formData.append('youtubeUrl', laYoutubeUrl)
-                    } else if (laAudioFile) {
-                      formData.append('videoFile', laAudioFile)
+                    // 예상 소요시간 계산
+                    let timeEstimate = ''
+                    if (videoDuration) {
+                      const hours = videoDuration / 3600
+                      if (hours >= 5) timeEstimate = '영상이 5시간 이상으로, 분석에 10분 이상 소요될 수 있습니다.'
+                      else if (hours >= 3) timeEstimate = '영상이 3시간 이상으로, 분석에 5~10분 소요될 수 있습니다.'
+                      else if (hours >= 1) timeEstimate = '영상이 1시간 이상으로, 분석에 3~5분 소요될 수 있습니다.'
+                      else timeEstimate = '분석에 1~3분 소요될 수 있습니다.'
                     }
 
-                    setLaProgress({ step: '서버 전송 중...', percent: 10, detail: laInputMode === 'youtube' ? 'YouTube URL을 서버에 전달합니다...' : '파일을 서버에 업로드합니다...' })
+                    setLaProgress({ step: '준비 중...', percent: 5, detail: timeEstimate || 'Gemini 분석을 시작합니다.' })
 
-                    // NEXT_PUBLIC_PYTHON_BACKEND_URL이 설정되면 Python 백엔드 직접 호출 (Vercel 300초 타임아웃 우회)
-                    // 미설정 시 기존 Vercel 프록시 경유 (타임아웃 제한 있음)
+                    const formData = new FormData()
+                    formData.append('prompt', laPrompt)
+                    formData.append('inputMode', 'youtube')
+                    formData.append('youtubeUrl', laYoutubeUrl)
+
+                    setLaProgress({ step: '서버 전송 중...', percent: 10, detail: timeEstimate ? `YouTube URL을 서버에 전달합니다... (${timeEstimate})` : 'YouTube URL을 서버에 전달합니다...' })
+
                     const directBackendUrl = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL
                     let response
                     if (directBackendUrl) {
@@ -4864,6 +4828,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     const reader = response.body.getReader()
                     const decoder = new TextDecoder()
                     let buffer = ''
+                    let finalAnalysis = null
 
                     while (true) {
                       const { done, value } = await reader.read()
@@ -4878,8 +4843,10 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           try {
                             const data = JSON.parse(line.slice(6))
                             if (data.type === 'progress') {
-                              setLaProgress({ step: data.step, percent: data.percent, detail: data.detail || '' })
+                              const detail = timeEstimate && data.percent < 90 ? `${data.detail || ''} ${data.detail ? '·' : ''} ${timeEstimate}`.trim() : (data.detail || '')
+                              setLaProgress({ step: data.step, percent: data.percent, detail })
                             } else if (data.type === 'result') {
+                              finalAnalysis = data.analysis
                               setLaResult({ analysis: data.analysis })
                               setLaProgress({ step: '완료', percent: 100, detail: '분석이 완료되었습니다!' })
                             } else if (data.type === 'error') {
@@ -4890,6 +4857,32 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                           }
                         }
                       }
+                    }
+
+                    // 분석 완료 후 DB에 저장
+                    if (finalAnalysis) {
+                      try {
+                        await fetch('/api/lecture-history', {
+                          method: 'POST',
+                          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            action: 'save',
+                            youtubeUrl: laYoutubeUrl,
+                            videoTitle: videoTitle || laYoutubeUrl,
+                            videoDuration: videoDuration || null,
+                            analysis: finalAnalysis,
+                            prompt: laPrompt
+                          })
+                        })
+                        // 히스토리 새로고침
+                        const listRes = await fetch('/api/lecture-history', {
+                          method: 'POST',
+                          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'list' })
+                        })
+                        const listData = await listRes.json()
+                        if (listData.success) setLaHistory(listData.items)
+                      } catch {}
                     }
                   } catch (err) {
                     setLaError(err.message || '분석 중 오류가 발생했습니다.')
@@ -4939,26 +4932,48 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               {laProcessing && laProgress.step && (
                 <div style={{
                   background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(99,102,241,0.2)',
                   borderRadius: '16px',
                   padding: '24px',
                   marginBottom: '20px'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <span style={{ fontSize: '14px', fontWeight: '600', color: '#a5b4fc' }}>{laProgress.step}</span>
-                    <span style={{ fontSize: '13px', color: '#94a3b8' }}>{laProgress.percent}%</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                    <div style={{
+                      width: '36px', height: '36px', borderRadius: '10px',
+                      background: 'rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '18px', animation: 'laPulse 1.5s ease-in-out infinite'
+                    }}>
+                      {laProgress.percent < 30 ? '📡' : laProgress.percent < 60 ? '⚙️' : laProgress.percent < 90 ? '🤖' : '✅'}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '600', color: '#a5b4fc' }}>{laProgress.step}</span>
+                        <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>{laProgress.percent}%</span>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.06)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{ width: '100%', height: '10px', background: 'rgba(255,255,255,0.06)', borderRadius: '5px', overflow: 'hidden', marginBottom: '12px' }}>
                     <div style={{
                       width: `${laProgress.percent}%`,
                       height: '100%',
-                      background: 'linear-gradient(90deg, #3b82f6, #6366f1)',
-                      borderRadius: '4px',
-                      transition: 'width 0.5s ease'
+                      background: laProgress.percent >= 100 ? 'linear-gradient(90deg, #10b981, #34d399)' : 'linear-gradient(90deg, #3b82f6, #6366f1, #818cf8)',
+                      borderRadius: '5px',
+                      transition: 'width 0.5s ease',
+                      backgroundSize: '200% 100%',
+                      animation: laProgress.percent < 100 ? 'laShimmer 2s linear infinite' : 'none'
                     }} />
                   </div>
                   {laProgress.detail && (
-                    <p style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>{laProgress.detail}</p>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>{laProgress.detail}</p>
+                  )}
+                  {laVideoDuration && laVideoDuration >= 3600 && laProgress.percent < 90 && (
+                    <div style={{
+                      marginTop: '10px', padding: '8px 12px',
+                      background: 'rgba(250,204,21,0.08)', borderRadius: '8px', border: '1px solid rgba(250,204,21,0.15)',
+                      fontSize: '12px', color: '#fcd34d', display: 'flex', alignItems: 'center', gap: '6px'
+                    }}>
+                      ⏱️ {Math.floor(laVideoDuration / 3600)}시간 이상 영상은 분석에 {laVideoDuration >= 18000 ? '10분 이상' : laVideoDuration >= 10800 ? '5~10분' : '3~5분'} 소요될 수 있습니다.
+                    </div>
                   )}
                 </div>
               )}
@@ -5016,6 +5031,173 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   </div>
                 </div>
               )}
+
+              {/* 분석 히스토리 (저장된 세션) */}
+              <div style={{
+                marginTop: '28px',
+                padding: '20px',
+                background: 'rgba(99,102,241,0.08)',
+                borderRadius: '16px',
+                border: '1px solid rgba(99,102,241,0.15)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h4 style={{ fontSize: '15px', fontWeight: '600', color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    📁 분석 히스토리
+                  </h4>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/lecture-history', {
+                          method: 'POST',
+                          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'list' })
+                        })
+                        const data = await res.json()
+                        if (data.success) setLaHistory(data.items)
+                      } catch {}
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(99,102,241,0.2)',
+                      border: '1px solid rgba(99,102,241,0.3)',
+                      borderRadius: '6px',
+                      color: '#a5b4fc',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🔄 새로고침
+                  </button>
+                </div>
+
+                {laHistory.length === 0 ? (
+                  <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '20px' }}>저장된 분석 기록이 없습니다.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '400px', overflow: 'auto' }}>
+                    {laHistory.map(item => (
+                      <div key={item.id} style={{
+                        padding: '12px 16px',
+                        background: 'rgba(0,0,0,0.2)',
+                        borderRadius: '10px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '10px'
+                      }}>
+                        <div
+                          style={{ cursor: 'pointer', flex: 1, minWidth: 0 }}
+                          onClick={async () => {
+                            try {
+                              const res = await fetch('/api/lecture-history', {
+                                method: 'POST',
+                                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'get', id: item.id })
+                              })
+                              const data = await res.json()
+                              if (data.success) setLaViewItem(data.item)
+                            } catch {}
+                          }}
+                        >
+                          <div style={{ fontWeight: '600', color: '#a5b4fc', fontSize: '14px', marginBottom: '4px', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.video_title || item.youtube_url}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            <span>{new Date(item.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</span>
+                            {item.video_duration && (
+                              <span>· {Math.floor(item.video_duration / 3600) > 0 ? `${Math.floor(item.video_duration / 3600)}시간 ` : ''}{Math.floor((item.video_duration % 3600) / 60)}분</span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch('/api/lecture-history', {
+                                  method: 'POST',
+                                  headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'get', id: item.id })
+                                })
+                                const data = await res.json()
+                                if (data.success) setLaViewItem(data.item)
+                              } catch {}
+                            }}
+                            style={{
+                              padding: '6px 10px',
+                              background: 'rgba(99,102,241,0.2)',
+                              border: '1px solid rgba(99,102,241,0.3)',
+                              borderRadius: '6px',
+                              color: '#a5b4fc',
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            👁️ 보기
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch('/api/lecture-history', {
+                                  method: 'POST',
+                                  headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'get', id: item.id })
+                                })
+                                const data = await res.json()
+                                if (data.success) {
+                                  const fullItem = data.item
+                                  const text = `--- 무료강의 분석 결과 ---\n영상: ${fullItem.video_title || ''}\nURL: ${fullItem.youtube_url || ''}\n분석일: ${new Date(fullItem.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n${fullItem.analysis}`
+                                  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+                                  const url = URL.createObjectURL(blob)
+                                  const a = document.createElement('a')
+                                  a.href = url
+                                  a.download = `강의분석_${(fullItem.video_title || 'result').slice(0, 30)}_${new Date(fullItem.created_at).toISOString().slice(0, 10)}.txt`
+                                  a.click()
+                                  URL.revokeObjectURL(url)
+                                }
+                              } catch {}
+                            }}
+                            style={{
+                              padding: '6px 10px',
+                              background: 'rgba(16,185,129,0.2)',
+                              border: '1px solid rgba(16,185,129,0.3)',
+                              borderRadius: '6px',
+                              color: '#10b981',
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            📥
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!confirm('이 분석 기록을 삭제하시겠습니까?')) return
+                              try {
+                                await fetch('/api/lecture-history', {
+                                  method: 'POST',
+                                  headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'delete', id: item.id })
+                                })
+                                setLaHistory(prev => prev.filter(h => h.id !== item.id))
+                              } catch {}
+                            }}
+                            style={{
+                              padding: '6px 10px',
+                              background: 'rgba(239,68,68,0.2)',
+                              border: '1px solid rgba(239,68,68,0.3)',
+                              borderRadius: '6px',
+                              color: '#f87171',
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -5031,6 +5213,76 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           개발자 이진우
         </div>
       </div>
+
+      {/* 강의 분석 히스토리 보기 모달 */}
+      {laViewItem && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setLaViewItem(null) }}
+        >
+          <div style={{ background: '#1e1e2e', borderRadius: '20px', padding: '24px', width: '700px', maxWidth: '95vw', border: '1px solid rgba(255,255,255,0.1)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{laViewItem.video_title || '분석 결과'}</h3>
+                <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <span>{new Date(laViewItem.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} 완료</span>
+                  {laViewItem.video_duration && (
+                    <span>· 영상 {Math.floor(laViewItem.video_duration / 3600) > 0 ? `${Math.floor(laViewItem.video_duration / 3600)}시간 ` : ''}{Math.floor((laViewItem.video_duration % 3600) / 60)}분</span>
+                  )}
+                </div>
+                {laViewItem.youtube_url && (
+                  <a href={laViewItem.youtube_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#6366f1', textDecoration: 'none', marginTop: '4px', display: 'inline-block' }}>
+                    🔗 YouTube 영상 보기
+                  </a>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                <button
+                  onClick={() => {
+                    const text = `--- 무료강의 분석 결과 ---\n영상: ${laViewItem.video_title || ''}\nURL: ${laViewItem.youtube_url || ''}\n분석일: ${new Date(laViewItem.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n${laViewItem.analysis}`
+                    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `강의분석_${(laViewItem.video_title || 'result').slice(0, 30)}_${new Date(laViewItem.created_at).toISOString().slice(0, 10)}.txt`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                  }}
+                  style={{
+                    padding: '8px 14px',
+                    background: 'rgba(16,185,129,0.15)',
+                    border: '1px solid rgba(16,185,129,0.3)',
+                    borderRadius: '8px',
+                    color: '#34d399',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  📥 다운로드
+                </button>
+                <button
+                  onClick={() => setLaViewItem(null)}
+                  style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '28px', cursor: 'pointer', lineHeight: 1 }}
+                >×</button>
+              </div>
+            </div>
+            <div style={{
+              flex: 1,
+              background: 'rgba(0,0,0,0.3)',
+              borderRadius: '12px',
+              padding: '20px',
+              overflowY: 'auto',
+              fontSize: '14px',
+              color: '#e2e8f0',
+              lineHeight: 1.8,
+              whiteSpace: 'pre-wrap'
+            }}>
+              {laViewItem.analysis}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 유튜브 채팅 보기 모달 */}
       {ytViewSession && (

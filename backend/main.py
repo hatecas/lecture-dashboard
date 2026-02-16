@@ -369,10 +369,10 @@ async def analyze_lecture(
                     executor.shutdown(wait=False)
 
                     if not audio_result:
-                        cookie_hint = "" if YOUTUBE_COOKIES_PATH else "\n\n또는 관리자에게 YouTube 쿠키 설정을 요청하세요."
+                        cookie_hint = "" if YOUTUBE_COOKIES_PATH else "\n\n관리자에게 YouTube 쿠키 설정을 요청하세요."
                         yield sse_event({
                             "type": "error",
-                            "message": f"자막도 없고 오디오 다운로드도 실패했습니다.\n\n이 영상은 YouTube에서 서버 다운로드를 차단하고 있을 수 있습니다.\n\n해결 방법:\n파일 업로드 모드로 전환하여 영상/오디오 파일을 직접 업로드해주세요.{cookie_hint}"
+                            "message": f"자막도 없고 오디오 다운로드도 실패했습니다.\n\n이 영상은 YouTube에서 서버 다운로드를 차단하고 있을 수 있습니다.\n\n다른 영상 URL을 시도하거나, 잠시 후 다시 시도해주세요.{cookie_hint}"
                         })
                         return
 

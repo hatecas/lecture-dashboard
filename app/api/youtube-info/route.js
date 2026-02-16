@@ -16,20 +16,23 @@ export async function POST(request) {
     const videoId = extractVideoId(url)
     if (!videoId) return NextResponse.json({ error: '유효한 유튜브 URL이 아닙니다' }, { status: 400 })
 
-    // 1) oEmbed로 채널명 가져오기
+    // 1) oEmbed로 채널명, 제목 가져오기
     let channelName = ''
+    let title = ''
     try {
       const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`)
       if (oembedRes.ok) {
         const oembed = await oembedRes.json()
         channelName = oembed.author_name || ''
+        title = oembed.title || ''
       }
     } catch (e) {
       // oEmbed 실패 시 무시
     }
 
-    // 2) 유튜브 페이지에서 조회수 파싱
+    // 2) 유튜브 페이지에서 조회수, 영상 길이 파싱
     let views = 0
+    let duration = 0 // 초 단위
     try {
       const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
         headers: {
@@ -61,12 +64,26 @@ export async function POST(request) {
             views = parseInt(koreanMatch[1].replace(/,/g, ''))
           }
         }
+
+        // 영상 길이 파싱: "lengthSeconds":"12345"
+        const durationMatch = html.match(/"lengthSeconds":"(\d+)"/)
+        if (durationMatch) {
+          duration = parseInt(durationMatch[1])
+        }
+
+        // 제목 파싱 (oEmbed 실패 시 폴백)
+        if (!title) {
+          const titleMatch = html.match(/<title>(.+?) - YouTube<\/title>/)
+          if (titleMatch) {
+            title = titleMatch[1]
+          }
+        }
       }
     } catch (e) {
       // 페이지 파싱 실패 시 무시
     }
 
-    return NextResponse.json({ channelName, views, videoId })
+    return NextResponse.json({ channelName, views, videoId, title, duration })
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
