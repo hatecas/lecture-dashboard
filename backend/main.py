@@ -103,7 +103,7 @@ def download_audio_yt_dlp(video_url: str) -> str:
         "--audio-quality", "64K",       # 음성이므로 64kbps면 충분 (파일 크기 최소화)
         "--no-playlist",
         "--no-check-certificates",
-        "--js-runtimes", "nodejs",      # yt-dlp 최신 버전 JS 런타임 필수
+        "--js-runtimes", "node",         # yt-dlp 최신 버전 JS 런타임 필수
         "--output", os.path.join(tmp_dir, "audio.%(ext)s"),
         video_url,
     ]
