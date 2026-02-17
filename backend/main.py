@@ -125,6 +125,10 @@ def download_audio_yt_dlp(video_url: str) -> str:
         "--no-playlist",
         "--no-check-certificates",
         "--js-runtimes", "node",         # yt-dlp 최신 버전 JS 런타임 필수
+        # 봇 감지 우회: 실제 Chrome 브라우저처럼 위장
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "--referer", "https://www.youtube.com/",
+        "--extractor-args", "youtube:player_client=mediaconnect",
         "--output", os.path.join(tmp_dir, "audio.%(ext)s"),
         video_url,
     ]
