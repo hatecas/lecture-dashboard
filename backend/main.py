@@ -110,23 +110,29 @@ def analyze_youtube_url_direct_sync(client, youtube_url: str, prompt: str) -> st
 
 
 def download_audio_yt_dlp(video_url: str) -> str:
-    """yt-dlp로 YouTube 오디오만 다운로드 (여러 player_client를 순차 시도)
+    """yt-dlp로 YouTube 오디오 다운로드 (PO Token 유도 + 모바일 클라이언트 우선 전략)
+
+    YouTube 최신 봇 감지(PO Token, 데이터센터 IP 차단) 우회를 위해:
+    1. 모바일 클라이언트(android/ios) 우선 사용 (웹보다 봇 감지 느슨)
+    2. player_skip=webpage 으로 봇 감지 스크립트 건너뛰기
+    3. --force-ipv4 로 클라우드 IPv6 블랙리스트 회피
+    4. 쿠키 파일 지원 (YT_COOKIES_FILE 환경변수)
 
     Returns: 다운로드된 오디오 파일 경로
     """
-    # 시도할 player_client 목록 (성공률 높은 순)
-    client_strategies = [
-        "web_creator",          # 크리에이터 클라이언트 (봇 감지 덜함)
-        "web",                  # 기본 웹 클라이언트
-        "android_vr",           # Android VR 클라이언트
-        "default",              # yt-dlp 기본값
+    # 우회 전략 목록: (extractor-args 문자열, 설명)
+    # 모바일 앱 클라이언트가 봇 감지에 가장 관대 → 우선 시도
+    strategies = [
+        ("youtube:player_client=android;player_skip=webpage", "android+skip_webpage"),
+        ("youtube:player_client=ios",                         "ios"),
+        ("youtube:player_client=android",                     "android"),
+        ("youtube:player_client=web_creator",                 "web_creator"),
     ]
 
-    # 환경변수로 쿠키 파일 지정 가능 (가장 확실한 방법)
     cookies_file = os.environ.get("YT_COOKIES_FILE", "")
 
     last_error = None
-    for i, player_client in enumerate(client_strategies):
+    for i, (extractor_args, strategy_name) in enumerate(strategies):
         tmp_dir = tempfile.mkdtemp(prefix="lecture_audio_")
 
         cmd = [
@@ -138,17 +144,17 @@ def download_audio_yt_dlp(video_url: str) -> str:
             "--no-check-certificates",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "--referer", "https://www.youtube.com/",
-            "--extractor-args", f"youtube:player_client={player_client}",
+            "--extractor-args", extractor_args,
+            "--force-ipv4",
             "--output", os.path.join(tmp_dir, "audio.%(ext)s"),
         ]
 
-        # 쿠키 파일이 있으면 추가 (봇 감지 우회에 가장 효과적)
         if cookies_file and os.path.isfile(cookies_file):
             cmd.extend(["--cookies", cookies_file])
 
         cmd.append(video_url)
 
-        logger.info(f"[yt-dlp] 시도 {i+1}/{len(client_strategies)}: player_client={player_client}")
+        logger.info(f"[yt-dlp] 시도 {i+1}/{len(strategies)}: {strategy_name}")
         start_time = time.time()
 
         try:
@@ -159,41 +165,40 @@ def download_audio_yt_dlp(video_url: str) -> str:
                 timeout=300,
             )
         except subprocess.TimeoutExpired:
-            logger.warning(f"[yt-dlp] 타임아웃: player_client={player_client}")
+            logger.warning(f"[yt-dlp] 타임아웃: {strategy_name}")
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            last_error = RuntimeError(f"yt-dlp 타임아웃 (player_client={player_client})")
+            last_error = RuntimeError(f"yt-dlp 타임아웃 ({strategy_name})")
             continue
 
         elapsed = time.time() - start_time
 
         if result.returncode != 0:
             stderr_short = result.stderr[:300] if result.stderr else "(no stderr)"
-            logger.warning(f"[yt-dlp] 실패 (player_client={player_client}): {stderr_short}")
+            logger.warning(f"[yt-dlp] 실패 ({strategy_name}): {stderr_short}")
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            last_error = RuntimeError(f"yt-dlp 다운로드 실패 (player_client={player_client}): {stderr_short}")
+            last_error = RuntimeError(f"yt-dlp 실패 ({strategy_name}): {stderr_short}")
             continue
 
         # 다운로드 성공 → 파일 찾기
         output_path = os.path.join(tmp_dir, "audio.mp3")
         if os.path.exists(output_path):
             file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            logger.info(f"[yt-dlp] 다운로드 완료: {output_path} ({file_size_mb:.1f}MB, {elapsed:.0f}초, client={player_client})")
+            logger.info(f"[yt-dlp] 성공: {output_path} ({file_size_mb:.1f}MB, {elapsed:.0f}초, {strategy_name})")
             return output_path
 
         for f in os.listdir(tmp_dir):
             fpath = os.path.join(tmp_dir, f)
             if os.path.isfile(fpath) and f.startswith("audio."):
                 file_size_mb = os.path.getsize(fpath) / (1024 * 1024)
-                logger.info(f"[yt-dlp] 다운로드 완료 (변환): {fpath} ({file_size_mb:.1f}MB, {elapsed:.0f}초, client={player_client})")
+                logger.info(f"[yt-dlp] 성공 (변환): {fpath} ({file_size_mb:.1f}MB, {elapsed:.0f}초, {strategy_name})")
                 return fpath
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        last_error = RuntimeError("yt-dlp 다운로드는 성공했지만 오디오 파일을 찾을 수 없습니다.")
+        last_error = RuntimeError("yt-dlp 성공했지만 오디오 파일을 찾을 수 없습니다.")
 
-    # 모든 전략 실패
     raise RuntimeError(
-        f"모든 yt-dlp 다운로드 전략이 실패했습니다. "
-        f"서버에 YouTube 쿠키 파일을 설정하세요: 환경변수 YT_COOKIES_FILE=/path/to/cookies.txt "
+        f"모든 yt-dlp 전략 실패. "
+        f"쿠키 파일 설정을 권장합니다: YT_COOKIES_FILE=/path/to/cookies.txt "
         f"(마지막 에러: {last_error})"
     )
 
