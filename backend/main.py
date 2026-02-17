@@ -88,6 +88,27 @@ def fetch_youtube_captions(video_id: str) -> str | None:
         return None
 
 
+def analyze_youtube_url_direct_sync(client, youtube_url: str, prompt: str) -> str:
+    """Gemini에 YouTube URL을 직접 전달하여 분석 (공개 영상용, 다운로드 불필요)"""
+    logger.info(f"[Gemini] YouTube URL 직접 분석 시도: {youtube_url}")
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[
+            types.Content(
+                parts=[
+                    types.Part.from_uri(file_uri=youtube_url, mime_type="video/mp4"),
+                    types.Part.from_text(prompt),
+                ]
+            )
+        ],
+    )
+    result = response.text or ""
+    if not result:
+        raise RuntimeError("Gemini 직접 URL 분석 결과가 비어있습니다.")
+    logger.info(f"[Gemini] 직접 URL 분석 완료 ({len(result)}자)")
+    return result
+
+
 def download_audio_yt_dlp(video_url: str) -> str:
     """yt-dlp로 YouTube 오디오만 다운로드 (일부공개/공개 모두 지원, 쿠키 불필요)
 
@@ -104,6 +125,10 @@ def download_audio_yt_dlp(video_url: str) -> str:
         "--no-playlist",
         "--no-check-certificates",
         "--js-runtimes", "node",         # yt-dlp 최신 버전 JS 런타임 필수
+        # 봇 감지 우회: 실제 Chrome 브라우저처럼 위장
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "--referer", "https://www.youtube.com/",
+        "--extractor-args", "youtube:player_client=mediaconnect",
         "--output", os.path.join(tmp_dir, "audio.%(ext)s"),
         video_url,
     ]
@@ -274,45 +299,57 @@ async def analyze_lecture(
                         yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(30 + ka * 3, 85), "detail": f"AI가 텍스트를 분석 중입니다... ({ka * 10}초)"})
                     analysis = await gen_task
                 else:
-                    # 자막 없음 → yt-dlp로 오디오 다운로드 후 Gemini File API로 분석
-                    # (일부공개/공개 모두 지원, 쿠키 불필요)
+                    # 자막 없음 → 2단계: Gemini 직접 URL 분석 시도
                     youtube_url = f"https://www.youtube.com/watch?v={video_id}"
-                    yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": 15, "detail": "자막 없음, 영상 오디오를 다운로드합니다..."})
+                    yield sse_event({"type": "progress", "step": "Gemini 직접 분석", "percent": 20, "detail": "자막 없음, Gemini로 영상 직접 분석을 시도합니다..."})
 
-                    # 1) yt-dlp로 오디오 다운로드
-                    audio_path = None
                     try:
-                        dl_task = asyncio.create_task(
-                            asyncio.to_thread(download_audio_yt_dlp, youtube_url))
-                        ka = 0
-                        while not dl_task.done():
-                            await asyncio.sleep(5)
-                            ka += 1
-                            yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": min(15 + ka * 2, 40), "detail": f"오디오 다운로드 중... ({ka * 5}초)"})
-                        audio_path = await dl_task
-
-                        file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
-                        yield sse_event({"type": "progress", "step": "Gemini 업로드", "percent": 45, "detail": f"오디오 {file_size_mb:.0f}MB 다운로드 완료, Gemini에 업로드 중..."})
-
-                        # 2) Gemini File API 업로드 + 분석
                         gen_task = asyncio.create_task(
-                            asyncio.to_thread(upload_and_analyze_audio_sync, client, audio_path, prompt))
+                            asyncio.to_thread(analyze_youtube_url_direct_sync, client, youtube_url, prompt))
                         ka = 0
                         while not gen_task.done():
                             await asyncio.sleep(10)
                             ka += 1
-                            yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(50 + ka * 2, 90), "detail": f"AI가 오디오를 분석 중입니다... ({ka * 10}초)"})
+                            yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(25 + ka * 3, 85), "detail": f"AI가 영상을 분석 중입니다... ({ka * 10}초)"})
                         analysis = await gen_task
+                        logger.info("[분석] Gemini 직접 URL 분석 성공")
 
-                    finally:
-                        # 로컬 오디오 파일 정리
-                        if audio_path and os.path.exists(audio_path):
-                            tmp_dir = os.path.dirname(audio_path)
-                            try:
-                                shutil.rmtree(tmp_dir, ignore_errors=True)
-                                logger.info(f"[정리] 임시 오디오 폴더 삭제: {tmp_dir}")
-                            except Exception:
-                                pass
+                    except Exception as e:
+                        # 3단계: Gemini 직접 실패 → yt-dlp 오디오 다운로드 폴백
+                        logger.warning(f"[분석] Gemini 직접 URL 분석 실패: {e}, yt-dlp 폴백 시도")
+                        yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": 15, "detail": "직접 분석 불가, 오디오 다운로드로 전환합니다..."})
+
+                        audio_path = None
+                        try:
+                            dl_task = asyncio.create_task(
+                                asyncio.to_thread(download_audio_yt_dlp, youtube_url))
+                            ka = 0
+                            while not dl_task.done():
+                                await asyncio.sleep(5)
+                                ka += 1
+                                yield sse_event({"type": "progress", "step": "오디오 다운로드", "percent": min(15 + ka * 2, 40), "detail": f"오디오 다운로드 중... ({ka * 5}초)"})
+                            audio_path = await dl_task
+
+                            file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+                            yield sse_event({"type": "progress", "step": "Gemini 업로드", "percent": 45, "detail": f"오디오 {file_size_mb:.0f}MB 다운로드 완료, Gemini에 업로드 중..."})
+
+                            gen_task = asyncio.create_task(
+                                asyncio.to_thread(upload_and_analyze_audio_sync, client, audio_path, prompt))
+                            ka = 0
+                            while not gen_task.done():
+                                await asyncio.sleep(10)
+                                ka += 1
+                                yield sse_event({"type": "progress", "step": "Gemini 분석 중", "percent": min(50 + ka * 2, 90), "detail": f"AI가 오디오를 분석 중입니다... ({ka * 10}초)"})
+                            analysis = await gen_task
+
+                        finally:
+                            if audio_path and os.path.exists(audio_path):
+                                tmp_dir = os.path.dirname(audio_path)
+                                try:
+                                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                                    logger.info(f"[정리] 임시 오디오 폴더 삭제: {tmp_dir}")
+                                except Exception:
+                                    pass
 
             else:
                 # 파일 업로드 방식
