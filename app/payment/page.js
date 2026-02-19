@@ -23,6 +23,12 @@ export default function PaymentTransactionsPage() {
   const [filterAmountMax, setFilterAmountMax] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
 
+  // 수동 편집 모달
+  const [editingTx, setEditingTx] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+
   const fetchTransactions = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -121,6 +127,51 @@ export default function PaymentTransactionsPage() {
       .filter((tx) => tx.status === 'DONE')
       .reduce((sum, tx) => sum + (tx.totalAmount || tx.amount || 0), 0)
   }, [filteredTransactions])
+
+  const openEditModal = (tx) => {
+    setEditingTx(tx)
+    setEditName(tx.customerName || '')
+    setEditPhone(tx.customerPhone || '')
+  }
+
+  const saveCustomerInfo = async () => {
+    if (!editingTx) return
+    setEditSaving(true)
+    try {
+      await fetch('/api/payment/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: editingTx.orderId,
+          customerName: editName.trim(),
+          customerPhone: editPhone.replace(/-/g, '').trim(),
+          orderName: editingTx.orderName || '',
+          paymentKey: editingTx.paymentKey,
+        }),
+      })
+
+      // 로컬 상태 즉시 업데이트
+      setTransactions((prev) =>
+        prev.map((tx) =>
+          tx.orderId === editingTx.orderId
+            ? { ...tx, customerName: editName.trim(), customerPhone: editPhone.replace(/-/g, '').trim() }
+            : tx
+        )
+      )
+      setEditingTx(null)
+    } catch (err) {
+      alert('저장에 실패했습니다')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const formatPhoneDisplay = (value) => {
+    const numbers = (value || '').replace(/[^0-9]/g, '').slice(0, 11)
+    if (numbers.length <= 3) return numbers
+    if (numbers.length <= 7) return `${numbers.slice(0, 3)}-${numbers.slice(3)}`
+    return `${numbers.slice(0, 3)}-${numbers.slice(3, 7)}-${numbers.slice(7)}`
+  }
 
   const inputStyle = {
     padding: '9px 14px',
@@ -412,13 +463,15 @@ export default function PaymentTransactionsPage() {
                           : 'none',
                         alignItems: 'center',
                         transition: 'background 0.15s',
+                        cursor: 'pointer',
                       }}
                       onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
                       onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      onClick={() => openEditModal(tx)}
                     >
                       {/* 주문자명 */}
-                      <div style={{ fontSize: '14px', color: '#e2e8f0', fontWeight: '500' }}>
-                        {tx.customerName || '-'}
+                      <div style={{ fontSize: '14px', color: tx.customerName ? '#e2e8f0' : '#6366f1', fontWeight: '500', cursor: 'pointer' }}>
+                        {tx.customerName || '+ 입력'}
                       </div>
 
                       {/* 상품명 */}
@@ -432,8 +485,8 @@ export default function PaymentTransactionsPage() {
                       </div>
 
                       {/* 전화번호 */}
-                      <div style={{ fontSize: '13px', color: '#94a3b8' }}>
-                        {tx.customerPhone || '-'}
+                      <div style={{ fontSize: '13px', color: tx.customerPhone ? '#94a3b8' : '#475569' }}>
+                        {tx.customerPhone ? formatPhoneDisplay(tx.customerPhone) : '-'}
                       </div>
 
                       {/* 결제금액 */}
@@ -466,6 +519,80 @@ export default function PaymentTransactionsPage() {
               </div>
             )}
           </>
+        )}
+
+        {/* 수동 편집 모달 */}
+        {editingTx && (
+          <div
+            onClick={() => setEditingTx(null)}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              zIndex: 1000, padding: '20px',
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%', maxWidth: '400px',
+                background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '16px', padding: '28px',
+              }}
+            >
+              <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>
+                고객 정보 입력
+              </h3>
+              <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+                {editingTx.orderName || editingTx.orderId}
+              </p>
+
+              <div style={{ marginBottom: '14px' }}>
+                <label style={labelStyle}>주문자명</label>
+                <input
+                  type="text"
+                  placeholder="홍길동"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  style={{ ...inputStyle, width: '100%' }}
+                  autoFocus
+                />
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label style={labelStyle}>전화번호</label>
+                <input
+                  type="tel"
+                  placeholder="010-1234-5678"
+                  value={formatPhoneDisplay(editPhone)}
+                  onChange={(e) => setEditPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                  style={{ ...inputStyle, width: '100%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setEditingTx(null)}
+                  style={{
+                    padding: '10px 20px', borderRadius: '8px',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    background: 'transparent', color: '#94a3b8',
+                    fontSize: '14px', cursor: 'pointer',
+                  }}
+                >취소</button>
+                <button
+                  onClick={saveCustomerInfo}
+                  disabled={editSaving || !editName.trim()}
+                  style={{
+                    padding: '10px 24px', borderRadius: '8px', border: 'none',
+                    background: editName.trim() ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.1)',
+                    color: editName.trim() ? '#fff' : '#64748b',
+                    fontSize: '14px', fontWeight: '600',
+                    cursor: editName.trim() ? 'pointer' : 'not-allowed',
+                  }}
+                >{editSaving ? '저장 중...' : '저장'}</button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* 초기 안내 */}

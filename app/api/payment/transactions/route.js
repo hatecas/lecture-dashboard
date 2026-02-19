@@ -1,6 +1,19 @@
 import { NextResponse } from 'next/server'
+import { readFile } from 'fs/promises'
+import path from 'path'
 
-// 토스페이먼츠 거래 내역 조회 API (상세 정보 포함)
+const ORDERS_FILE = path.join(process.cwd(), 'data', 'orders.json')
+
+async function readLocalOrders() {
+  try {
+    const raw = await readFile(ORDERS_FILE, 'utf-8')
+    return JSON.parse(raw)
+  } catch {
+    return {}
+  }
+}
+
+// 토스페이먼츠 거래 내역 조회 API (로컬 주문 데이터 머지)
 export async function GET(request) {
   try {
     const secretKey = process.env.TOSS_SECRET_KEY
@@ -54,9 +67,24 @@ export async function GET(request) {
       )
     }
 
-    // 2. 각 거래의 상세 정보 조회 (주문자명, 전화번호 등)
+    // 2. 로컬 주문 데이터 로드
+    const localOrders = await readLocalOrders()
+
+    // 3. 각 거래에 로컬 데이터 + 토스 상세 정보 머지
     const enriched = await Promise.all(
       (data || []).map(async (tx) => {
+        // 로컬 주문 데이터가 있으면 우선 사용
+        const localOrder = localOrders[tx.orderId]
+        if (localOrder) {
+          return {
+            ...tx,
+            orderName: localOrder.orderName || tx.orderName || '',
+            customerName: localOrder.customerName || '',
+            customerPhone: localOrder.customerPhone || '',
+          }
+        }
+
+        // 로컬 데이터 없으면 토스 상세 API에서 조회 시도
         if (!tx.paymentKey) return tx
 
         try {
@@ -81,7 +109,6 @@ export async function GET(request) {
               customerEmail: detail.customer?.email || detail.customerEmail || '',
             }
           }
-          console.log(`[상세 조회 실패] paymentKey=${tx.paymentKey} status=${detailRes.status}`)
         } catch (err) {
           console.error(`[상세 조회 실패] paymentKey=${tx.paymentKey}`, err)
         }
@@ -90,7 +117,7 @@ export async function GET(request) {
       })
     )
 
-    return NextResponse.json({ transactions: enriched })
+    return NextResponse.json({ transactions: enriched, localOrders })
   } catch (error) {
     console.error('[거래 내역 조회 오류]', error)
     return NextResponse.json(

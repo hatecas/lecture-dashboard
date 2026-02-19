@@ -74,6 +74,19 @@ export default function CheckoutPage() {
     try {
       const orderId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 
+      // 결제 전에 주문 정보를 서버에 저장
+      await fetch('/api/payment/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          customerName: customerName.trim(),
+          customerPhone: customerPhone.replace(/-/g, '').trim(),
+          orderName: orderName.trim(),
+          amount,
+        }),
+      })
+
       await widgets.requestPayment({
         orderId,
         orderName: orderName.trim(),

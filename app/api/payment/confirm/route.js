@@ -1,4 +1,26 @@
 import { NextResponse } from 'next/server'
+import { readFile, writeFile, mkdir } from 'fs/promises'
+import { existsSync } from 'fs'
+import path from 'path'
+
+const DATA_DIR = path.join(process.cwd(), 'data')
+const ORDERS_FILE = path.join(DATA_DIR, 'orders.json')
+
+async function updateOrderStatus(orderId, paymentKey, status) {
+  try {
+    if (!existsSync(DATA_DIR)) await mkdir(DATA_DIR, { recursive: true })
+    let orders = {}
+    try { orders = JSON.parse(await readFile(ORDERS_FILE, 'utf-8')) } catch {}
+    if (orders[orderId]) {
+      orders[orderId].paymentKey = paymentKey
+      orders[orderId].status = status
+      orders[orderId].updatedAt = new Date().toISOString()
+      await writeFile(ORDERS_FILE, JSON.stringify(orders, null, 2), 'utf-8')
+    }
+  } catch (err) {
+    console.error('[주문 상태 업데이트 실패]', err)
+  }
+}
 
 // 토스페이먼츠 결제 승인 API
 export async function POST(request) {
@@ -43,8 +65,9 @@ export async function POST(request) {
       )
     }
 
-    // 결제 성공 - 여기서 DB 저장 등 후처리
-    // 예: await supabase.from('payments').insert({ ... })
+    // 결제 성공 - 주문 상태 업데이트
+    await updateOrderStatus(data.orderId, paymentKey, 'DONE')
+
     console.log('[결제 승인 성공]', {
       orderId: data.orderId,
       amount: data.totalAmount,
