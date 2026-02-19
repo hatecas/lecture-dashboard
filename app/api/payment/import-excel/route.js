@@ -56,13 +56,16 @@ export async function POST(request) {
     // 컬럼명 찾기
     const headers = Object.keys(rows[0])
     const orderIdCol = findColumn(headers, ['주문번호', 'orderId', 'order_id', '주문ID'])
-    const nameCol = findColumn(headers, ['구매자명', '주문자명', '고객명', '이름', 'customerName', '구매자이름'])
-    const phoneCol = findColumn(headers, ['구매자연락처', '구매자전화번호', '전화번호', '연락처', 'customerPhone', '휴대폰', '핸드폰번호', '구매자휴대폰번호'])
+    const nameCol = findColumn(headers, ['구매자', '구매자명', '주문자명', '고객명', '이름', 'customerName', '구매자이름'])
+    const phoneCol = findColumn(headers, ['구매자휴대폰번호', '구매자연락처', '구매자전화번호', '전화번호', '연락처', 'customerPhone', '휴대폰', '핸드폰번호', '휴대폰번호'])
     const emailCol = findColumn(headers, ['구매자이메일', '이메일', 'customerEmail', 'email', '구매자메일'])
     const productCol = findColumn(headers, ['상품명', '주문명', 'orderName', '상품'])
-    const amountCol = findColumn(headers, ['결제금액', '금액', '결제액', 'amount', '총결제금액'])
-    const statusCol = findColumn(headers, ['결제상태', '상태', 'status'])
+    const amountCol = findColumn(headers, ['결제금액', '결제 금액', '금액', '결제액', 'amount', '총결제금액'])
+    const statusCol = findColumn(headers, ['결제상태', '결제 상태', '상태', 'status'])
     const paymentKeyCol = findColumn(headers, ['paymentKey', '결제키', 'Payment Key'])
+
+    console.log('[엑셀 임포트] 감지된 컬럼:', headers.join(', '))
+    console.log('[엑셀 임포트] 매핑:', { orderIdCol, nameCol, phoneCol, emailCol, productCol, amountCol, paymentKeyCol })
 
     if (!orderIdCol) {
       return NextResponse.json(

@@ -27,6 +27,7 @@ export default function PaymentTransactionsPage() {
   const [editingTx, setEditingTx] = useState(null)
   const [editName, setEditName] = useState('')
   const [editPhone, setEditPhone] = useState('')
+  const [editEmail, setEditEmail] = useState('')
   const [editSaving, setEditSaving] = useState(false)
 
   // 엑셀 임포트
@@ -137,6 +138,7 @@ export default function PaymentTransactionsPage() {
     setEditingTx(tx)
     setEditName(tx.customerName || '')
     setEditPhone(tx.customerPhone || '')
+    setEditEmail(tx.customerEmail || '')
   }
 
   const saveCustomerInfo = async () => {
@@ -150,6 +152,7 @@ export default function PaymentTransactionsPage() {
           orderId: editingTx.orderId,
           customerName: editName.trim(),
           customerPhone: editPhone.replace(/-/g, '').trim(),
+          customerEmail: editEmail.trim(),
           orderName: editingTx.orderName || '',
           paymentKey: editingTx.paymentKey,
         }),
@@ -159,7 +162,7 @@ export default function PaymentTransactionsPage() {
       setTransactions((prev) =>
         prev.map((tx) =>
           tx.orderId === editingTx.orderId
-            ? { ...tx, customerName: editName.trim(), customerPhone: editPhone.replace(/-/g, '').trim() }
+            ? { ...tx, customerName: editName.trim(), customerPhone: editPhone.replace(/-/g, '').trim(), customerEmail: editEmail.trim() }
             : tx
         )
       )
@@ -349,6 +352,35 @@ export default function PaymentTransactionsPage() {
           </button>
         </div>
 
+        {/* 구매자 정보 안내 배너 */}
+        {hasSearched && !loading && transactions.length > 0 && !importResult && (
+          (() => {
+            const missingCount = transactions.filter(tx => !tx.customerName).length
+            if (missingCount === 0) return null
+            return (
+              <div style={{
+                background: 'rgba(251,191,36,0.08)',
+                border: '1px solid rgba(251,191,36,0.2)',
+                borderRadius: '12px',
+                padding: '14px 18px',
+                marginBottom: '12px',
+                fontSize: '13px',
+                color: '#fbbf24',
+                lineHeight: '1.7',
+              }}>
+                <div style={{ fontWeight: '700', marginBottom: '6px' }}>
+                  구매자 정보 {missingCount}건 누락
+                </div>
+                <div style={{ color: '#d4a017' }}>
+                  토스 API는 결제 요청 시 전달된 고객 정보만 반환합니다.
+                  <br />
+                  <strong>기존 플랫폼 또는 토스 대시보드</strong>에서 엑셀 내보내기 후 위의 <strong>&quot;토스 엑셀 임포트&quot;</strong> 버튼으로 업로드하면 주문번호 기준 자동 매칭됩니다.
+                </div>
+              </div>
+            )
+          })()
+        )}
+
         {/* 임포트 결과 */}
         {importResult && (
           <div style={{
@@ -531,7 +563,7 @@ export default function PaymentTransactionsPage() {
                 {/* 테이블 헤더 */}
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr 1.4fr 1.1fr 1fr 0.7fr',
+                  gridTemplateColumns: '0.9fr 1.4fr 1fr 0.9fr 0.7fr 0.7fr',
                   padding: '14px 20px',
                   borderBottom: '1px solid rgba(255,255,255,0.08)',
                   fontSize: '13px',
@@ -543,18 +575,22 @@ export default function PaymentTransactionsPage() {
                   <div>전화번호</div>
                   <div style={{ textAlign: 'right' }}>결제금액</div>
                   <div style={{ textAlign: 'center' }}>결제상태</div>
+                  <div style={{ textAlign: 'right' }}>결제일시</div>
                 </div>
 
                 {/* 거래 목록 */}
                 {filteredTransactions.map((tx, i) => {
                   const status = getStatusLabel(tx.status)
                   const amount = tx.totalAmount || tx.amount || 0
+                  const txDate = tx.transactionAt || tx.approvedAt || ''
+                  const dateStr = txDate ? new Date(txDate).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) : ''
+                  const timeStr = txDate ? new Date(txDate).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''
                   return (
                     <div
                       key={tx.transactionKey || i}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '1fr 1.4fr 1.1fr 1fr 0.7fr',
+                        gridTemplateColumns: '0.9fr 1.4fr 1fr 0.9fr 0.7fr 0.7fr',
                         padding: '13px 20px',
                         borderBottom: i < filteredTransactions.length - 1
                           ? '1px solid rgba(255,255,255,0.04)'
@@ -611,6 +647,12 @@ export default function PaymentTransactionsPage() {
                           {status.text}
                         </span>
                       </div>
+
+                      {/* 결제일시 */}
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '12px', color: '#94a3b8' }}>{dateStr}</div>
+                        <div style={{ fontSize: '11px', color: '#475569' }}>{timeStr}</div>
+                      </div>
                     </div>
                   )
                 })}
@@ -656,13 +698,24 @@ export default function PaymentTransactionsPage() {
                 />
               </div>
 
-              <div style={{ marginBottom: '24px' }}>
+              <div style={{ marginBottom: '14px' }}>
                 <label style={labelStyle}>전화번호</label>
                 <input
                   type="tel"
                   placeholder="010-1234-5678"
                   value={formatPhoneDisplay(editPhone)}
                   onChange={(e) => setEditPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                  style={{ ...inputStyle, width: '100%' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label style={labelStyle}>이메일</label>
+                <input
+                  type="email"
+                  placeholder="example@email.com"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
                   style={{ ...inputStyle, width: '100%' }}
                 />
               </div>

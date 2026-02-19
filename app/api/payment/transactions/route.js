@@ -123,29 +123,48 @@ export async function GET(request) {
 
             if (detailRes.ok) {
               const detail = await detailRes.json()
+
+              // [디버깅] 첫 번째 건의 전체 API 응답 로깅
+              if (i === 0 && batch.indexOf(batch.find(b => b.tx === tx)) === 0) {
+                console.log('\n===== [토스 상세 API 전체 응답] =====')
+                console.log(JSON.stringify(detail, null, 2))
+                console.log('===== [응답 끝] =====\n')
+              }
+
               const orderName = detail.orderName || tx.orderName || ''
 
-              // 상품명을 로컬에 캐싱
-              if (orderName) {
+              // 토스 API에서 고객 정보 추출 시도 (customerName, customerEmail, customerMobilePhone 필드)
+              const apiCustomerName = detail.customerName || detail.customer?.name || ''
+              const apiCustomerPhone = detail.customerMobilePhone || detail.customer?.mobilePhone || ''
+              const apiCustomerEmail = detail.customerEmail || detail.customer?.email || ''
+
+              // 상품명 + 고객정보 로컬에 캐싱
+              const shouldUpdate = orderName || apiCustomerName || apiCustomerPhone
+              if (shouldUpdate) {
                 localOrders[tx.orderId] = {
                   ...(localOrder || {}),
                   orderId: tx.orderId,
-                  orderName,
+                  ...(orderName && { orderName }),
                   paymentKey: tx.paymentKey,
                   amount: detail.totalAmount || tx.totalAmount || tx.amount || 0,
                   status: detail.status || tx.status || 'DONE',
+                  // API에서 고객 정보를 가져왔으면 캐싱 (로컬에 이미 있으면 로컬 우선)
+                  ...(apiCustomerName && !localOrder?.customerName && { customerName: apiCustomerName }),
+                  ...(apiCustomerPhone && !localOrder?.customerPhone && { customerPhone: apiCustomerPhone }),
+                  ...(apiCustomerEmail && !localOrder?.customerEmail && { customerEmail: apiCustomerEmail }),
                   ...(!localOrders[tx.orderId]?.createdAt && { createdAt: new Date().toISOString() }),
                   updatedAt: new Date().toISOString(),
                 }
                 ordersUpdated = true
               }
 
+              // 고객 정보: 로컬 캐시 > API 응답 > 빈 값
               return {
                 ...tx,
                 orderName,
-                customerName: localOrder?.customerName || '',
-                customerPhone: localOrder?.customerPhone || '',
-                customerEmail: localOrder?.customerEmail || '',
+                customerName: localOrder?.customerName || apiCustomerName || '',
+                customerPhone: localOrder?.customerPhone || apiCustomerPhone || '',
+                customerEmail: localOrder?.customerEmail || apiCustomerEmail || '',
               }
             }
           } catch (err) {
