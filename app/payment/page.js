@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 
 export default function PaymentTransactionsPage() {
   const [transactions, setTransactions] = useState([])
@@ -8,13 +8,20 @@ export default function PaymentTransactionsPage() {
   const [error, setError] = useState(null)
   const [hasSearched, setHasSearched] = useState(false)
 
-  // 기본값: 오늘 기준 최근 7일
+  // 기본값: 오늘 기준 최근 1개월
   const today = new Date()
-  const weekAgo = new Date(today)
-  weekAgo.setDate(weekAgo.getDate() - 7)
+  const monthAgo = new Date(today)
+  monthAgo.setMonth(monthAgo.getMonth() - 1)
 
-  const [startDate, setStartDate] = useState(weekAgo.toISOString().slice(0, 10))
+  const [startDate, setStartDate] = useState(monthAgo.toISOString().slice(0, 10))
   const [endDate, setEndDate] = useState(today.toISOString().slice(0, 10))
+
+  // 필터
+  const [filterMethod, setFilterMethod] = useState('전체')
+  const [filterStatus, setFilterStatus] = useState('전체')
+  const [filterAmountMin, setFilterAmountMin] = useState('')
+  const [filterAmountMax, setFilterAmountMax] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true)
@@ -44,26 +51,94 @@ export default function PaymentTransactionsPage() {
     }
   }, [startDate, endDate])
 
-  const getMethodLabel = (method) => {
-    const map = {
-      '카드': { bg: 'rgba(99,102,241,0.15)', color: '#a5b4fc' },
-      '계좌이체': { bg: 'rgba(34,197,94,0.15)', color: '#86efac' },
-      '가상계좌': { bg: 'rgba(251,191,36,0.15)', color: '#fcd34d' },
-      '휴대폰': { bg: 'rgba(236,72,153,0.15)', color: '#f9a8d4' },
-    }
-    return map[method] || { bg: 'rgba(255,255,255,0.08)', color: '#94a3b8' }
-  }
+  // 필터 + 검색 적용
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      // 결제수단 필터
+      if (filterMethod !== '전체' && tx.method !== filterMethod) return false
+
+      // 결제상태 필터
+      if (filterStatus !== '전체') {
+        const statusMap = {
+          '완료': 'DONE',
+          '취소': 'CANCELED',
+          '부분취소': 'PARTIAL_CANCELED',
+          '입금대기': 'WAITING_FOR_DEPOSIT',
+          '만료': 'EXPIRED',
+        }
+        if (tx.status !== statusMap[filterStatus]) return false
+      }
+
+      // 금액 필터
+      const amount = tx.totalAmount || tx.amount || 0
+      if (filterAmountMin && amount < Number(filterAmountMin)) return false
+      if (filterAmountMax && amount > Number(filterAmountMax)) return false
+
+      // 검색
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        const searchFields = [
+          tx.customerName,
+          tx.orderName,
+          tx.customerPhone,
+          tx.orderId,
+          tx.customerEmail,
+        ]
+        const match = searchFields.some((field) =>
+          field && String(field).toLowerCase().includes(q)
+        )
+        if (!match) return false
+      }
+
+      return true
+    })
+  }, [transactions, filterMethod, filterStatus, filterAmountMin, filterAmountMax, searchQuery])
 
   const getStatusLabel = (status) => {
     const map = {
-      DONE: { text: '완료', color: '#22c55e' },
-      CANCELED: { text: '취소', color: '#ef4444' },
-      WAITING_FOR_DEPOSIT: { text: '입금대기', color: '#fbbf24' },
-      PARTIAL_CANCELED: { text: '부분취소', color: '#f97316' },
-      ABORTED: { text: '중단', color: '#64748b' },
-      EXPIRED: { text: '만료', color: '#64748b' },
+      DONE: { text: '완료', bg: 'rgba(34,197,94,0.15)', color: '#22c55e' },
+      CANCELED: { text: '취소', bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
+      WAITING_FOR_DEPOSIT: { text: '입금대기', bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
+      PARTIAL_CANCELED: { text: '부분취소', bg: 'rgba(249,115,22,0.15)', color: '#f97316' },
+      ABORTED: { text: '중단', bg: 'rgba(100,116,139,0.15)', color: '#64748b' },
+      EXPIRED: { text: '만료', bg: 'rgba(100,116,139,0.15)', color: '#64748b' },
     }
-    return map[status] || { text: status, color: '#94a3b8' }
+    return map[status] || { text: status, bg: 'rgba(255,255,255,0.08)', color: '#94a3b8' }
+  }
+
+  // 합계 계산
+  const totalAmount = useMemo(() => {
+    return filteredTransactions
+      .filter((tx) => tx.status === 'DONE')
+      .reduce((sum, tx) => sum + (tx.totalAmount || tx.amount || 0), 0)
+  }, [filteredTransactions])
+
+  const inputStyle = {
+    padding: '9px 14px',
+    borderRadius: '8px',
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'rgba(255,255,255,0.05)',
+    color: '#e2e8f0',
+    fontSize: '13px',
+    outline: 'none',
+  }
+
+  const selectStyle = {
+    ...inputStyle,
+    cursor: 'pointer',
+    appearance: 'none',
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 10px center',
+    paddingRight: '30px',
+  }
+
+  const labelStyle = {
+    fontSize: '12px',
+    color: '#64748b',
+    display: 'block',
+    marginBottom: '5px',
+    fontWeight: '500',
   }
 
   return (
@@ -72,72 +147,62 @@ export default function PaymentTransactionsPage() {
       background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)',
       padding: '32px 20px',
     }}>
-      <div style={{ maxWidth: '960px', margin: '0 auto' }}>
+      <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
         {/* 헤더 */}
-        <div style={{ marginBottom: '28px' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>
-            결제 내역 조회
-          </h1>
-          <p style={{ fontSize: '14px', color: '#64748b' }}>
-            토스페이먼츠 거래 내역을 조회합니다
-          </p>
+        <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'end', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>
+              결제 내역
+            </h1>
+            <p style={{ fontSize: '14px', color: '#64748b' }}>
+              토스페이먼츠 거래 내역을 조회합니다
+            </p>
+          </div>
+          {hasSearched && !loading && (
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '13px', color: '#64748b' }}>완료 건 합계</div>
+              <div style={{ fontSize: '22px', fontWeight: '700', color: '#a5b4fc' }}>
+                {totalAmount.toLocaleString()}원
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* 검색 필터 */}
+        {/* 기간 + 조회 */}
         <div style={{
           background: 'rgba(255,255,255,0.03)',
           border: '1px solid rgba(255,255,255,0.1)',
           borderRadius: '16px',
           padding: '20px',
-          marginBottom: '20px',
+          marginBottom: '12px',
           display: 'flex',
           gap: '12px',
           alignItems: 'end',
           flexWrap: 'wrap',
         }}>
           <div>
-            <label style={{ fontSize: '13px', color: '#94a3b8', display: 'block', marginBottom: '6px' }}>
-              시작일
-            </label>
+            <label style={labelStyle}>시작일</label>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              style={{
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255,255,255,0.15)',
-                background: 'rgba(255,255,255,0.05)',
-                color: '#e2e8f0',
-                fontSize: '14px',
-                outline: 'none',
-              }}
+              style={inputStyle}
             />
           </div>
           <div>
-            <label style={{ fontSize: '13px', color: '#94a3b8', display: 'block', marginBottom: '6px' }}>
-              종료일
-            </label>
+            <label style={labelStyle}>종료일</label>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              style={{
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: '1px solid rgba(255,255,255,0.15)',
-                background: 'rgba(255,255,255,0.05)',
-                color: '#e2e8f0',
-                fontSize: '14px',
-                outline: 'none',
-              }}
+              style={inputStyle}
             />
           </div>
           <button
             onClick={fetchTransactions}
             disabled={loading}
             style={{
-              padding: '10px 28px',
+              padding: '9px 28px',
               borderRadius: '8px',
               border: 'none',
               background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
@@ -152,6 +217,107 @@ export default function PaymentTransactionsPage() {
             {loading ? '조회 중...' : '조회'}
           </button>
         </div>
+
+        {/* 필터 + 검색 */}
+        {hasSearched && (
+          <div style={{
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: '16px',
+            padding: '16px 20px',
+            marginBottom: '20px',
+            display: 'flex',
+            gap: '12px',
+            alignItems: 'end',
+            flexWrap: 'wrap',
+          }}>
+            {/* 검색 */}
+            <div style={{ flex: '1 1 220px' }}>
+              <label style={labelStyle}>검색</label>
+              <input
+                type="text"
+                placeholder="주문자명, 상품명, 전화번호, 주문번호..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ ...inputStyle, width: '100%' }}
+              />
+            </div>
+
+            {/* 결제수단 */}
+            <div>
+              <label style={labelStyle}>결제수단</label>
+              <select
+                value={filterMethod}
+                onChange={(e) => setFilterMethod(e.target.value)}
+                style={selectStyle}
+              >
+                {['전체', '카드', '계좌이체', '가상계좌', '휴대폰'].map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 결제상태 */}
+            <div>
+              <label style={labelStyle}>결제상태</label>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                style={selectStyle}
+              >
+                {['전체', '완료', '취소', '부분취소', '입금대기', '만료'].map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 금액 범위 */}
+            <div>
+              <label style={labelStyle}>최소금액</label>
+              <input
+                type="number"
+                placeholder="0"
+                value={filterAmountMin}
+                onChange={(e) => setFilterAmountMin(e.target.value)}
+                style={{ ...inputStyle, width: '110px' }}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>최대금액</label>
+              <input
+                type="number"
+                placeholder="무제한"
+                value={filterAmountMax}
+                onChange={(e) => setFilterAmountMax(e.target.value)}
+                style={{ ...inputStyle, width: '110px' }}
+              />
+            </div>
+
+            {/* 필터 초기화 */}
+            {(filterMethod !== '전체' || filterStatus !== '전체' || filterAmountMin || filterAmountMax || searchQuery) && (
+              <button
+                onClick={() => {
+                  setFilterMethod('전체')
+                  setFilterStatus('전체')
+                  setFilterAmountMin('')
+                  setFilterAmountMax('')
+                  setSearchQuery('')
+                }}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                초기화
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 에러 표시 */}
         {error && (
@@ -177,9 +343,12 @@ export default function PaymentTransactionsPage() {
               marginBottom: '12px',
             }}>
               총 <span style={{ color: '#e2e8f0', fontWeight: '600' }}>{transactions.length}</span>건
+              {filteredTransactions.length !== transactions.length && (
+                <span> (필터 적용: <span style={{ color: '#a5b4fc' }}>{filteredTransactions.length}</span>건)</span>
+              )}
             </div>
 
-            {transactions.length === 0 ? (
+            {filteredTransactions.length === 0 ? (
               <div style={{
                 background: 'rgba(255,255,255,0.03)',
                 border: '1px solid rgba(255,255,255,0.08)',
@@ -187,14 +356,11 @@ export default function PaymentTransactionsPage() {
                 padding: '60px 20px',
                 textAlign: 'center',
               }}>
-                <div style={{ fontSize: '40px', marginBottom: '12px' }}>
-                  —
-                </div>
+                <div style={{ fontSize: '40px', marginBottom: '12px' }}>—</div>
                 <p style={{ color: '#64748b', fontSize: '15px' }}>
-                  해당 기간에 거래 내역이 없습니다
-                </p>
-                <p style={{ color: '#475569', fontSize: '13px', marginTop: '8px' }}>
-                  테스트 결제를 먼저 진행하거나 기간을 변경해보세요
+                  {transactions.length === 0
+                    ? '해당 기간에 거래 내역이 없습니다'
+                    : '필터 조건에 맞는 결과가 없습니다'}
                 </p>
               </div>
             ) : (
@@ -207,32 +373,32 @@ export default function PaymentTransactionsPage() {
                 {/* 테이블 헤더 */}
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: '1.5fr 1fr 1fr 1fr 0.8fr',
+                  gridTemplateColumns: '1fr 1.4fr 1.1fr 1fr 0.7fr',
                   padding: '14px 20px',
                   borderBottom: '1px solid rgba(255,255,255,0.08)',
                   fontSize: '13px',
                   color: '#64748b',
                   fontWeight: '600',
                 }}>
-                  <div>주문명</div>
-                  <div>결제수단</div>
-                  <div style={{ textAlign: 'right' }}>금액</div>
-                  <div style={{ textAlign: 'center' }}>일시</div>
-                  <div style={{ textAlign: 'center' }}>상태</div>
+                  <div>주문자명</div>
+                  <div>상품명</div>
+                  <div>전화번호</div>
+                  <div style={{ textAlign: 'right' }}>결제금액</div>
+                  <div style={{ textAlign: 'center' }}>결제상태</div>
                 </div>
 
                 {/* 거래 목록 */}
-                {transactions.map((tx, i) => {
-                  const method = getMethodLabel(tx.method)
+                {filteredTransactions.map((tx, i) => {
                   const status = getStatusLabel(tx.status)
+                  const amount = tx.totalAmount || tx.amount || 0
                   return (
                     <div
                       key={tx.transactionKey || i}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '1.5fr 1fr 1fr 1fr 0.8fr',
-                        padding: '14px 20px',
-                        borderBottom: i < transactions.length - 1
+                        gridTemplateColumns: '1fr 1.4fr 1.1fr 1fr 0.7fr',
+                        padding: '13px 20px',
+                        borderBottom: i < filteredTransactions.length - 1
                           ? '1px solid rgba(255,255,255,0.04)'
                           : 'none',
                         alignItems: 'center',
@@ -241,54 +407,46 @@ export default function PaymentTransactionsPage() {
                       onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
                       onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
+                      {/* 주문자명 */}
+                      <div style={{ fontSize: '14px', color: '#e2e8f0', fontWeight: '500' }}>
+                        {tx.customerName || '-'}
+                      </div>
+
+                      {/* 상품명 */}
                       <div>
-                        <div style={{ fontSize: '14px', color: '#e2e8f0', fontWeight: '500' }}>
+                        <div style={{ fontSize: '14px', color: '#e2e8f0' }}>
                           {tx.orderName || '-'}
                         </div>
-                        <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }}>
+                        <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
                           {tx.orderId || ''}
                         </div>
                       </div>
-                      <div>
+
+                      {/* 전화번호 */}
+                      <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+                        {tx.customerPhone || '-'}
+                      </div>
+
+                      {/* 결제금액 */}
+                      <div style={{
+                        textAlign: 'right',
+                        fontSize: '14px',
+                        color: tx.status === 'CANCELED' ? '#ef4444' : '#e2e8f0',
+                        fontWeight: '600',
+                      }}>
+                        {tx.status === 'CANCELED' && '-'}{amount.toLocaleString()}원
+                      </div>
+
+                      {/* 결제상태 */}
+                      <div style={{ textAlign: 'center' }}>
                         <span style={{
                           display: 'inline-block',
                           padding: '4px 10px',
                           borderRadius: '6px',
-                          background: method.bg,
-                          color: method.color,
-                          fontSize: '12px',
-                          fontWeight: '500',
-                        }}>
-                          {tx.method || '-'}
-                        </span>
-                      </div>
-                      <div style={{
-                        textAlign: 'right',
-                        fontSize: '14px',
-                        color: '#e2e8f0',
-                        fontWeight: '600',
-                      }}>
-                        {(tx.totalAmount || tx.amount || 0).toLocaleString()}원
-                      </div>
-                      <div style={{
-                        textAlign: 'center',
-                        fontSize: '13px',
-                        color: '#94a3b8',
-                      }}>
-                        {tx.approvedAt
-                          ? new Date(tx.approvedAt).toLocaleString('ko-KR', {
-                              month: '2-digit',
-                              day: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
-                          : '-'}
-                      </div>
-                      <div style={{ textAlign: 'center' }}>
-                        <span style={{
+                          background: status.bg,
+                          color: status.color,
                           fontSize: '12px',
                           fontWeight: '600',
-                          color: status.color,
                         }}>
                           {status.text}
                         </span>

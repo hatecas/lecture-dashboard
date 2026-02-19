@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-// 토스페이먼츠 거래 내역 조회 API
+// 토스페이먼츠 거래 내역 조회 API (상세 정보 포함)
 export async function GET(request) {
   try {
     const secretKey = process.env.TOSS_SECRET_KEY
@@ -25,22 +25,20 @@ export async function GET(request) {
     }
 
     const encryptedSecretKey = Buffer.from(secretKey + ':').toString('base64')
+    const authHeader = `Basic ${encryptedSecretKey}`
 
-    const params = new URLSearchParams({
-      startDate,
-      endDate,
-      limit,
-    })
+    const params = new URLSearchParams({ startDate, endDate, limit })
     if (startingAfter) {
       params.set('startingAfter', startingAfter)
     }
 
+    // 1. 거래 목록 조회
     const response = await fetch(
       `https://api.tosspayments.com/v1/transactions?${params.toString()}`,
       {
         method: 'GET',
         headers: {
-          Authorization: `Basic ${encryptedSecretKey}`,
+          Authorization: authHeader,
           'Content-Type': 'application/json',
         },
       }
@@ -56,7 +54,41 @@ export async function GET(request) {
       )
     }
 
-    return NextResponse.json({ transactions: data })
+    // 2. 각 거래의 상세 정보 조회 (주문자명, 전화번호 등)
+    const enriched = await Promise.all(
+      (data || []).map(async (tx) => {
+        if (!tx.paymentKey) return tx
+
+        try {
+          const detailRes = await fetch(
+            `https://api.tosspayments.com/v1/payments/${tx.paymentKey}`,
+            {
+              method: 'GET',
+              headers: {
+                Authorization: authHeader,
+                'Content-Type': 'application/json',
+              },
+            }
+          )
+
+          if (detailRes.ok) {
+            const detail = await detailRes.json()
+            return {
+              ...tx,
+              customerName: detail.customer?.name || '',
+              customerPhone: detail.customer?.mobilePhone || '',
+              customerEmail: detail.customer?.email || '',
+            }
+          }
+        } catch (err) {
+          console.error(`[상세 조회 실패] paymentKey=${tx.paymentKey}`, err)
+        }
+
+        return tx
+      })
+    )
+
+    return NextResponse.json({ transactions: enriched })
   } catch (error) {
     console.error('[거래 내역 조회 오류]', error)
     return NextResponse.json(
