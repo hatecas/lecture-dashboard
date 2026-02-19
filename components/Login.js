@@ -121,7 +121,7 @@ export default function Login({ onLogin }) {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="admin"
+              placeholder="아이디"
               style={{
                 width: '100%',
                 padding: '14px 16px',
@@ -194,14 +194,6 @@ export default function Login({ onLogin }) {
           </button>
         </form>
 
-        <p style={{ 
-          textAlign: 'center', 
-          color: '#64748b', 
-          fontSize: '12px', 
-          marginTop: '20px' 
-        }}>
-          테스트: admin / 1234
-        </p>
       </div>
     </div>
   )
