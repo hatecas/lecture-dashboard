@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile, mkdir } from 'fs/promises'
+import { existsSync } from 'fs'
 import path from 'path'
 
-const ORDERS_FILE = path.join(process.cwd(), 'data', 'orders.json')
+const DATA_DIR = path.join(process.cwd(), 'data')
+const ORDERS_FILE = path.join(DATA_DIR, 'orders.json')
 
 async function readLocalOrders() {
   try {
@@ -11,6 +13,13 @@ async function readLocalOrders() {
   } catch {
     return {}
   }
+}
+
+async function writeLocalOrders(orders) {
+  if (!existsSync(DATA_DIR)) {
+    await mkdir(DATA_DIR, { recursive: true })
+  }
+  await writeFile(ORDERS_FILE, JSON.stringify(orders, null, 2), 'utf-8')
 }
 
 // 토스페이먼츠 거래 내역 조회 API (로컬 주문 데이터 머지)
@@ -71,20 +80,24 @@ export async function GET(request) {
     const localOrders = await readLocalOrders()
 
     // 3. 각 거래에 로컬 데이터 + 토스 상세 정보 머지
+    let ordersUpdated = false
+
     const enriched = await Promise.all(
       (data || []).map(async (tx) => {
-        // 로컬 주문 데이터가 있으면 우선 사용
         const localOrder = localOrders[tx.orderId]
-        if (localOrder) {
+        const hasLocalCustomerInfo = localOrder?.customerName && localOrder?.customerPhone
+
+        // 로컬에 고객정보가 완전히 있으면 바로 사용
+        if (hasLocalCustomerInfo) {
           return {
             ...tx,
             orderName: localOrder.orderName || tx.orderName || '',
-            customerName: localOrder.customerName || '',
-            customerPhone: localOrder.customerPhone || '',
+            customerName: localOrder.customerName,
+            customerPhone: localOrder.customerPhone,
           }
         }
 
-        // 로컬 데이터 없으면 토스 상세 API에서 조회 시도
+        // 로컬에 고객정보가 없거나 불완전하면 토스 상세 API에서 조회
         if (!tx.paymentKey) return tx
 
         try {
@@ -101,21 +114,62 @@ export async function GET(request) {
 
           if (detailRes.ok) {
             const detail = await detailRes.json()
+            const customerName = detail.customer?.name || detail.customerName || localOrder?.customerName || ''
+            const customerPhone = detail.customer?.mobilePhone || detail.customerMobilePhone || localOrder?.customerPhone || ''
+            const customerEmail = detail.customer?.email || detail.customerEmail || ''
+
+            // 가져온 고객정보를 로컬에 자동 저장 (캐싱)
+            if (customerName || customerPhone) {
+              localOrders[tx.orderId] = {
+                ...(localOrder || {}),
+                orderId: tx.orderId,
+                orderName: detail.orderName || tx.orderName || localOrder?.orderName || '',
+                customerName: customerName,
+                customerPhone: customerPhone.replace(/-/g, ''),
+                customerEmail: customerEmail,
+                paymentKey: tx.paymentKey,
+                amount: detail.totalAmount || tx.totalAmount || tx.amount || 0,
+                status: detail.status || tx.status || 'DONE',
+                createdAt: localOrder?.createdAt || new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }
+              ordersUpdated = true
+            }
+
             return {
               ...tx,
               orderName: detail.orderName || tx.orderName || '',
-              customerName: detail.customer?.name || detail.customerName || '',
-              customerPhone: detail.customer?.mobilePhone || detail.customerMobilePhone || '',
-              customerEmail: detail.customer?.email || detail.customerEmail || '',
+              customerName,
+              customerPhone,
+              customerEmail,
             }
           }
         } catch (err) {
           console.error(`[상세 조회 실패] paymentKey=${tx.paymentKey}`, err)
         }
 
+        // 토스 API도 실패하면 로컬에 있는 것이라도 사용
+        if (localOrder) {
+          return {
+            ...tx,
+            orderName: localOrder.orderName || tx.orderName || '',
+            customerName: localOrder.customerName || '',
+            customerPhone: localOrder.customerPhone || '',
+          }
+        }
+
         return tx
       })
     )
+
+    // 토스에서 가져온 고객정보를 로컬에 일괄 저장
+    if (ordersUpdated) {
+      try {
+        await writeLocalOrders(localOrders)
+      } catch (err) {
+        console.error('[로컬 주문 저장 실패]', err)
+      }
+    }
 
     return NextResponse.json({ transactions: enriched, localOrders })
   } catch (error) {

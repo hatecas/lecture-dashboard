@@ -470,8 +470,8 @@ export default function PaymentTransactionsPage() {
                       onClick={() => openEditModal(tx)}
                     >
                       {/* 주문자명 */}
-                      <div style={{ fontSize: '14px', color: tx.customerName ? '#e2e8f0' : '#6366f1', fontWeight: '500', cursor: 'pointer' }}>
-                        {tx.customerName || '+ 입력'}
+                      <div style={{ fontSize: '14px', color: tx.customerName ? '#e2e8f0' : '#475569', fontWeight: '500', cursor: 'pointer' }}>
+                        {tx.customerName || '미확인'}
                       </div>
 
                       {/* 상품명 */}
@@ -540,7 +540,7 @@ export default function PaymentTransactionsPage() {
               }}
             >
               <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>
-                고객 정보 입력
+                고객 정보 수정
               </h3>
               <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
                 {editingTx.orderName || editingTx.orderId}
