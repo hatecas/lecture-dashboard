@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { supabase } from '@/lib/supabase'
+import { sendNotification, getRecipientContact } from '@/lib/notification'
 
 // 업무 목록 조회
 export async function GET(request) {
@@ -90,11 +91,33 @@ export async function POST(request) {
 
     if (error) throw error
 
+    // 신규 업무 배정 알림 (비동기 - 응답 지연 방지)
+    sendTaskNotification(data).catch(e => console.error('알림 발송 실패:', e))
+
     return NextResponse.json({ task: data })
   } catch (error) {
     console.error('업무 생성 오류:', error)
     return NextResponse.json({ error: '업무 생성 실패' }, { status: 500 })
   }
+}
+
+// 신규 업무 배정 알림 발송
+async function sendTaskNotification(task) {
+  const recipient = await getRecipientContact(task.assignee_id)
+  if (!recipient || (!recipient.phone && !recipient.slack_email)) return
+
+  await sendNotification({
+    task: {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      deadline: task.deadline,
+      requester_name: task.requester?.name || '알 수 없음'
+    },
+    recipient,
+    triggerReason: 'new_task'
+  })
 }
 
 // 업무 수정 (상태 변경, 사유 작성 등)

@@ -140,6 +140,12 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
   const [taskPage, setTaskPage] = useState(1) // 업무 목록 페이지네이션
   const TASKS_PER_PAGE = 8
 
+  // 알림 설정 상태
+  const [showNotifSettings, setShowNotifSettings] = useState(false)
+  const [notifProfile, setNotifProfile] = useState({ phone: '', slack_email: '' })
+  const [notifSaving, setNotifSaving] = useState(false)
+  const [notifLoaded, setNotifLoaded] = useState(false)
+
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
   const [csInput, setCsInput] = useState('')
@@ -598,6 +604,39 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
     } catch (e) {
       console.error('업무 삭제 실패:', e)
     }
+  }
+
+  // 알림 설정 (연락처) 로드
+  const loadNotifProfile = async () => {
+    try {
+      const res = await fetch(`/api/profile?userId=${userId}`, { headers: getAuthHeaders() })
+      const data = await res.json()
+      if (res.ok && data.profile) {
+        setNotifProfile({ phone: data.profile.phone || '', slack_email: data.profile.slack_email || '' })
+        setNotifLoaded(true)
+      }
+    } catch (e) {
+      console.error('알림 설정 로드 실패:', e)
+    }
+  }
+
+  // 알림 설정 (연락처) 저장
+  const saveNotifProfile = async () => {
+    setNotifSaving(true)
+    try {
+      const res = await fetch('/api/profile', {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ userId, ...notifProfile })
+      })
+      if (!res.ok) throw new Error('저장 실패')
+      alert('알림 연락처가 저장되었습니다.')
+      setShowNotifSettings(false)
+    } catch (e) {
+      console.error('알림 설정 저장 실패:', e)
+      alert('저장에 실패했습니다.')
+    }
+    setNotifSaving(false)
   }
 
   // 마감일까지 남은 일수 계산
@@ -5505,24 +5544,45 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                 <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>업무 관리</h2>
                 <p style={{ fontSize: '13px', color: '#64748b' }}>팀원에게 업무를 요청하고 진행 상황을 추적합니다</p>
               </div>
-              <button
-                onClick={() => { setShowTaskModal(true); loadTaskUsers() }}
-                style={{
-                  padding: '10px 20px',
-                  background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                  border: 'none',
-                  borderRadius: '10px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                + 업무 요청
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => { if (!notifLoaded) loadNotifProfile(); setShowNotifSettings(true) }}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '10px',
+                    color: '#94a3b8',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  title="알림 설정"
+                >
+                  🔔 알림 설정
+                </button>
+                <button
+                  onClick={() => { setShowTaskModal(true); loadTaskUsers() }}
+                  style={{
+                    padding: '10px 20px',
+                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    border: 'none',
+                    borderRadius: '10px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  + 업무 요청
+                </button>
+              </div>
             </div>
 
             {/* 요약 카드 */}
@@ -6198,6 +6258,97 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
         </div>
       )}
 
+
+      {/* 알림 설정 모달 */}
+      {showNotifSettings && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 1000, padding: '20px'
+        }} onClick={() => setShowNotifSettings(false)}>
+          <div style={{
+            background: '#1a1f2e', borderRadius: '16px', padding: '28px',
+            width: '100%', maxWidth: '440px', border: '1px solid rgba(255,255,255,0.1)'
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '8px' }}>
+              🔔 알림 설정
+            </h3>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '24px' }}>
+              업무 알림을 받을 연락처를 설정하세요. 신규 업무 배정, 마감 임박, 긴급 업무 알림이 발송됩니다.
+            </p>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', fontWeight: '600', marginBottom: '6px' }}>
+                📱 휴대폰 번호 (SMS)
+              </label>
+              <input
+                type="tel"
+                placeholder="01012345678"
+                value={notifProfile.phone}
+                onChange={e => setNotifProfile(p => ({ ...p, phone: e.target.value }))}
+                style={{
+                  width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                  color: '#fff', fontSize: '14px', outline: 'none', boxSizing: 'border-box'
+                }}
+              />
+              <p style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>하이픈(-) 없이 숫자만 입력</p>
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', fontWeight: '600', marginBottom: '6px' }}>
+                💬 슬랙 이메일
+              </label>
+              <input
+                type="email"
+                placeholder="user@company.com"
+                value={notifProfile.slack_email}
+                onChange={e => setNotifProfile(p => ({ ...p, slack_email: e.target.value }))}
+                style={{
+                  width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                  color: '#fff', fontSize: '14px', outline: 'none', boxSizing: 'border-box'
+                }}
+              />
+              <p style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>슬랙 계정에 등록된 이메일</p>
+            </div>
+
+            <div style={{
+              background: 'rgba(99,102,241,0.08)', borderRadius: '10px', padding: '14px',
+              border: '1px solid rgba(99,102,241,0.15)', marginBottom: '24px'
+            }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: '#a5b4fc', marginBottom: '8px' }}>알림 발송 조건</div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
+                • 신규 업무 배정 시 즉시 알림<br/>
+                • 마감 1일 전 미완료 업무 알림<br/>
+                • 긴급 업무 미완료 시 매일 알림
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => setShowNotifSettings(false)}
+                style={{
+                  flex: 1, padding: '10px', background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px',
+                  color: '#94a3b8', fontSize: '14px', cursor: 'pointer'
+                }}
+              >취소</button>
+              <button
+                onClick={saveNotifProfile}
+                disabled={notifSaving}
+                style={{
+                  flex: 1, padding: '10px',
+                  background: notifSaving ? '#4b5563' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                  border: 'none', borderRadius: '8px',
+                  color: '#fff', fontSize: '14px', fontWeight: '600',
+                  cursor: notifSaving ? 'not-allowed' : 'pointer'
+                }}
+              >{notifSaving ? '저장 중...' : '저장'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 업무 생성 모달 */}
       {showTaskModal && (
