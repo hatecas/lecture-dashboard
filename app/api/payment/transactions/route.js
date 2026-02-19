@@ -75,11 +75,13 @@ export async function GET(request) {
             const detail = await detailRes.json()
             return {
               ...tx,
-              customerName: detail.customer?.name || '',
-              customerPhone: detail.customer?.mobilePhone || '',
-              customerEmail: detail.customer?.email || '',
+              orderName: detail.orderName || tx.orderName || '',
+              customerName: detail.customer?.name || detail.customerName || '',
+              customerPhone: detail.customer?.mobilePhone || detail.customerMobilePhone || '',
+              customerEmail: detail.customer?.email || detail.customerEmail || '',
             }
           }
+          console.log(`[상세 조회 실패] paymentKey=${tx.paymentKey} status=${detailRes.status}`)
         } catch (err) {
           console.error(`[상세 조회 실패] paymentKey=${tx.paymentKey}`, err)
         }

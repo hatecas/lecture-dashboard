@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 
 export default function PaymentTransactionsPage() {
   const [transactions, setTransactions] = useState([])
@@ -50,6 +50,15 @@ export default function PaymentTransactionsPage() {
       setLoading(false)
     }
   }, [startDate, endDate])
+
+  // 접속 즉시 자동 조회
+  const didMount = useRef(false)
+  useEffect(() => {
+    if (!didMount.current) {
+      didMount.current = true
+      fetchTransactions()
+    }
+  }, [fetchTransactions])
 
   // 필터 + 검색 적용
   const filteredTransactions = useMemo(() => {
