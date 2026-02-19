@@ -647,6 +647,13 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
     rejected: { label: '반려', color: '#ef4444', bg: 'rgba(239,68,68,0.15)' }
   }
 
+  // 로그인 시 업무 데이터 로드 (알림 뱃지용)
+  useEffect(() => {
+    if (userId) {
+      loadTasks()
+    }
+  }, [userId])
+
   useEffect(() => {
     loadSessions()
     loadInstructors()
