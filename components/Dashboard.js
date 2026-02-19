@@ -5915,7 +5915,7 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
         const urgentIncompleteCount = currentList.filter(t => t.priority === 'urgent' && t.status !== 'completed' && t.status !== 'rejected').length
 
         return (
-        <div style={{ padding: isMobile ? '16px' : '32px 48px', maxWidth: '1100px', margin: '0 auto' }}>
+        <div style={{ padding: isMobile ? '16px' : '32px 48px', maxWidth: '1100px', margin: '0 auto', width: '100%' }}>
           {/* 헤더 */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px', flexWrap: 'wrap', gap: '12px' }}>
             <div>
