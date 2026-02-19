@@ -561,17 +561,35 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      // 생성된 업무를 바로 목록에 추가 (서버 응답 데이터 활용)
+      if (data.task) {
+        setTaskSentList(prev => [data.task, ...prev])
+      } else {
+        loadTasks()
+      }
       setShowTaskModal(false)
       setNewTask({ assignee_id: '', title: '', description: '', priority: 'normal', deadline: '' })
-      loadTasks()
     } catch (e) {
       console.error('업무 생성 실패:', e)
     }
     setTaskCreating(false)
   }
 
-  // 업무 상태 변경
+  // 업무 상태 변경 (낙관적 업데이트)
   const updateTaskStatus = async (taskId, status, rejection_reason) => {
+    // 낙관적 업데이트: UI를 먼저 반영
+    const prevSent = [...taskSentList]
+    const prevReceived = [...taskReceivedList]
+    const updateList = (list) => list.map(t => t.id === taskId ? { ...t, status, ...(rejection_reason ? { rejection_reason } : {}) } : t)
+    setTaskSentList(updateList(taskSentList))
+    setTaskReceivedList(updateList(taskReceivedList))
+    setShowRejectModal(null)
+    setRejectReason('')
+    // 상세보기도 즉시 반영
+    if (taskDetailView?.id === taskId) {
+      setTaskDetailView(prev => prev ? { ...prev, status, ...(rejection_reason ? { rejection_reason } : {}) } : prev)
+    }
+
     try {
       const body = { id: taskId, status }
       if (rejection_reason) body.rejection_reason = rejection_reason
@@ -581,17 +599,24 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
         body: JSON.stringify(body)
       })
       if (!res.ok) throw new Error('업무 상태 변경 실패')
-      setShowRejectModal(null)
-      setRejectReason('')
-      loadTasks()
     } catch (e) {
+      // 실패 시 롤백
       console.error('업무 상태 변경 실패:', e)
+      setTaskSentList(prevSent)
+      setTaskReceivedList(prevReceived)
     }
   }
 
-  // 업무 삭제
+  // 업무 삭제 (낙관적 업데이트)
   const deleteTask = async (taskId) => {
     if (!confirm('이 업무를 삭제하시겠습니까?')) return
+    // 낙관적 업데이트: UI에서 먼저 제거
+    const prevSent = [...taskSentList]
+    const prevReceived = [...taskReceivedList]
+    setTaskSentList(taskSentList.filter(t => t.id !== taskId))
+    setTaskReceivedList(taskReceivedList.filter(t => t.id !== taskId))
+    setTaskDetailView(null)
+
     try {
       const res = await fetch('/api/tasks', {
         method: 'DELETE',
@@ -599,10 +624,11 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
         body: JSON.stringify({ id: taskId })
       })
       if (!res.ok) throw new Error('업무 삭제 실패')
-      setTaskDetailView(null)
-      loadTasks()
     } catch (e) {
+      // 실패 시 롤백
       console.error('업무 삭제 실패:', e)
+      setTaskSentList(prevSent)
+      setTaskReceivedList(prevReceived)
     }
   }
 
