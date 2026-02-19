@@ -9,6 +9,7 @@ import Dashboard from '@/components/Dashboard'
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [userName, setUserName] = useState('')
+  const [userId, setUserId] = useState(null)
   const [userPermissions, setUserPermissions] = useState({})
   const [loading, setLoading] = useState(true)
   const [showExpiryModal, setShowExpiryModal] = useState(false)
@@ -133,6 +134,7 @@ export default function Home() {
         if (valid) {
           setIsLoggedIn(true)
           setUserName(storedName || user?.name || '')
+          setUserId(user?.id || localStorage.getItem('userId'))
           // 권한 정보 복원
           try {
             const storedPermissions = localStorage.getItem('userPermissions')
@@ -174,6 +176,10 @@ export default function Home() {
     localStorage.setItem('isLoggedIn', 'true')
     localStorage.setItem('userName', name || '')
     localStorage.setItem('userPermissions', JSON.stringify(permissions))
+    if (permissions.userId) {
+      localStorage.setItem('userId', permissions.userId)
+      setUserId(permissions.userId)
+    }
     setUserName(name || '')
     setUserPermissions(permissions)
     setIsLoggedIn(true)
@@ -201,7 +207,9 @@ export default function Home() {
     localStorage.removeItem('userName')
     localStorage.removeItem('authToken')
     localStorage.removeItem('userPermissions')
+    localStorage.removeItem('userId')
     setUserName('')
+    setUserId(null)
     setUserPermissions({})
     setIsLoggedIn(false)
   }
@@ -225,7 +233,7 @@ export default function Home() {
 
   return (
     <>
-      <Dashboard onLogout={handleLogout} userName={userName} permissions={userPermissions} />
+      <Dashboard onLogout={handleLogout} userName={userName} userId={userId} permissions={userPermissions} />
 
       {/* 세션 만료 알림 모달 */}
       {showExpiryModal && (

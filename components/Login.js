@@ -63,7 +63,8 @@ export default function Login({ onLogin }) {
           body: JSON.stringify({ name: data.name || data.username })
         })
         onLogin(data.name || data.username, {
-          canUseInflow: data.can_use_inflow || false
+          canUseInflow: data.can_use_inflow || false,
+          userId: data.id
         })
       }
     } catch (err) {

@@ -5,7 +5,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
 
-export default function Dashboard({ onLogout, userName, permissions = {} }) {
+export default function Dashboard({ onLogout, userName, userId, permissions = {} }) {
   const [sessions, setSessions] = useState([])
   const [instructors, setInstructors] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
@@ -124,6 +124,19 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [deleteSheetIds, setDeleteSheetIds] = useState([]) // 삭제 선택된 시트 ID들
   const [deleteSheetLoading, setDeleteSheetLoading] = useState(false)
   const [permissionError, setPermissionError] = useState(null) // 권한 에러 시 서비스 계정 이메일
+
+  // 업무 요청 상태
+  const [taskTab, setTaskTab] = useState('received') // 'received' | 'sent'
+  const [taskSentList, setTaskSentList] = useState([])
+  const [taskReceivedList, setTaskReceivedList] = useState([])
+  const [taskLoading, setTaskLoading] = useState(false)
+  const [taskUsers, setTaskUsers] = useState([])
+  const [showTaskModal, setShowTaskModal] = useState(false)
+  const [newTask, setNewTask] = useState({ assignee_id: '', title: '', description: '', priority: 'normal', deadline: '' })
+  const [taskCreating, setTaskCreating] = useState(false)
+  const [showRejectModal, setShowRejectModal] = useState(null) // task id
+  const [rejectReason, setRejectReason] = useState('')
+  const [taskDetailView, setTaskDetailView] = useState(null) // 상세보기용
 
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
@@ -498,6 +511,138 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       'Content-Type': 'application/json',
       'Authorization': token ? `Bearer ${token}` : ''
     }
+  }
+
+  // 업무 목록 로드
+  const loadTasks = async () => {
+    if (!userId) return
+    setTaskLoading(true)
+    try {
+      const res = await fetch(`/api/tasks?userId=${userId}`, { headers: getAuthHeaders() })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setTaskSentList(data.sent || [])
+      setTaskReceivedList(data.received || [])
+    } catch (e) {
+      console.error('업무 로드 실패:', e)
+    }
+    setTaskLoading(false)
+  }
+
+  // 직원 목록 로드
+  const loadTaskUsers = async () => {
+    try {
+      const res = await fetch('/api/users', { headers: getAuthHeaders() })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setTaskUsers(data.users || [])
+    } catch (e) {
+      console.error('직원 목록 로드 실패:', e)
+    }
+  }
+
+  // 업무 생성
+  const createTask = async () => {
+    if (!newTask.assignee_id || !newTask.title || !newTask.deadline) return
+    setTaskCreating(true)
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ ...newTask, requester_id: userId })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setShowTaskModal(false)
+      setNewTask({ assignee_id: '', title: '', description: '', priority: 'normal', deadline: '' })
+      loadTasks()
+    } catch (e) {
+      console.error('업무 생성 실패:', e)
+    }
+    setTaskCreating(false)
+  }
+
+  // 업무 상태 변경
+  const updateTaskStatus = async (taskId, status, rejection_reason) => {
+    try {
+      const body = { id: taskId, status }
+      if (rejection_reason) body.rejection_reason = rejection_reason
+      const res = await fetch('/api/tasks', {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body)
+      })
+      if (!res.ok) throw new Error('업무 상태 변경 실패')
+      setShowRejectModal(null)
+      setRejectReason('')
+      loadTasks()
+    } catch (e) {
+      console.error('업무 상태 변경 실패:', e)
+    }
+  }
+
+  // 업무 삭제
+  const deleteTask = async (taskId) => {
+    if (!confirm('이 업무를 삭제하시겠습니까?')) return
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ id: taskId })
+      })
+      if (!res.ok) throw new Error('업무 삭제 실패')
+      setTaskDetailView(null)
+      loadTasks()
+    } catch (e) {
+      console.error('업무 삭제 실패:', e)
+    }
+  }
+
+  // 마감일까지 남은 일수 계산
+  const getDaysUntilDeadline = (deadline) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const deadlineDate = new Date(deadline)
+    deadlineDate.setHours(0, 0, 0, 0)
+    return Math.ceil((deadlineDate - today) / (1000 * 60 * 60 * 24))
+  }
+
+  // 마감일 상태 색상
+  const getDeadlineColor = (deadline, status) => {
+    if (status === 'completed') return '#10b981'
+    if (status === 'rejected') return '#64748b'
+    const days = getDaysUntilDeadline(deadline)
+    if (days < 0) return '#ef4444' // 기한 초과
+    if (days === 0) return '#f97316' // 오늘 마감
+    if (days <= 2) return '#fbbf24' // 2일 이내
+    return '#94a3b8'
+  }
+
+  // 마감일 텍스트
+  const getDeadlineText = (deadline, status) => {
+    if (status === 'completed') return '완료'
+    if (status === 'rejected') return '반려'
+    const days = getDaysUntilDeadline(deadline)
+    if (days < 0) return `${Math.abs(days)}일 초과`
+    if (days === 0) return '오늘 마감'
+    if (days === 1) return '내일 마감'
+    return `${days}일 남음`
+  }
+
+  // 우선순위 관련
+  const priorityConfig = {
+    urgent: { label: '긴급', color: '#ef4444', bg: 'rgba(239,68,68,0.15)' },
+    high: { label: '높음', color: '#f97316', bg: 'rgba(249,115,22,0.15)' },
+    normal: { label: '보통', color: '#6366f1', bg: 'rgba(99,102,241,0.15)' },
+    low: { label: '낮음', color: '#94a3b8', bg: 'rgba(148,163,184,0.15)' }
+  }
+
+  // 상태 관련
+  const statusConfig = {
+    pending: { label: '대기중', color: '#fbbf24', bg: 'rgba(251,191,36,0.15)' },
+    in_progress: { label: '진행중', color: '#6366f1', bg: 'rgba(99,102,241,0.15)' },
+    completed: { label: '완료', color: '#10b981', bg: 'rgba(16,185,129,0.15)' },
+    rejected: { label: '반려', color: '#ef4444', bg: 'rgba(239,68,68,0.15)' }
   }
 
   useEffect(() => {
@@ -1612,6 +1757,54 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 top: sidebarCollapsed ? '6px' : 'auto',
                 right: sidebarCollapsed ? '6px' : 'auto'
               }} />
+            )}
+          </button>
+
+          {/* 업무 관리 메뉴 */}
+          <button onClick={() => {
+            setCurrentTab('tasks');
+            if(isMobile) setMobileMenuOpen(false);
+            loadTasks();
+            loadTaskUsers();
+          }} style={{
+            width: '100%',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+            background: currentTab === 'tasks' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'tasks' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'tasks' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'tasks' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
+            alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+            gap: sidebarCollapsed ? '4px' : '10px',
+            transition: 'all 0.3s ease',
+            position: 'relative'
+          }} title="업무 관리">
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📋</span>
+            {sidebarCollapsed ? '업무' : '업무'}
+            {taskReceivedList.filter(t => t.status === 'pending' || (t.status !== 'completed' && t.status !== 'rejected' && getDaysUntilDeadline(t.deadline) <= 1)).length > 0 && (
+              <span style={{
+                background: '#ef4444',
+                color: '#fff',
+                fontSize: '11px',
+                fontWeight: '700',
+                borderRadius: '10px',
+                padding: '1px 6px',
+                minWidth: '18px',
+                textAlign: 'center',
+                marginLeft: sidebarCollapsed ? '0' : 'auto',
+                position: sidebarCollapsed ? 'absolute' : 'static',
+                top: sidebarCollapsed ? '4px' : 'auto',
+                right: sidebarCollapsed ? '4px' : 'auto'
+              }}>
+                {taskReceivedList.filter(t => t.status === 'pending' || (t.status !== 'completed' && t.status !== 'rejected' && getDaysUntilDeadline(t.deadline) <= 1)).length}
+              </span>
             )}
           </button>
         </div>
@@ -5619,6 +5812,549 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             {/* 현재 파일명 */}
             <div style={{ fontSize: '13px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 20px' }}>
               {uploadProgress.fileName}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== 업무 관리 탭 ==================== */}
+      {currentTab === 'tasks' && (
+        <div style={{ padding: isMobile ? '16px' : '32px', maxWidth: '1200px' }}>
+          {/* 헤더 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', color: '#fff', marginBottom: '4px' }}>업무 관리</h2>
+              <p style={{ fontSize: '13px', color: '#64748b' }}>팀원에게 업무를 요청하고 진행 상황을 추적합니다</p>
+            </div>
+            <button
+              onClick={() => { setShowTaskModal(true); loadTaskUsers() }}
+              style={{
+                padding: '10px 20px',
+                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                border: 'none',
+                borderRadius: '10px',
+                color: '#fff',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              + 업무 요청
+            </button>
+          </div>
+
+          {/* 탭 전환: 요청받은 / 요청한 */}
+          <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', padding: '4px' }}>
+            <button
+              onClick={() => setTaskTab('received')}
+              style={{
+                flex: 1,
+                padding: '10px 16px',
+                background: taskTab === 'received' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                border: 'none',
+                borderRadius: '8px',
+                color: taskTab === 'received' ? '#a5b4fc' : '#94a3b8',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              요청받은 업무 ({taskReceivedList.length})
+            </button>
+            <button
+              onClick={() => setTaskTab('sent')}
+              style={{
+                flex: 1,
+                padding: '10px 16px',
+                background: taskTab === 'sent' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                border: 'none',
+                borderRadius: '8px',
+                color: taskTab === 'sent' ? '#a5b4fc' : '#94a3b8',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              요청한 업무 ({taskSentList.length})
+            </button>
+          </div>
+
+          {/* 업무 목록 */}
+          {taskLoading ? (
+            <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>업무를 불러오는 중...</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {(taskTab === 'received' ? taskReceivedList : taskSentList).length === 0 ? (
+                <div style={{
+                  textAlign: 'center',
+                  padding: '60px 20px',
+                  background: 'rgba(255,255,255,0.03)',
+                  borderRadius: '16px',
+                  border: '1px solid rgba(255,255,255,0.06)'
+                }}>
+                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>📋</div>
+                  <div style={{ color: '#64748b', fontSize: '15px' }}>
+                    {taskTab === 'received' ? '요청받은 업무가 없습니다' : '요청한 업무가 없습니다'}
+                  </div>
+                </div>
+              ) : (
+                (taskTab === 'received' ? taskReceivedList : taskSentList).map(task => {
+                  const deadlineColor = getDeadlineColor(task.deadline, task.status)
+                  const deadlineText = getDeadlineText(task.deadline, task.status)
+                  const daysLeft = getDaysUntilDeadline(task.deadline)
+                  const isUrgent = task.status !== 'completed' && task.status !== 'rejected' && daysLeft <= 1
+                  const priority = priorityConfig[task.priority] || priorityConfig.normal
+                  const statusInfo = statusConfig[task.status] || statusConfig.pending
+
+                  return (
+                    <div
+                      key={task.id}
+                      onClick={() => setTaskDetailView(task)}
+                      style={{
+                        background: isUrgent ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.03)',
+                        borderRadius: '14px',
+                        padding: '16px 20px',
+                        border: isUrgent ? '1px solid rgba(239,68,68,0.2)' : '1px solid rgba(255,255,255,0.06)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '16px'
+                      }}
+                    >
+                      {/* 우선순위 인디케이터 */}
+                      <div style={{
+                        width: '4px',
+                        height: '40px',
+                        borderRadius: '4px',
+                        background: priority.color,
+                        flexShrink: 0
+                      }} />
+
+                      {/* 메인 콘텐츠 */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '15px', fontWeight: '600', color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {task.title}
+                          </span>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            color: statusInfo.color,
+                            background: statusInfo.bg,
+                            padding: '2px 8px',
+                            borderRadius: '6px'
+                          }}>
+                            {statusInfo.label}
+                          </span>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            color: priority.color,
+                            background: priority.bg,
+                            padding: '2px 8px',
+                            borderRadius: '6px'
+                          }}>
+                            {priority.label}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: '#64748b' }}>
+                          <span>{taskTab === 'received' ? `요청자: ${task.requester?.name || task.requester?.username || '?'}` : `담당자: ${task.assignee?.name || task.assignee?.username || '?'}`}</span>
+                          <span>|</span>
+                          <span>{new Date(task.created_at).toLocaleDateString('ko-KR')}</span>
+                        </div>
+                      </div>
+
+                      {/* 마감일 */}
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{
+                          fontSize: '13px',
+                          fontWeight: '700',
+                          color: deadlineColor,
+                          marginBottom: '2px'
+                        }}>
+                          {deadlineText}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>
+                          {task.deadline}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 업무 생성 모달 */}
+      {showTaskModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 2000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }} onClick={() => setShowTaskModal(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%)',
+            borderRadius: '20px',
+            padding: '28px',
+            width: '480px',
+            maxWidth: '90vw',
+            border: '1px solid rgba(255,255,255,0.1)',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '20px' }}>업무 요청</h3>
+
+            {/* 담당자 */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>담당자 *</label>
+              <select
+                value={newTask.assignee_id}
+                onChange={e => setNewTask({ ...newTask, assignee_id: e.target.value })}
+                style={{
+                  width: '100%', padding: '12px 14px',
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '10px', color: '#fff', fontSize: '14px', outline: 'none'
+                }}
+              >
+                <option value="" style={{ background: '#1e1e2e' }}>담당자 선택</option>
+                {taskUsers.filter(u => u.id !== userId).map(u => (
+                  <option key={u.id} value={u.id} style={{ background: '#1e1e2e' }}>{u.name || u.username}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 제목 */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>업무 제목 *</label>
+              <input
+                value={newTask.title}
+                onChange={e => setNewTask({ ...newTask, title: e.target.value })}
+                placeholder="업무 제목을 입력하세요"
+                style={{
+                  width: '100%', padding: '12px 14px',
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '10px', color: '#fff', fontSize: '14px', outline: 'none'
+                }}
+              />
+            </div>
+
+            {/* 설명 */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>상세 내용</label>
+              <textarea
+                value={newTask.description}
+                onChange={e => setNewTask({ ...newTask, description: e.target.value })}
+                placeholder="업무 내용을 상세히 작성해주세요"
+                rows={4}
+                style={{
+                  width: '100%', padding: '12px 14px',
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '10px', color: '#fff', fontSize: '14px', outline: 'none',
+                  resize: 'vertical', lineHeight: '1.6'
+                }}
+              />
+            </div>
+
+            {/* 우선순위 + 마감일 */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>우선순위</label>
+                <select
+                  value={newTask.priority}
+                  onChange={e => setNewTask({ ...newTask, priority: e.target.value })}
+                  style={{
+                    width: '100%', padding: '12px 14px',
+                    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '10px', color: '#fff', fontSize: '14px', outline: 'none'
+                  }}
+                >
+                  <option value="low" style={{ background: '#1e1e2e' }}>낮음</option>
+                  <option value="normal" style={{ background: '#1e1e2e' }}>보통</option>
+                  <option value="high" style={{ background: '#1e1e2e' }}>높음</option>
+                  <option value="urgent" style={{ background: '#1e1e2e' }}>긴급</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>마감일 *</label>
+                <input
+                  type="date"
+                  value={newTask.deadline}
+                  onChange={e => setNewTask({ ...newTask, deadline: e.target.value })}
+                  style={{
+                    width: '100%', padding: '12px 14px',
+                    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '10px', color: '#fff', fontSize: '14px', outline: 'none'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* 버튼 */}
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => setShowTaskModal(false)}
+                style={{
+                  flex: 1, padding: '12px',
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '10px', color: '#94a3b8', fontSize: '14px', fontWeight: '600', cursor: 'pointer'
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={createTask}
+                disabled={taskCreating || !newTask.assignee_id || !newTask.title || !newTask.deadline}
+                style={{
+                  flex: 1, padding: '12px',
+                  background: taskCreating || !newTask.assignee_id || !newTask.title || !newTask.deadline
+                    ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                  border: 'none',
+                  borderRadius: '10px', color: '#fff', fontSize: '14px', fontWeight: '600',
+                  cursor: taskCreating || !newTask.assignee_id || !newTask.title || !newTask.deadline ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {taskCreating ? '요청 중...' : '업무 요청'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 업무 상세 보기 모달 */}
+      {taskDetailView && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 2000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }} onClick={() => setTaskDetailView(null)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%)',
+            borderRadius: '20px',
+            padding: '28px',
+            width: '520px',
+            maxWidth: '90vw',
+            border: '1px solid rgba(255,255,255,0.1)',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            {(() => {
+              const task = taskDetailView
+              const priority = priorityConfig[task.priority] || priorityConfig.normal
+              const statusInfo = statusConfig[task.status] || statusConfig.pending
+              const deadlineColor = getDeadlineColor(task.deadline, task.status)
+              const deadlineText = getDeadlineText(task.deadline, task.status)
+              const isMyTask = task.assignee_id === userId // 내가 담당자인지
+              const isRequester = task.requester_id === userId // 내가 요청자인지
+
+              return (
+                <>
+                  {/* 헤더 */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                    <div style={{ flex: 1 }}>
+                      <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '10px', lineHeight: '1.4' }}>
+                        {task.title}
+                      </h3>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '600', color: statusInfo.color, background: statusInfo.bg, padding: '3px 10px', borderRadius: '6px' }}>
+                          {statusInfo.label}
+                        </span>
+                        <span style={{ fontSize: '11px', fontWeight: '600', color: priority.color, background: priority.bg, padding: '3px 10px', borderRadius: '6px' }}>
+                          {priority.label}
+                        </span>
+                        <span style={{ fontSize: '11px', fontWeight: '700', color: deadlineColor, background: `${deadlineColor}20`, padding: '3px 10px', borderRadius: '6px' }}>
+                          {deadlineText}
+                        </span>
+                      </div>
+                    </div>
+                    <button onClick={() => setTaskDetailView(null)} style={{
+                      background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px',
+                      width: '32px', height: '32px', color: '#94a3b8', fontSize: '18px', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>x</button>
+                  </div>
+
+                  {/* 정보 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '12px' }}>
+                      <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>요청자</div>
+                      <div style={{ fontSize: '14px', color: '#e2e8f0', fontWeight: '600' }}>{task.requester?.name || task.requester?.username || '?'}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '12px' }}>
+                      <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>담당자</div>
+                      <div style={{ fontSize: '14px', color: '#e2e8f0', fontWeight: '600' }}>{task.assignee?.name || task.assignee?.username || '?'}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '12px' }}>
+                      <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>요청일</div>
+                      <div style={{ fontSize: '14px', color: '#e2e8f0' }}>{new Date(task.created_at).toLocaleDateString('ko-KR')}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '12px' }}>
+                      <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>마감일</div>
+                      <div style={{ fontSize: '14px', color: deadlineColor, fontWeight: '600' }}>{task.deadline}</div>
+                    </div>
+                  </div>
+
+                  {/* 상세 내용 */}
+                  {task.description && (
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px', marginBottom: '16px' }}>
+                      <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>상세 내용</div>
+                      <div style={{ fontSize: '14px', color: '#e2e8f0', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>{task.description}</div>
+                    </div>
+                  )}
+
+                  {/* 반려 사유 */}
+                  {task.rejection_reason && (
+                    <div style={{
+                      background: 'rgba(239,68,68,0.08)', borderRadius: '10px', padding: '16px', marginBottom: '16px',
+                      border: '1px solid rgba(239,68,68,0.15)'
+                    }}>
+                      <div style={{ fontSize: '11px', color: '#f87171', marginBottom: '8px', fontWeight: '600' }}>반려 / 미완료 사유</div>
+                      <div style={{ fontSize: '14px', color: '#fca5a5', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>{task.rejection_reason}</div>
+                    </div>
+                  )}
+
+                  {/* 완료일 */}
+                  {task.completed_at && (
+                    <div style={{ fontSize: '12px', color: '#10b981', marginBottom: '16px' }}>
+                      완료일: {new Date(task.completed_at).toLocaleString('ko-KR')}
+                    </div>
+                  )}
+
+                  {/* 액션 버튼들 */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {/* 담당자 액션 */}
+                    {isMyTask && task.status === 'pending' && (
+                      <>
+                        <button
+                          onClick={() => { updateTaskStatus(task.id, 'in_progress'); setTaskDetailView({ ...task, status: 'in_progress' }) }}
+                          style={{
+                            flex: 1, padding: '10px',
+                            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                            border: 'none', borderRadius: '10px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer'
+                          }}
+                        >
+                          수락 (진행 시작)
+                        </button>
+                        <button
+                          onClick={() => setShowRejectModal(task.id)}
+                          style={{
+                            flex: 1, padding: '10px',
+                            background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+                            borderRadius: '10px', color: '#f87171', fontSize: '13px', fontWeight: '600', cursor: 'pointer'
+                          }}
+                        >
+                          반려
+                        </button>
+                      </>
+                    )}
+                    {isMyTask && task.status === 'in_progress' && (
+                      <>
+                        <button
+                          onClick={() => { updateTaskStatus(task.id, 'completed'); setTaskDetailView({ ...task, status: 'completed' }) }}
+                          style={{
+                            flex: 1, padding: '10px',
+                            background: 'linear-gradient(135deg, #10b981, #059669)',
+                            border: 'none', borderRadius: '10px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer'
+                          }}
+                        >
+                          완료 처리
+                        </button>
+                        <button
+                          onClick={() => setShowRejectModal(task.id)}
+                          style={{
+                            flex: 1, padding: '10px',
+                            background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+                            borderRadius: '10px', color: '#f87171', fontSize: '13px', fontWeight: '600', cursor: 'pointer'
+                          }}
+                        >
+                          못했음 (사유 작성)
+                        </button>
+                      </>
+                    )}
+                    {/* 요청자는 삭제 가능 */}
+                    {isRequester && (
+                      <button
+                        onClick={() => deleteTask(task.id)}
+                        style={{
+                          padding: '10px 16px',
+                          background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '10px', color: '#94a3b8', fontSize: '13px', fontWeight: '600', cursor: 'pointer'
+                        }}
+                      >
+                        삭제
+                      </button>
+                    )}
+                  </div>
+                </>
+              )
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* 반려/미완료 사유 입력 모달 */}
+      {showRejectModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 3000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }} onClick={() => { setShowRejectModal(null); setRejectReason('') }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%)',
+            borderRadius: '20px',
+            padding: '28px',
+            width: '420px',
+            maxWidth: '90vw',
+            border: '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '16px' }}>사유 작성</h3>
+            <p style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px' }}>
+              반려 또는 미완료 사유를 작성해주세요.
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              placeholder="사유를 입력하세요..."
+              rows={4}
+              style={{
+                width: '100%', padding: '12px 14px',
+                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '10px', color: '#fff', fontSize: '14px', outline: 'none',
+                resize: 'vertical', lineHeight: '1.6', marginBottom: '16px'
+              }}
+            />
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => { setShowRejectModal(null); setRejectReason('') }}
+                style={{
+                  flex: 1, padding: '12px',
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '10px', color: '#94a3b8', fontSize: '14px', fontWeight: '600', cursor: 'pointer'
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={() => {
+                  if (!rejectReason.trim()) return
+                  updateTaskStatus(showRejectModal, 'rejected', rejectReason)
+                  setTaskDetailView(null)
+                }}
+                disabled={!rejectReason.trim()}
+                style={{
+                  flex: 1, padding: '12px',
+                  background: !rejectReason.trim() ? '#4c4c6d' : 'linear-gradient(135deg, #ef4444, #dc2626)',
+                  border: 'none',
+                  borderRadius: '10px', color: '#fff', fontSize: '14px', fontWeight: '600',
+                  cursor: !rejectReason.trim() ? 'not-allowed' : 'pointer'
+                }}
+              >
+                확인
+              </button>
             </div>
           </div>
         </div>
