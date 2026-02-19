@@ -29,7 +29,7 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
   const [timelineInterval, setTimelineInterval] = useState(10) // 5, 10, 15, 20, 30분
   const [rankingMetric, setRankingMetric] = useState('revenue')
   const [rankingOrder, setRankingOrder] = useState('desc')
-  const [cohortChartInstructor, setCohortChartInstructor] = useState('all')
+  const [showCohortChart, setShowCohortChart] = useState(false)
   const [compareLeftId, setCompareLeftId] = useState(null)
   const [compareRightId, setCompareRightId] = useState(null)
   const [compareLeftInstructor, setCompareLeftInstructor] = useState('')
@@ -1688,29 +1688,6 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
             대조
           </button>
 
-          <button onClick={() => { setCurrentTab('cohort-chart'); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'cohort-chart' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'cohort-chart' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'cohort-chart' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'cohort-chart' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="기수별 차트">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📊</span>
-            기수별 차트
-          </button>
-
           {/* 구분선 */}
           <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '12px 16px' }} />
 
@@ -2138,9 +2115,32 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
           {currentTab === 'dashboard' && (
             <>
               {/* 지표 카드 - 글래스모피즘 + 그라데이션 테두리 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <span style={{ fontSize: '15px', fontWeight: '600', color: 'rgba(255,255,255,0.7)' }}>핵심 지표</span>
-                <HelpTooltip text={"선택한 강사/기수의 핵심 성과지표입니다.\n시트 동기화 데이터 또는 직접 입력한 데이터를 표시합니다."} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '15px', fontWeight: '600', color: 'rgba(255,255,255,0.7)' }}>핵심 지표</span>
+                  <HelpTooltip text={"선택한 강사/기수의 핵심 성과지표입니다.\n시트 동기화 데이터 또는 직접 입력한 데이터를 표시합니다."} />
+                </div>
+                <button
+                  onClick={() => setShowCohortChart(true)}
+                  style={{
+                    padding: '7px 14px',
+                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 15px rgba(99,102,241,0.4)' }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' }}
+                >
+                  📊 기수별 차트
+                </button>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px', marginBottom: '24px' }}>
                 <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(96,165,250,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(167,139,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
@@ -2613,209 +2613,6 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                     <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>데이터가 없습니다. 시트 동기화를 먼저 진행해주세요.</div>
                   )}
                 </div>
-              </>
-            )
-          })()}
-
-          {/* 기수별 차트 탭 */}
-          {currentTab === 'cohort-chart' && (() => {
-            // 강사 목록 추출 (allSheetData의 name에서 기수번호 제거)
-            const instructorMap = {}
-            allSheetData.forEach(d => {
-              const match = d.name.match(/^(.+?)\s*\d+기$/)
-              if (match) {
-                const instructor = match[1].trim()
-                if (!instructorMap[instructor]) instructorMap[instructor] = []
-                instructorMap[instructor].push(d)
-              }
-            })
-            const instructorNames = Object.keys(instructorMap).sort((a, b) => a.localeCompare(b, 'ko'))
-
-            // 차트 데이터 준비
-            let chartData = []
-            if (cohortChartInstructor === 'all') {
-              chartData = allSheetData
-                .filter(d => d.name.match(/\d+기$/))
-                .sort((a, b) => {
-                  const aNum = parseInt(a.name.match(/(\d+)기$/)?.[1] || '0')
-                  const bNum = parseInt(b.name.match(/(\d+)기$/)?.[1] || '0')
-                  return aNum - bNum
-                })
-                .map(d => ({
-                  ...d,
-                  label: d.name,
-                  shortLabel: d.name.replace(/\s+/g, ' ')
-                }))
-            } else {
-              chartData = (instructorMap[cohortChartInstructor] || [])
-                .sort((a, b) => {
-                  const aNum = parseInt(a.name.match(/(\d+)기$/)?.[1] || '0')
-                  const bNum = parseInt(b.name.match(/(\d+)기$/)?.[1] || '0')
-                  return aNum - bNum
-                })
-                .map(d => {
-                  const num = d.name.match(/(\d+)기$/)?.[1] || ''
-                  return { ...d, label: `${num}기`, shortLabel: `${num}기` }
-                })
-            }
-
-            const CHART_CONFIGS = [
-              {
-                key: 'revenue',
-                title: '매출',
-                color: '#60a5fa',
-                gradient: ['#3b82f6', '#1d4ed8'],
-                format: v => formatMoney(v),
-                yFormat: v => v >= 100000000 ? (v / 100000000).toFixed(1) + '억' : Math.round(v / 10000) + '만'
-              },
-              {
-                key: 'kakaoRoomDb',
-                title: 'DB 수 (카톡방)',
-                color: '#34d399',
-                gradient: ['#10b981', '#059669'],
-                format: v => formatNumber(v) + '명',
-                yFormat: v => formatNumber(v)
-              },
-              {
-                key: 'conversionCost',
-                title: '전환단가',
-                color: '#f59e0b',
-                gradient: ['#f59e0b', '#d97706'],
-                format: v => formatNumber(v) + '원',
-                yFormat: v => v >= 10000 ? Math.round(v / 10000) + '만' : formatNumber(v)
-              },
-              {
-                key: 'operatingProfit',
-                title: '영업이익',
-                color: '#a78bfa',
-                gradient: ['#8b5cf6', '#6d28d9'],
-                format: v => formatMoney(v),
-                yFormat: v => v >= 100000000 ? (v / 100000000).toFixed(1) + '억' : Math.round(v / 10000) + '만'
-              }
-            ]
-
-            const CustomTooltip = ({ active, payload, label, config }) => {
-              if (!active || !payload?.length) return null
-              return (
-                <div style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', padding: '12px 16px', backdropFilter: 'blur(12px)' }}>
-                  <div style={{ fontSize: '13px', fontWeight: '600', color: '#fff', marginBottom: '6px' }}>{label}</div>
-                  {payload.map((p, i) => (
-                    <div key={i} style={{ fontSize: '12px', color: p.color || config.color, fontWeight: '600' }}>
-                      {config.title}: {config.format(p.value)}
-                    </div>
-                  ))}
-                </div>
-              )
-            }
-
-            return (
-              <>
-                <div style={{ marginBottom: '24px' }}>
-                  <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    📊 기수별 차트
-                  </h2>
-
-                  {/* 강사 필터 */}
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '24px' }}>
-                    <button
-                      onClick={() => setCohortChartInstructor('all')}
-                      style={{
-                        padding: '8px 16px',
-                        background: cohortChartInstructor === 'all' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
-                        border: cohortChartInstructor === 'all' ? 'none' : '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer',
-                        fontWeight: cohortChartInstructor === 'all' ? '600' : '400'
-                      }}
-                    >
-                      전체
-                    </button>
-                    {instructorNames.map(name => (
-                      <button
-                        key={name}
-                        onClick={() => setCohortChartInstructor(name)}
-                        style={{
-                          padding: '8px 16px',
-                          background: cohortChartInstructor === name ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.05)',
-                          border: cohortChartInstructor === name ? 'none' : '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer',
-                          fontWeight: cohortChartInstructor === name ? '600' : '400'
-                        }}
-                      >
-                        {name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {chartData.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>데이터가 없습니다. 시트 동기화를 먼저 진행해주세요.</div>
-                ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px' }}>
-                    {CHART_CONFIGS.map(config => {
-                      const filteredData = chartData.filter(d => d[config.key] !== undefined && d[config.key] !== null && d[config.key] !== 0)
-                      const maxVal = filteredData.length > 0 ? Math.max(...filteredData.map(d => Math.abs(d[config.key]))) : 0
-
-                      return (
-                        <div key={config.key} style={{
-                          background: 'rgba(255,255,255,0.03)',
-                          border: '1px solid rgba(255,255,255,0.08)',
-                          borderRadius: '16px',
-                          padding: '24px',
-                          transition: 'all 0.3s ease'
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                            <h3 style={{ fontSize: '16px', fontWeight: '600', color: config.color, margin: 0 }}>{config.title}</h3>
-                            {filteredData.length > 0 && (
-                              <span style={{ fontSize: '12px', color: '#64748b' }}>
-                                평균: {config.format(Math.round(filteredData.reduce((sum, d) => sum + (d[config.key] || 0), 0) / filteredData.length))}
-                              </span>
-                            )}
-                          </div>
-                          {filteredData.length === 0 ? (
-                            <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: '13px' }}>데이터 없음</div>
-                          ) : (
-                            <ResponsiveContainer width="100%" height={280}>
-                              <BarChart data={filteredData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-                                <defs>
-                                  <linearGradient id={`grad-${config.key}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={config.gradient[0]} stopOpacity={0.9} />
-                                    <stop offset="100%" stopColor={config.gradient[1]} stopOpacity={0.6} />
-                                  </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                                <XAxis
-                                  dataKey="shortLabel"
-                                  tick={{ fill: '#94a3b8', fontSize: 11 }}
-                                  axisLine={{ stroke: 'rgba(255,255,255,0.1)' }}
-                                  tickLine={false}
-                                  angle={cohortChartInstructor === 'all' ? -45 : 0}
-                                  textAnchor={cohortChartInstructor === 'all' ? 'end' : 'middle'}
-                                  height={cohortChartInstructor === 'all' ? 60 : 30}
-                                  interval={0}
-                                />
-                                <YAxis
-                                  tickFormatter={config.yFormat}
-                                  tick={{ fill: '#64748b', fontSize: 11 }}
-                                  axisLine={false}
-                                  tickLine={false}
-                                  width={50}
-                                />
-                                <Tooltip content={<CustomTooltip config={config} />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
-                                <Bar dataKey={config.key} fill={`url(#grad-${config.key})`} radius={[4, 4, 0, 0]} maxBarSize={48}>
-                                  {filteredData.map((entry, idx) => {
-                                    const val = entry[config.key] || 0
-                                    const isMax = val === maxVal && maxVal > 0
-                                    return <Cell key={idx} fill={isMax ? config.gradient[0] : `url(#grad-${config.key})`} stroke={isMax ? config.color : 'none'} strokeWidth={isMax ? 2 : 0} />
-                                  })}
-                                </Bar>
-                              </BarChart>
-                            </ResponsiveContainer>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
               </>
             )
           })()}
@@ -6948,6 +6745,161 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
         </div>
       )}
 
+      {/* 기수별 차트 모달 */}
+      {showCohortChart && (() => {
+        const cohortData = allSheetData
+          .filter(d => {
+            const match = d.name.match(/^(.+?)\s*\d+기$/)
+            return match && match[1].trim() === selectedInstructor
+          })
+          .sort((a, b) => {
+            const aNum = parseInt(a.name.match(/(\d+)기$/)?.[1] || '0')
+            const bNum = parseInt(b.name.match(/(\d+)기$/)?.[1] || '0')
+            return aNum - bNum
+          })
+          .map(d => {
+            const num = d.name.match(/(\d+)기$/)?.[1] || ''
+            return { ...d, label: `${num}기` }
+          })
+
+        const CHARTS = [
+          {
+            key: 'revenue', title: '매출', color: '#60a5fa',
+            gradient: ['#3b82f6', '#1d4ed8'],
+            format: v => formatMoney(v),
+            yFormat: v => v >= 100000000 ? (v / 100000000).toFixed(1) + '억' : Math.round(v / 10000) + '만'
+          },
+          {
+            key: 'kakaoRoomDb', title: 'DB 수 (카톡방)', color: '#34d399',
+            gradient: ['#10b981', '#059669'],
+            format: v => formatNumber(v) + '명',
+            yFormat: v => formatNumber(v)
+          },
+          {
+            key: 'conversionCost', title: '전환단가 (낮을수록 좋음)', color: '#f59e0b',
+            gradient: ['#f59e0b', '#d97706'],
+            format: v => formatNumber(v) + '원',
+            yFormat: v => v >= 10000 ? Math.round(v / 10000) + '만' : formatNumber(v),
+            lowerIsBetter: true
+          },
+          {
+            key: 'operatingProfit', title: '영업이익', color: '#a78bfa',
+            gradient: ['#8b5cf6', '#6d28d9'],
+            format: v => formatMoney(v),
+            yFormat: v => v >= 100000000 ? (v / 100000000).toFixed(1) + '억' : Math.round(v / 10000) + '만'
+          }
+        ]
+
+        const CohortTooltip = ({ active, payload, label, chartConfig }) => {
+          if (!active || !payload?.length) return null
+          return (
+            <div style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', padding: '12px 16px', backdropFilter: 'blur(12px)' }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: '#fff', marginBottom: '6px' }}>{label}</div>
+              <div style={{ fontSize: '13px', color: chartConfig.color, fontWeight: '600' }}>
+                {chartConfig.format(payload[0]?.value)}
+              </div>
+            </div>
+          )
+        }
+
+        return (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.6)', zIndex: 50000,
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            backdropFilter: 'blur(4px)'
+          }} onClick={() => setShowCohortChart(false)}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: 'linear-gradient(135deg, #1e293b 0%, #1a1f35 100%)',
+              borderRadius: '20px', width: '900px', maxWidth: '95vw', maxHeight: '90vh',
+              border: '1px solid rgba(255,255,255,0.1)',
+              boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+              overflow: 'hidden', display: 'flex', flexDirection: 'column'
+            }}>
+              {/* 헤더 */}
+              <div style={{
+                padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', flexShrink: 0
+              }}>
+                <div>
+                  <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>📊 {selectedInstructor} - 기수별 차트</div>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginTop: '2px' }}>{cohortData.length}개 기수 데이터</div>
+                </div>
+                <button
+                  onClick={() => setShowCohortChart(false)}
+                  style={{
+                    background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%',
+                    width: '32px', height: '32px', color: '#fff', fontSize: '18px',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* 차트 영역 */}
+              <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
+                {cohortData.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>
+                    {selectedInstructor} 강사의 기수별 데이터가 없습니다.
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px' }}>
+                    {CHARTS.map(config => {
+                      const filtered = cohortData.filter(d => d[config.key] !== undefined && d[config.key] !== null && d[config.key] !== 0)
+                      if (filtered.length === 0) return (
+                        <div key={config.key} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '24px' }}>
+                          <h3 style={{ fontSize: '15px', fontWeight: '600', color: config.color, margin: '0 0 16px 0' }}>{config.title}</h3>
+                          <div style={{ height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: '13px' }}>데이터 없음</div>
+                        </div>
+                      )
+                      const vals = filtered.map(d => d[config.key])
+                      const maxVal = Math.max(...vals)
+                      const minVal = Math.min(...vals)
+                      const avg = Math.round(vals.reduce((s, v) => s + v, 0) / vals.length)
+                      const bestVal = config.lowerIsBetter ? minVal : maxVal
+
+                      return (
+                        <div key={config.key} style={{
+                          background: 'rgba(255,255,255,0.03)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: '16px', padding: '24px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h3 style={{ fontSize: '15px', fontWeight: '600', color: config.color, margin: 0 }}>{config.title}</h3>
+                            <span style={{ fontSize: '11px', color: '#64748b' }}>평균: {config.format(avg)}</span>
+                          </div>
+                          <ResponsiveContainer width="100%" height={220}>
+                            <BarChart data={filtered} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                              <defs>
+                                <linearGradient id={`cg-${config.key}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor={config.gradient[0]} stopOpacity={0.9} />
+                                  <stop offset="100%" stopColor={config.gradient[1]} stopOpacity={0.6} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                              <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} interval={0} />
+                              <YAxis tickFormatter={config.yFormat} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} width={50} />
+                              <Tooltip content={<CohortTooltip chartConfig={config} />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
+                              <Bar dataKey={config.key} fill={`url(#cg-${config.key})`} radius={[4, 4, 0, 0]} maxBarSize={52}>
+                                {filtered.map((entry, idx) => {
+                                  const val = entry[config.key]
+                                  const isBest = val === bestVal
+                                  return <Cell key={idx} fill={isBest ? config.gradient[0] : `url(#cg-${config.key})`} stroke={isBest ? config.color : 'none'} strokeWidth={isBest ? 2 : 0} />
+                                })}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
     </div>
   )
