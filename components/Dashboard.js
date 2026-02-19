@@ -5478,6 +5478,297 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
           )}
         </div>
 
+        {/* ==================== 업무 관리 탭 ==================== */}
+        {currentTab === 'tasks' && (() => {
+          const currentList = taskTab === 'received' ? taskReceivedList : taskSentList
+          const sortedList = [...currentList].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          const totalPages = Math.max(1, Math.ceil(sortedList.length / TASKS_PER_PAGE))
+          const safePage = Math.min(taskPage, totalPages)
+          const pagedList = sortedList.slice((safePage - 1) * TASKS_PER_PAGE, safePage * TASKS_PER_PAGE)
+          const pendingCount = taskReceivedList.filter(t => t.status === 'pending').length
+          const inProgressCount = currentList.filter(t => t.status === 'in_progress').length
+          const completedCount = currentList.filter(t => t.status === 'completed').length
+          const urgentIncompleteCount = currentList.filter(t => t.priority === 'urgent' && t.status !== 'completed' && t.status !== 'rejected').length
+
+          return (
+          <div style={{ padding: isMobile ? '16px' : '0 32px 32px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+            {/* 헤더 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>업무 관리</h2>
+                <p style={{ fontSize: '13px', color: '#64748b' }}>팀원에게 업무를 요청하고 진행 상황을 추적합니다</p>
+              </div>
+              <button
+                onClick={() => { setShowTaskModal(true); loadTaskUsers() }}
+                style={{
+                  padding: '10px 20px',
+                  background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                  border: 'none',
+                  borderRadius: '10px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                + 업무 요청
+              </button>
+            </div>
+
+            {/* 요약 카드 */}
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
+              <div style={{ background: 'rgba(251,191,36,0.08)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(251,191,36,0.15)' }}>
+                <div style={{ fontSize: '11px', color: '#fbbf24', fontWeight: '600', marginBottom: '6px' }}>대기중</div>
+                <div style={{ fontSize: '24px', fontWeight: '700', color: '#fbbf24' }}>{pendingCount}</div>
+              </div>
+              <div style={{ background: 'rgba(99,102,241,0.08)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(99,102,241,0.15)' }}>
+                <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: '600', marginBottom: '6px' }}>진행중</div>
+                <div style={{ fontSize: '24px', fontWeight: '700', color: '#a5b4fc' }}>{inProgressCount}</div>
+              </div>
+              <div style={{ background: 'rgba(16,185,129,0.08)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(16,185,129,0.15)' }}>
+                <div style={{ fontSize: '11px', color: '#10b981', fontWeight: '600', marginBottom: '6px' }}>완료</div>
+                <div style={{ fontSize: '24px', fontWeight: '700', color: '#10b981' }}>{completedCount}</div>
+              </div>
+              <div style={{ background: urgentIncompleteCount > 0 ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.05)', borderRadius: '12px', padding: '16px', border: urgentIncompleteCount > 0 ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(239,68,68,0.1)' }}>
+                <div style={{ fontSize: '11px', color: '#f87171', fontWeight: '600', marginBottom: '6px' }}>긴급 미완료</div>
+                <div style={{ fontSize: '24px', fontWeight: '700', color: urgentIncompleteCount > 0 ? '#ef4444' : '#f87171' }}>{urgentIncompleteCount}</div>
+              </div>
+            </div>
+
+            {/* 탭 전환: 요청받은 / 요청한 */}
+            <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', padding: '4px' }}>
+              <button
+                onClick={() => { setTaskTab('received'); setTaskPage(1) }}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  background: taskTab === 'received' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: taskTab === 'received' ? '#a5b4fc' : '#94a3b8',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                요청받은 업무 ({taskReceivedList.length})
+              </button>
+              <button
+                onClick={() => { setTaskTab('sent'); setTaskPage(1) }}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  background: taskTab === 'sent' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: taskTab === 'sent' ? '#a5b4fc' : '#94a3b8',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                요청한 업무 ({taskSentList.length})
+              </button>
+            </div>
+
+            {/* 정렬 안내 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '12px', color: '#64748b' }}>최신순 정렬 · {sortedList.length}건</span>
+              {totalPages > 1 && <span style={{ fontSize: '12px', color: '#64748b' }}>{safePage} / {totalPages} 페이지</span>}
+            </div>
+
+            {/* 업무 목록 */}
+            {taskLoading ? (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>업무를 불러오는 중...</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {sortedList.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '60px 20px',
+                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.06)'
+                  }}>
+                    <div style={{ fontSize: '40px', marginBottom: '12px' }}>📋</div>
+                    <div style={{ color: '#64748b', fontSize: '15px' }}>
+                      {taskTab === 'received' ? '요청받은 업무가 없습니다' : '요청한 업무가 없습니다'}
+                    </div>
+                  </div>
+                ) : (
+                  pagedList.map(task => {
+                    const deadlineColor = getDeadlineColor(task.deadline, task.status)
+                    const deadlineText = getDeadlineText(task.deadline, task.status)
+                    const daysLeft = getDaysUntilDeadline(task.deadline)
+                    const isUrgent = task.status !== 'completed' && task.status !== 'rejected' && daysLeft <= 1
+                    const priority = priorityConfig[task.priority] || priorityConfig.normal
+                    const statusInfo = statusConfig[task.status] || statusConfig.pending
+                    const isDanger = task.priority === 'urgent' && task.status !== 'completed' && task.status !== 'rejected'
+
+                    return (
+                      <div
+                        key={task.id}
+                        onClick={() => setTaskDetailView(task)}
+                        style={{
+                          background: isDanger
+                            ? 'linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(239,68,68,0.08) 100%)'
+                            : isUrgent ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.03)',
+                          borderRadius: '14px',
+                          padding: '18px 24px',
+                          border: isDanger
+                            ? '1px solid rgba(239,68,68,0.4)'
+                            : isUrgent ? '1px solid rgba(239,68,68,0.2)' : '1px solid rgba(255,255,255,0.06)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '16px',
+                          boxShadow: isDanger ? '0 0 20px rgba(239,68,68,0.1)' : 'none',
+                          position: 'relative',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        {isDanger && (
+                          <div style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: '4px',
+                            background: 'linear-gradient(180deg, #ef4444, #dc2626)',
+                            boxShadow: '0 0 12px rgba(239,68,68,0.5)'
+                          }} />
+                        )}
+
+                        <div style={{
+                          width: '4px',
+                          height: '40px',
+                          borderRadius: '4px',
+                          background: priority.color,
+                          flexShrink: 0,
+                          marginLeft: isDanger ? '8px' : 0
+                        }} />
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                            {isDanger && <span style={{ fontSize: '14px' }}>🚨</span>}
+                            <span style={{ fontSize: '15px', fontWeight: '600', color: isDanger ? '#fca5a5' : '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {task.title}
+                            </span>
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              color: statusInfo.color,
+                              background: statusInfo.bg,
+                              padding: '2px 8px',
+                              borderRadius: '6px'
+                            }}>
+                              {statusInfo.label}
+                            </span>
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              color: priority.color,
+                              background: priority.bg,
+                              padding: '2px 8px',
+                              borderRadius: '6px'
+                            }}>
+                              {priority.label}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: '#64748b' }}>
+                            <span>{taskTab === 'received' ? `요청자: ${task.requester?.name || task.requester?.username || '?'}` : `담당자: ${task.assignee?.name || task.assignee?.username || '?'}`}</span>
+                            <span>|</span>
+                            <span>{new Date(task.created_at).toLocaleDateString('ko-KR')}</span>
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <div style={{
+                            fontSize: '13px',
+                            fontWeight: '700',
+                            color: deadlineColor,
+                            marginBottom: '2px'
+                          }}>
+                            {deadlineText}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>
+                            {task.deadline}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
+
+            {/* 페이지네이션 */}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', marginTop: '24px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setTaskPage(p => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  style={{
+                    padding: '8px 14px',
+                    background: safePage <= 1 ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '8px',
+                    color: safePage <= 1 ? '#4a5568' : '#94a3b8',
+                    fontSize: '13px',
+                    cursor: safePage <= 1 ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  ← 이전
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                  <button
+                    key={page}
+                    onClick={() => setTaskPage(page)}
+                    style={{
+                      padding: '8px 12px',
+                      background: page === safePage ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.03)',
+                      border: page === safePage ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '8px',
+                      color: page === safePage ? '#a5b4fc' : '#94a3b8',
+                      fontSize: '13px',
+                      fontWeight: page === safePage ? '700' : '400',
+                      cursor: 'pointer',
+                      minWidth: '36px',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setTaskPage(p => Math.min(totalPages, p + 1))}
+                  disabled={safePage >= totalPages}
+                  style={{
+                    padding: '8px 14px',
+                    background: safePage >= totalPages ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '8px',
+                    color: safePage >= totalPages ? '#4a5568' : '#94a3b8',
+                    fontSize: '13px',
+                    cursor: safePage >= totalPages ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  다음 →
+                </button>
+              </div>
+            )}
+          </div>
+          )
+        })()}
+
         {/* 푸터 */}
         <div style={{
           padding: '20px 32px',
@@ -5900,303 +6191,6 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
         </div>
       )}
 
-      {/* ==================== 업무 관리 탭 ==================== */}
-      {currentTab === 'tasks' && (() => {
-        const currentList = taskTab === 'received' ? taskReceivedList : taskSentList
-        // 최신순 정렬
-        const sortedList = [...currentList].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-        const totalPages = Math.max(1, Math.ceil(sortedList.length / TASKS_PER_PAGE))
-        const safePage = Math.min(taskPage, totalPages)
-        const pagedList = sortedList.slice((safePage - 1) * TASKS_PER_PAGE, safePage * TASKS_PER_PAGE)
-        // 통계
-        const pendingCount = taskReceivedList.filter(t => t.status === 'pending').length
-        const inProgressCount = currentList.filter(t => t.status === 'in_progress').length
-        const completedCount = currentList.filter(t => t.status === 'completed').length
-        const urgentIncompleteCount = currentList.filter(t => t.priority === 'urgent' && t.status !== 'completed' && t.status !== 'rejected').length
-
-        return (
-        <div style={{ padding: isMobile ? '16px' : '32px 48px', maxWidth: '1100px', margin: '0 auto', width: '100%' }}>
-          {/* 헤더 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px', flexWrap: 'wrap', gap: '12px' }}>
-            <div>
-              <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>업무 관리</h2>
-              <p style={{ fontSize: '13px', color: '#64748b' }}>팀원에게 업무를 요청하고 진행 상황을 추적합니다</p>
-            </div>
-            <button
-              onClick={() => { setShowTaskModal(true); loadTaskUsers() }}
-              style={{
-                padding: '10px 20px',
-                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                border: 'none',
-                borderRadius: '10px',
-                color: '#fff',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              + 업무 요청
-            </button>
-          </div>
-
-          {/* 요약 카드 */}
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
-            <div style={{ background: 'rgba(251,191,36,0.08)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(251,191,36,0.15)' }}>
-              <div style={{ fontSize: '11px', color: '#fbbf24', fontWeight: '600', marginBottom: '6px' }}>대기중</div>
-              <div style={{ fontSize: '24px', fontWeight: '700', color: '#fbbf24' }}>{pendingCount}</div>
-            </div>
-            <div style={{ background: 'rgba(99,102,241,0.08)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(99,102,241,0.15)' }}>
-              <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: '600', marginBottom: '6px' }}>진행중</div>
-              <div style={{ fontSize: '24px', fontWeight: '700', color: '#a5b4fc' }}>{inProgressCount}</div>
-            </div>
-            <div style={{ background: 'rgba(16,185,129,0.08)', borderRadius: '12px', padding: '16px', border: '1px solid rgba(16,185,129,0.15)' }}>
-              <div style={{ fontSize: '11px', color: '#10b981', fontWeight: '600', marginBottom: '6px' }}>완료</div>
-              <div style={{ fontSize: '24px', fontWeight: '700', color: '#10b981' }}>{completedCount}</div>
-            </div>
-            <div style={{ background: urgentIncompleteCount > 0 ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.05)', borderRadius: '12px', padding: '16px', border: urgentIncompleteCount > 0 ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(239,68,68,0.1)' }}>
-              <div style={{ fontSize: '11px', color: '#f87171', fontWeight: '600', marginBottom: '6px' }}>긴급 미완료</div>
-              <div style={{ fontSize: '24px', fontWeight: '700', color: urgentIncompleteCount > 0 ? '#ef4444' : '#f87171' }}>{urgentIncompleteCount}</div>
-            </div>
-          </div>
-
-          {/* 탭 전환: 요청받은 / 요청한 */}
-          <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', padding: '4px' }}>
-            <button
-              onClick={() => { setTaskTab('received'); setTaskPage(1) }}
-              style={{
-                flex: 1,
-                padding: '10px 16px',
-                background: taskTab === 'received' ? 'rgba(99,102,241,0.3)' : 'transparent',
-                border: 'none',
-                borderRadius: '8px',
-                color: taskTab === 'received' ? '#a5b4fc' : '#94a3b8',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              요청받은 업무 ({taskReceivedList.length})
-            </button>
-            <button
-              onClick={() => { setTaskTab('sent'); setTaskPage(1) }}
-              style={{
-                flex: 1,
-                padding: '10px 16px',
-                background: taskTab === 'sent' ? 'rgba(99,102,241,0.3)' : 'transparent',
-                border: 'none',
-                borderRadius: '8px',
-                color: taskTab === 'sent' ? '#a5b4fc' : '#94a3b8',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              요청한 업무 ({taskSentList.length})
-            </button>
-          </div>
-
-          {/* 정렬 안내 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '12px', color: '#64748b' }}>최신순 정렬 · {sortedList.length}건</span>
-            {totalPages > 1 && <span style={{ fontSize: '12px', color: '#64748b' }}>{safePage} / {totalPages} 페이지</span>}
-          </div>
-
-          {/* 업무 목록 */}
-          {taskLoading ? (
-            <div style={{ textAlign: 'center', padding: '60px 0', color: '#64748b' }}>업무를 불러오는 중...</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {sortedList.length === 0 ? (
-                <div style={{
-                  textAlign: 'center',
-                  padding: '60px 20px',
-                  background: 'rgba(255,255,255,0.03)',
-                  borderRadius: '16px',
-                  border: '1px solid rgba(255,255,255,0.06)'
-                }}>
-                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>📋</div>
-                  <div style={{ color: '#64748b', fontSize: '15px' }}>
-                    {taskTab === 'received' ? '요청받은 업무가 없습니다' : '요청한 업무가 없습니다'}
-                  </div>
-                </div>
-              ) : (
-                pagedList.map(task => {
-                  const deadlineColor = getDeadlineColor(task.deadline, task.status)
-                  const deadlineText = getDeadlineText(task.deadline, task.status)
-                  const daysLeft = getDaysUntilDeadline(task.deadline)
-                  const isUrgent = task.status !== 'completed' && task.status !== 'rejected' && daysLeft <= 1
-                  const priority = priorityConfig[task.priority] || priorityConfig.normal
-                  const statusInfo = statusConfig[task.status] || statusConfig.pending
-                  // 긴급 우선순위 + 미완료 = 위험 강조
-                  const isDanger = task.priority === 'urgent' && task.status !== 'completed' && task.status !== 'rejected'
-
-                  return (
-                    <div
-                      key={task.id}
-                      onClick={() => setTaskDetailView(task)}
-                      style={{
-                        background: isDanger
-                          ? 'linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(239,68,68,0.08) 100%)'
-                          : isUrgent ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.03)',
-                        borderRadius: '14px',
-                        padding: '18px 24px',
-                        border: isDanger
-                          ? '1px solid rgba(239,68,68,0.4)'
-                          : isUrgent ? '1px solid rgba(239,68,68,0.2)' : '1px solid rgba(255,255,255,0.06)',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '16px',
-                        boxShadow: isDanger ? '0 0 20px rgba(239,68,68,0.1)' : 'none',
-                        position: 'relative',
-                        overflow: 'hidden'
-                      }}
-                    >
-                      {/* 긴급 미완료 왼쪽 글로우 효과 */}
-                      {isDanger && (
-                        <div style={{
-                          position: 'absolute',
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: '4px',
-                          background: 'linear-gradient(180deg, #ef4444, #dc2626)',
-                          boxShadow: '0 0 12px rgba(239,68,68,0.5)'
-                        }} />
-                      )}
-
-                      {/* 우선순위 인디케이터 */}
-                      <div style={{
-                        width: '4px',
-                        height: '40px',
-                        borderRadius: '4px',
-                        background: priority.color,
-                        flexShrink: 0,
-                        marginLeft: isDanger ? '8px' : 0
-                      }} />
-
-                      {/* 메인 콘텐츠 */}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
-                          {isDanger && <span style={{ fontSize: '14px' }}>🚨</span>}
-                          <span style={{ fontSize: '15px', fontWeight: '600', color: isDanger ? '#fca5a5' : '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {task.title}
-                          </span>
-                          <span style={{
-                            fontSize: '11px',
-                            fontWeight: '600',
-                            color: statusInfo.color,
-                            background: statusInfo.bg,
-                            padding: '2px 8px',
-                            borderRadius: '6px'
-                          }}>
-                            {statusInfo.label}
-                          </span>
-                          <span style={{
-                            fontSize: '11px',
-                            fontWeight: '600',
-                            color: priority.color,
-                            background: priority.bg,
-                            padding: '2px 8px',
-                            borderRadius: '6px'
-                          }}>
-                            {priority.label}
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: '#64748b' }}>
-                          <span>{taskTab === 'received' ? `요청자: ${task.requester?.name || task.requester?.username || '?'}` : `담당자: ${task.assignee?.name || task.assignee?.username || '?'}`}</span>
-                          <span>|</span>
-                          <span>{new Date(task.created_at).toLocaleDateString('ko-KR')}</span>
-                        </div>
-                      </div>
-
-                      {/* 마감일 */}
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{
-                          fontSize: '13px',
-                          fontWeight: '700',
-                          color: deadlineColor,
-                          marginBottom: '2px'
-                        }}>
-                          {deadlineText}
-                        </div>
-                        <div style={{ fontSize: '11px', color: '#64748b' }}>
-                          {task.deadline}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          )}
-
-          {/* 페이지네이션 */}
-          {totalPages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', marginTop: '24px', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => setTaskPage(p => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                style={{
-                  padding: '8px 14px',
-                  background: safePage <= 1 ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '8px',
-                  color: safePage <= 1 ? '#4a5568' : '#94a3b8',
-                  fontSize: '13px',
-                  cursor: safePage <= 1 ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s'
-                }}
-              >
-                ← 이전
-              </button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                <button
-                  key={page}
-                  onClick={() => setTaskPage(page)}
-                  style={{
-                    padding: '8px 12px',
-                    background: page === safePage ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.03)',
-                    border: page === safePage ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: '8px',
-                    color: page === safePage ? '#a5b4fc' : '#94a3b8',
-                    fontSize: '13px',
-                    fontWeight: page === safePage ? '700' : '400',
-                    cursor: 'pointer',
-                    minWidth: '36px',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  {page}
-                </button>
-              ))}
-              <button
-                onClick={() => setTaskPage(p => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-                style={{
-                  padding: '8px 14px',
-                  background: safePage >= totalPages ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '8px',
-                  color: safePage >= totalPages ? '#4a5568' : '#94a3b8',
-                  fontSize: '13px',
-                  cursor: safePage >= totalPages ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s'
-                }}
-              >
-                다음 →
-              </button>
-            </div>
-          )}
-        </div>
-        )
-      })()}
 
       {/* 업무 생성 모달 */}
       {showTaskModal && (
