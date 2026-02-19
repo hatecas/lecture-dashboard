@@ -29,6 +29,11 @@ export default function PaymentTransactionsPage() {
   const [editPhone, setEditPhone] = useState('')
   const [editSaving, setEditSaving] = useState(false)
 
+  // 엑셀 임포트
+  const [importLoading, setImportLoading] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const fileInputRef = useRef(null)
+
   const fetchTransactions = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -166,6 +171,45 @@ export default function PaymentTransactionsPage() {
     }
   }
 
+  const handleExcelImport = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setImportLoading(true)
+    setImportResult(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/payment/import-excel', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setImportResult({ error: data.error })
+      } else {
+        setImportResult({
+          success: true,
+          imported: data.imported,
+          updated: data.updated,
+          skipped: data.skipped,
+          total: data.total,
+        })
+        // 임포트 후 자동 재조회
+        fetchTransactions()
+      }
+    } catch (err) {
+      setImportResult({ error: '파일 업로드에 실패했습니다' })
+    } finally {
+      setImportLoading(false)
+      // input 초기화 (같은 파일 재업로드 가능하게)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   const formatPhoneDisplay = (value) => {
     const numbers = (value || '').replace(/[^0-9]/g, '').slice(0, 11)
     if (numbers.length <= 3) return numbers
@@ -276,7 +320,61 @@ export default function PaymentTransactionsPage() {
           >
             {loading ? '조회 중...' : '조회'}
           </button>
+
+          {/* 엑셀 임포트 */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleExcelImport}
+            style={{ display: 'none' }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importLoading}
+            style={{
+              padding: '9px 20px',
+              borderRadius: '8px',
+              border: '1px solid rgba(34,197,94,0.3)',
+              background: 'rgba(34,197,94,0.1)',
+              color: '#22c55e',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: importLoading ? 'not-allowed' : 'pointer',
+              opacity: importLoading ? 0.6 : 1,
+              transition: 'all 0.15s',
+            }}
+          >
+            {importLoading ? '처리 중...' : '토스 엑셀 임포트'}
+          </button>
         </div>
+
+        {/* 임포트 결과 */}
+        {importResult && (
+          <div style={{
+            background: importResult.error ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+            border: `1px solid ${importResult.error ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)'}`,
+            borderRadius: '12px',
+            padding: '12px 16px',
+            marginBottom: '12px',
+            fontSize: '13px',
+            color: importResult.error ? '#f87171' : '#4ade80',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}>
+            <span>
+              {importResult.error
+                ? importResult.error
+                : `총 ${importResult.total}건 중 신규 ${importResult.imported}건, 업데이트 ${importResult.updated}건 (스킵 ${importResult.skipped}건)`
+              }
+            </span>
+            <button
+              onClick={() => setImportResult(null)}
+              style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }}
+            >×</button>
+          </div>
+        )}
 
         {/* 필터 + 검색 */}
         {hasSearched && (
