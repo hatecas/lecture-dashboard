@@ -24,7 +24,15 @@ export async function GET(request) {
       .eq('requester_id', userId)
       .order('created_at', { ascending: false })
 
-    if (sentError && sentError.code !== '42P01') throw sentError
+    // 테이블 미존재(42P01) 또는 관계 오류 시 빈 배열 반환
+    if (sentError) {
+      const code = sentError.code || ''
+      const msg = (sentError.message || '').toLowerCase()
+      if (code === '42P01' || msg.includes('relation') || msg.includes('does not exist')) {
+        return NextResponse.json({ sent: [], received: [] })
+      }
+      throw sentError
+    }
 
     // 요청받은 업무 (다른 사람이 나에게 요청)
     const { data: receivedTasks, error: receivedError } = await supabase
@@ -33,7 +41,14 @@ export async function GET(request) {
       .eq('assignee_id', userId)
       .order('created_at', { ascending: false })
 
-    if (receivedError && receivedError.code !== '42P01') throw receivedError
+    if (receivedError) {
+      const code = receivedError.code || ''
+      const msg = (receivedError.message || '').toLowerCase()
+      if (code === '42P01' || msg.includes('relation') || msg.includes('does not exist')) {
+        return NextResponse.json({ sent: sentTasks || [], received: [] })
+      }
+      throw receivedError
+    }
 
     return NextResponse.json({
       sent: sentTasks || [],
