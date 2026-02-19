@@ -91,8 +91,8 @@ export async function POST(request) {
 
     if (error) throw error
 
-    // 신규 업무 배정 알림 (비동기 - 응답 지연 방지)
-    sendTaskNotification(data).catch(e => console.error('알림 발송 실패:', e))
+    // 신규 업무 배정 알림 (await - 서버리스에서 fire-and-forget 불안정)
+    await sendTaskNotification(data).catch(e => console.error('알림 발송 실패:', e))
 
     return NextResponse.json({ task: data })
   } catch (error) {
