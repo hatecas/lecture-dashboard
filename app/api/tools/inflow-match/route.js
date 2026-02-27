@@ -137,12 +137,13 @@ export async function POST(request) {
 
     logs.push(`총 결제자: ${allPayersData.length}명`)
 
-    // 환불 제외 (결제금액 0 이하)
+    // 환불 제외 (결제금액 0 이하 또는 H열 결제상태가 '환불됨')
     let refundCount = 0
     const validPayers = allPayersData.filter(payer => {
       const 결제금액 = getColumnValue(payer, 6) // G열
+      const 결제상태 = String(getColumnValue(payer, 7)).trim() // H열
       const amount = parseFloat(String(결제금액).replace(/[^0-9.-]/g, '')) || 0
-      if (amount <= 0) {
+      if (amount <= 0 || 결제상태 === '환불됨') {
         refundCount++
         return false
       }

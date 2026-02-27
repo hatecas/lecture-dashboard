@@ -2867,7 +2867,15 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                         type="file"
                         accept=".xlsx,.xls,.csv"
                         multiple
-                        onChange={(e) => setToolFiles1(Array.from(e.target.files))}
+                        onChange={(e) => {
+                          const newFiles = Array.from(e.target.files)
+                          setToolFiles1(prev => {
+                            const existingNames = new Set(prev.map(f => f.name))
+                            const unique = newFiles.filter(f => !existingNames.has(f.name))
+                            return [...prev, ...unique]
+                          })
+                          e.target.value = ''
+                        }}
                         style={{ display: 'none' }}
                         id="tool-file1"
                       />
@@ -2887,7 +2895,15 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                       </label>
                       {toolFiles1.length > 0 && (
                         <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
-                          {toolFiles1.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                          {toolFiles1.map((f, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                              <span>✓ {f.name}</span>
+                              <button
+                                onClick={() => setToolFiles1(prev => prev.filter((_, idx) => idx !== i))}
+                                style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '11px', padding: '0 2px' }}
+                              >✕</button>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -2907,7 +2923,15 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                         type="file"
                         accept=".xlsx,.xls,.csv"
                         multiple
-                        onChange={(e) => setToolFiles2(Array.from(e.target.files))}
+                        onChange={(e) => {
+                          const newFiles = Array.from(e.target.files)
+                          setToolFiles2(prev => {
+                            const existingNames = new Set(prev.map(f => f.name))
+                            const unique = newFiles.filter(f => !existingNames.has(f.name))
+                            return [...prev, ...unique]
+                          })
+                          e.target.value = ''
+                        }}
                         style={{ display: 'none' }}
                         id="tool-file2"
                       />
@@ -2927,7 +2951,15 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                       </label>
                       {toolFiles2.length > 0 && (
                         <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
-                          {toolFiles2.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                          {toolFiles2.map((f, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                              <span>✓ {f.name}</span>
+                              <button
+                                onClick={() => setToolFiles2(prev => prev.filter((_, idx) => idx !== i))}
+                                style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '11px', padding: '0 2px' }}
+                              >✕</button>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
