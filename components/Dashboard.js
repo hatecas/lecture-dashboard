@@ -2862,7 +2862,7 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                     }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>📥</div>
                       <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>신청자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>강사별 폴더를 선택하세요 (하위 Excel/CSV 자동 인식)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>폴더 선택 시 상위 폴더명이 유입경로에 포함됩니다</p>
                       <input
                         type="file"
                         webkitdirectory=""
@@ -2878,22 +2878,54 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                           e.target.value = ''
                         }}
                         style={{ display: 'none' }}
-                        id="tool-file1"
+                        id="tool-file1-folder"
                       />
-                      <label
-                        htmlFor="tool-file1"
-                        style={{
-                          display: 'inline-block',
-                          padding: '8px 16px',
-                          background: 'rgba(99,102,241,0.3)',
-                          borderRadius: '8px',
-                          color: '#a5b4fc',
-                          fontSize: '13px',
-                          cursor: 'pointer'
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        multiple
+                        onChange={(e) => {
+                          const newFiles = Array.from(e.target.files)
+                          setToolFiles1(prev => {
+                            const existingPaths = new Set(prev.map(f => f.webkitRelativePath || f.name))
+                            const unique = newFiles.filter(f => !existingPaths.has(f.webkitRelativePath || f.name))
+                            return [...prev, ...unique]
+                          })
+                          e.target.value = ''
                         }}
-                      >
-                        폴더 선택
-                      </label>
+                        style={{ display: 'none' }}
+                        id="tool-file1-files"
+                      />
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                        <label
+                          htmlFor="tool-file1-folder"
+                          style={{
+                            display: 'inline-block',
+                            padding: '8px 16px',
+                            background: 'rgba(99,102,241,0.3)',
+                            borderRadius: '8px',
+                            color: '#a5b4fc',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          폴더 선택
+                        </label>
+                        <label
+                          htmlFor="tool-file1-files"
+                          style={{
+                            display: 'inline-block',
+                            padding: '8px 16px',
+                            background: 'rgba(99,102,241,0.15)',
+                            borderRadius: '8px',
+                            color: '#818cf8',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          파일 선택
+                        </label>
+                      </div>
                       {toolFiles1.length > 0 && (
                         <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
                           {toolFiles1.map((f, i) => {
