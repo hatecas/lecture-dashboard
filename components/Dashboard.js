@@ -2862,16 +2862,17 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                     }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>📥</div>
                       <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>신청자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>연락처, 유입경로 포함 (Excel/CSV, 여러개 가능)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>강사별 폴더를 선택하세요 (하위 Excel/CSV 자동 인식)</p>
                       <input
                         type="file"
-                        accept=".xlsx,.xls,.csv"
-                        multiple
+                        webkitdirectory=""
+                        directory=""
                         onChange={(e) => {
-                          const newFiles = Array.from(e.target.files)
+                          const allFiles = Array.from(e.target.files)
+                          const excelFiles = allFiles.filter(f => /\.(xlsx|xls|csv)$/i.test(f.name))
                           setToolFiles1(prev => {
-                            const existingNames = new Set(prev.map(f => f.name))
-                            const unique = newFiles.filter(f => !existingNames.has(f.name))
+                            const existingPaths = new Set(prev.map(f => f.webkitRelativePath || f.name))
+                            const unique = excelFiles.filter(f => !existingPaths.has(f.webkitRelativePath || f.name))
                             return [...prev, ...unique]
                           })
                           e.target.value = ''
@@ -2891,19 +2892,24 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                           cursor: 'pointer'
                         }}
                       >
-                        파일 선택
+                        폴더 선택
                       </label>
                       {toolFiles1.length > 0 && (
                         <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
-                          {toolFiles1.map((f, i) => (
+                          {toolFiles1.map((f, i) => {
+                            const parts = (f.webkitRelativePath || '').split('/')
+                            const parent = parts.length >= 2 ? parts[parts.length - 2] : ''
+                            const display = parent ? `${parent}/${f.name}` : f.name
+                            return (
                             <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                              <span>✓ {f.name}</span>
+                              <span>✓ {display}</span>
                               <button
                                 onClick={() => setToolFiles1(prev => prev.filter((_, idx) => idx !== i))}
                                 style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '11px', padding: '0 2px' }}
                               >✕</button>
                             </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -2975,7 +2981,10 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
                       setToolLog(['처리 시작...'])
 
                       const formData = new FormData()
-                      toolFiles1.forEach(f => formData.append('applicants', f))
+                      toolFiles1.forEach(f => {
+                        formData.append('applicants', f)
+                        formData.append('applicantPaths', f.webkitRelativePath || f.name)
+                      })
                       toolFiles2.forEach(f => formData.append('payers', f))
 
                       try {

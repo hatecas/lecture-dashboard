@@ -79,15 +79,21 @@ export async function POST(request) {
 
     // 모든 신청자 파일 병합 (파일명 포함)
     // 신청자: D열(인덱스 3) = 전화번호, E열(인덱스 4) = 신청일
+    const applicantPaths = formData.getAll('applicantPaths')
     const applicantMap = new Map()
-    for (const file of applicantsFiles) {
+    for (let i = 0; i < applicantsFiles.length; i++) {
+      const file = applicantsFiles[i]
       const buffer = await file.arrayBuffer()
       const wb = XLSX.read(buffer)
       const sheet = wb.Sheets[wb.SheetNames[0]]
       const data = XLSX.utils.sheet_to_json(sheet, { defval: '' })
 
-      // 파일명에서 확장자 제거하여 유입경로로 사용
-      const fileName = file.name.replace(/\.(xlsx|xls|csv)$/i, '')
+      // 경로에서 바로 상위 폴더명 추출하여 유입경로에 포함
+      const relativePath = applicantPaths[i] || file.name
+      const parts = relativePath.replace(/\\/g, '/').split('/')
+      const fileNameOnly = file.name.replace(/\.(xlsx|xls|csv)$/i, '')
+      const parentFolder = parts.length >= 2 ? parts[parts.length - 2] : ''
+      const fileName = parentFolder ? `${parentFolder}_${fileNameOnly}` : fileNameOnly
 
       for (const row of data) {
         // D열(인덱스 3) = 전화번호
