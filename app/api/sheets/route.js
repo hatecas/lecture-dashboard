@@ -1,5 +1,43 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { supabase } from '@/lib/supabase'
+
+// 기본 설정값 (DB에 설정이 없을 때 사용)
+const DEFAULT_CONFIG = {
+  sheet_id: '1cG6wewwrBrNZYI9y_PCAA943Y4qqWAJiWzI1zleDXiw',
+  data_range: 'A:AR',
+  header_keyword: '강사명',
+  column_mappings: [
+    { fieldKey: 'name', displayName: '강사명', columnIndex: 0, type: '이름' },
+    { fieldKey: 'freeClassDate', displayName: '무료강의날짜', columnIndex: 1, type: '날짜' },
+    { fieldKey: 'revenue', displayName: '최종매출액', columnIndex: 8, type: '숫자' },
+    { fieldKey: 'operatingProfit', displayName: '영업이익', columnIndex: 10, type: '숫자' },
+    { fieldKey: 'profitMargin', displayName: '영업이익률', columnIndex: 11, type: '퍼센트' },
+    { fieldKey: 'adSpend', displayName: '광고비', columnIndex: 17, type: '숫자' },
+    { fieldKey: 'gdnConvCost', displayName: 'GDN전환단가', columnIndex: 18, type: '숫자' },
+    { fieldKey: 'metaConvCost', displayName: '메타전환단가', columnIndex: 19, type: '숫자' },
+    { fieldKey: 'kakaoRoomDb', displayName: '카톡방', columnIndex: 28, type: '숫자' },
+    { fieldKey: 'liveViewers', displayName: '동시접속', columnIndex: 29, type: '숫자' },
+    { fieldKey: 'totalPurchases', displayName: '결제건수', columnIndex: 34, type: '숫자' },
+    { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 43, type: '퍼센트' }
+  ]
+}
+
+async function getSheetConfig() {
+  try {
+    const { data, error } = await supabase
+      .from('sheet_config')
+      .select('*')
+      .order('id', { ascending: true })
+      .limit(1)
+      .single()
+
+    if (error || !data) return DEFAULT_CONFIG
+    return data
+  } catch {
+    return DEFAULT_CONFIG
+  }
+}
 
 export async function GET(request) {
   // API 인증 검증
@@ -12,8 +50,12 @@ export async function GET(request) {
   const name = searchParams.get('name')
 
   try {
-    const sheetId = '1cG6wewwrBrNZYI9y_PCAA943Y4qqWAJiWzI1zleDXiw'
-    const range = 'A:AR'
+    const config = await getSheetConfig()
+    const sheetId = config.sheet_id
+    const range = config.data_range
+    const headerKeyword = config.header_keyword
+    const columnMappings = config.column_mappings || DEFAULT_CONFIG.column_mappings
+
     const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&range=${range}`
 
     const response = await fetch(url)
@@ -21,50 +63,59 @@ export async function GET(request) {
     const json = JSON.parse(text.substring(47, text.length - 2))
     const rows = json.table.rows
 
-    // 헤더 행 찾기 (gviz API가 이미 헤더를 분리한 경우 rows에는 데이터만 있음)
+    // 헤더 행 찾기
     let startIndex = 0
     for (let i = 0; i < rows.length; i++) {
-      if (rows[i].c[0]?.v === '강사명') {
+      if (rows[i].c[0]?.v === headerKeyword) {
         startIndex = i + 1
         break
       }
+    }
+
+    // 매핑 인덱스 맵 생성
+    const mappingMap = {}
+    for (const m of columnMappings) {
+      mappingMap[m.fieldKey] = m
     }
 
     // 전체 데이터 파싱
     const allData = []
     for (let i = startIndex; i < rows.length; i++) {
       const row = rows[i].c
-      const rowName = row[0]?.v
+      const nameMapping = mappingMap['name']
+      const nameIdx = nameMapping ? nameMapping.columnIndex : 0
+      const rowName = row[nameIdx]?.v
       if (!rowName) continue
 
-      // 카드매출/계좌매출 2열 추가로 기존 인덱스 +2
-      const revenue = row[8]?.v || 0          // 최종매출액 (I열, 기존 G+2)
-      const operatingProfit = row[10]?.v || 0 // 영업이익 (K열, 기존 I+2)
-      const profitMargin = row[11]?.v || 0    // 영업이익률 (L열, 기존 J+2)
-      const adSpend = row[17]?.v || 0         // 광고비 (R열, 기존 P+2)
-      const gdnConvCost = row[18]?.v || 0     // GDN전환단가 (S열, 기존 Q+2)
-      const metaConvCost = row[19]?.v || 0    // 메타전환단가 (T열, 기존 R+2)
-      const kakaoDb = row[28]?.v || 0         // 카톡방 (AC열, 기존 AA+2)
-      const liveViewers = row[29]?.v || 0     // 동시접속 (AD열, 기존 AB+2)
-      const totalPurchases = row[34]?.v || 0  // 결제건수 (AI열, 기존 AG+2)
-      const conversionRate = row[43]?.v || 0  // 전환율 (AR열, 기존 AP+2)
-      const freeClassDate = row[1]?.f || null // 무료강의날짜 (B열, 변경 없음)
+      const entry = { name: rowName.replace(/\s+/g, ' ').trim() }
 
-      allData.push({
-        name: rowName.replace(/\s+/g, ' ').trim(),
-        revenue,
-        operatingProfit,
-        profitMargin: Math.round(profitMargin * 10000) / 100,
-        adSpend,
-        conversionCost: Math.round((gdnConvCost + metaConvCost) / 2),
-        gdnConvCost,
-        metaConvCost,
-        kakaoRoomDb: kakaoDb,
-        liveViewers,
-        totalPurchases,
-        purchaseConversionRate: conversionRate,
-        freeClassDate
-      })
+      for (const m of columnMappings) {
+        if (m.fieldKey === 'name') continue
+
+        if (m.type === '날짜') {
+          entry[m.fieldKey] = row[m.columnIndex]?.f || null
+        } else if (m.type === '퍼센트') {
+          const val = row[m.columnIndex]?.v || 0
+          entry[m.fieldKey] = Math.round(val * 10000) / 100
+        } else {
+          entry[m.fieldKey] = row[m.columnIndex]?.v || 0
+        }
+      }
+
+      // 기존 호환: conversionCost 계산
+      if (mappingMap['gdnConvCost'] && mappingMap['metaConvCost']) {
+        entry.conversionCost = Math.round(((entry.gdnConvCost || 0) + (entry.metaConvCost || 0)) / 2)
+      }
+
+      // 기존 호환: purchaseConversionRate = conversionRate
+      if (entry.conversionRate !== undefined) {
+        entry.purchaseConversionRate = entry.conversionRate
+      }
+
+      // 기존 호환: kakaoRoomDb = kakaoRoomDb
+      // (이미 올바른 키로 매핑됨)
+
+      allData.push(entry)
     }
 
     // 특정 이름 조회

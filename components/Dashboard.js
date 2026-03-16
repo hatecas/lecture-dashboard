@@ -125,6 +125,29 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [deleteSheetLoading, setDeleteSheetLoading] = useState(false)
   const [permissionError, setPermissionError] = useState(null) // 권한 에러 시 서비스 계정 이메일
 
+  // 시트 설정 상태
+  const [sheetConfig, setSheetConfig] = useState({
+    sheetId: '1cG6wewwrBrNZYI9y_PCAA943Y4qqWAJiWzI1zleDXiw',
+    dataRange: 'A:AR',
+    headerKeyword: '강사명',
+    columnMappings: [
+      { fieldKey: 'name', displayName: '강사명', columnIndex: 0, type: '이름' },
+      { fieldKey: 'freeClassDate', displayName: '무료강의날짜', columnIndex: 1, type: '날짜' },
+      { fieldKey: 'revenue', displayName: '최종매출액', columnIndex: 8, type: '숫자' },
+      { fieldKey: 'operatingProfit', displayName: '영업이익', columnIndex: 10, type: '숫자' },
+      { fieldKey: 'profitMargin', displayName: '영업이익률', columnIndex: 11, type: '퍼센트' },
+      { fieldKey: 'adSpend', displayName: '광고비', columnIndex: 17, type: '숫자' },
+      { fieldKey: 'gdnConvCost', displayName: 'GDN전환단가', columnIndex: 18, type: '숫자' },
+      { fieldKey: 'metaConvCost', displayName: '메타전환단가', columnIndex: 19, type: '숫자' },
+      { fieldKey: 'kakaoRoomDb', displayName: '카톡방', columnIndex: 28, type: '숫자' },
+      { fieldKey: 'liveViewers', displayName: '동시접속', columnIndex: 29, type: '숫자' },
+      { fieldKey: 'totalPurchases', displayName: '결제건수', columnIndex: 34, type: '숫자' },
+      { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 43, type: '퍼센트' }
+    ]
+  })
+  const [sheetConfigLoading, setSheetConfigLoading] = useState(false)
+  const [sheetConfigSaving, setSheetConfigSaving] = useState(false)
+
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
   const [csInput, setCsInput] = useState('')
@@ -190,6 +213,57 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     } catch {
       return []
     }
+  }
+
+  // 시트 설정 로드
+  const loadSheetConfig = async () => {
+    try {
+      const response = await fetch('/api/sheet-config', { headers: getAuthHeaders() })
+      if (!response.ok) throw new Error('Failed to load')
+      const result = await response.json()
+      if (result.config) {
+        setSheetConfig({
+          sheetId: result.config.sheet_id,
+          dataRange: result.config.data_range,
+          headerKeyword: result.config.header_keyword,
+          columnMappings: result.config.column_mappings || []
+        })
+      }
+    } catch {}
+  }
+
+  // 시트 설정 저장
+  const saveSheetConfig = async () => {
+    setSheetConfigSaving(true)
+    try {
+      const response = await fetch('/api/sheet-config', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          sheetId: sheetConfig.sheetId,
+          dataRange: sheetConfig.dataRange,
+          headerKeyword: sheetConfig.headerKeyword,
+          columnMappings: sheetConfig.columnMappings
+        })
+      })
+      if (!response.ok) throw new Error('Failed to save')
+      alert('시트 설정이 저장되었습니다.')
+    } catch {
+      alert('시트 설정 저장에 실패했습니다.')
+    } finally {
+      setSheetConfigSaving(false)
+    }
+  }
+
+  // 컬럼 번호를 엑셀 열 문자로 변환
+  const columnIndexToLetter = (index) => {
+    let letter = ''
+    let num = index
+    while (num >= 0) {
+      letter = String.fromCharCode(65 + (num % 26)) + letter
+      num = Math.floor(num / 26) - 1
+    }
+    return letter
   }
 
   // 시트 탭 목록 가져오기
@@ -542,6 +616,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   useEffect(() => {
     if (currentTab === 'resources' && savedSheets.length === 0) {
       loadSavedSheets().then(sheets => setSavedSheets(sheets))
+    }
+    if (currentTab === 'sheet-settings') {
+      loadSheetConfig()
     }
   }, [currentTab])
 
@@ -1613,6 +1690,30 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                 right: sidebarCollapsed ? '6px' : 'auto'
               }} />
             )}
+          </button>
+
+          {/* 시트 설정 */}
+          <button onClick={() => { setCurrentTab('sheet-settings'); if(isMobile) setMobileMenuOpen(false) }} style={{
+            width: '100%',
+            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+            background: currentTab === 'sheet-settings' ? 'rgba(99,102,241,0.2)' : 'transparent',
+            backdropFilter: currentTab === 'sheet-settings' ? 'blur(10px)' : 'none',
+            border: 'none',
+            borderLeft: currentTab === 'sheet-settings' ? '3px solid #818cf8' : '3px solid transparent',
+            color: currentTab === 'sheet-settings' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+            fontSize: sidebarCollapsed ? '11px' : '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: sidebarCollapsed ? 'column' : 'row',
+            alignItems: 'center',
+            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+            gap: sidebarCollapsed ? '4px' : '10px',
+            transition: 'all 0.3s ease'
+          }} title="시트 설정">
+            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚙</span>
+            시트 설정
           </button>
         </div>
       </div>
@@ -5197,6 +5298,163 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* 시트 설정 탭 */}
+          {currentTab === 'sheet-settings' && (
+            <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⚙ 구글시트 컬럼 매핑 설정
+              </h2>
+              <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '28px' }}>
+                데이시트 데이터베이스 시트의 열 구조가 바뀌면 여기서 매핑을 수정하세요. 코드 수정 없이 반영됩니다.
+              </p>
+
+              {/* 시트 기본 정보 */}
+              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '24px 32px', marginBottom: '24px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#f87171', marginBottom: '20px' }}>시트 기본 정보</h3>
+                <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 3, minWidth: '200px' }}>
+                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>시트 ID</label>
+                    <input
+                      type="text"
+                      value={sheetConfig.sheetId}
+                      onChange={(e) => setSheetConfig({ ...sheetConfig, sheetId: e.target.value })}
+                      style={{ width: '100%', padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#fff', fontSize: '14px' }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, minWidth: '120px' }}>
+                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>데이터 범위</label>
+                    <input
+                      type="text"
+                      value={sheetConfig.dataRange}
+                      onChange={(e) => setSheetConfig({ ...sheetConfig, dataRange: e.target.value })}
+                      style={{ width: '100%', padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#fff', fontSize: '14px' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ maxWidth: '400px' }}>
+                  <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>헤더 식별 키워드 (A열 값)</label>
+                  <input
+                    type="text"
+                    value={sheetConfig.headerKeyword}
+                    onChange={(e) => setSheetConfig({ ...sheetConfig, headerKeyword: e.target.value })}
+                    style={{ width: '100%', padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#fff', fontSize: '14px' }}
+                  />
+                </div>
+              </div>
+
+              {/* 컬럼 매핑 */}
+              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '24px 32px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#f87171' }}>컬럼 매핑</h3>
+                  <button
+                    onClick={() => setSheetConfig({
+                      ...sheetConfig,
+                      columnMappings: [...sheetConfig.columnMappings, { fieldKey: '', displayName: '', columnIndex: 0, type: '숫자' }]
+                    })}
+                    style={{ padding: '8px 16px', background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: '8px', color: '#a5b4fc', fontSize: '13px', cursor: 'pointer' }}
+                  >
+                    + 컬럼 추가
+                  </button>
+                </div>
+
+                {/* 테이블 헤더 */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px 120px 40px', gap: '12px', padding: '0 8px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '8px' }}>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600' }}>필드 키</div>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600' }}>표시 이름</div>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>열 번호</div>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600', textAlign: 'center' }}></div>
+                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600' }}>타입</div>
+                  <div></div>
+                </div>
+
+                {/* 매핑 행들 */}
+                {sheetConfig.columnMappings.map((mapping, idx) => (
+                  <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px 120px 40px', gap: '12px', padding: '8px', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                    <input
+                      type="text"
+                      value={mapping.fieldKey}
+                      onChange={(e) => {
+                        const updated = [...sheetConfig.columnMappings]
+                        updated[idx] = { ...updated[idx], fieldKey: e.target.value }
+                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                      }}
+                      style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px' }}
+                    />
+                    <input
+                      type="text"
+                      value={mapping.displayName}
+                      onChange={(e) => {
+                        const updated = [...sheetConfig.columnMappings]
+                        updated[idx] = { ...updated[idx], displayName: e.target.value }
+                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                      }}
+                      style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px' }}
+                    />
+                    <input
+                      type="number"
+                      value={mapping.columnIndex}
+                      onChange={(e) => {
+                        const updated = [...sheetConfig.columnMappings]
+                        updated[idx] = { ...updated[idx], columnIndex: parseInt(e.target.value) || 0 }
+                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                      }}
+                      style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', textAlign: 'center' }}
+                    />
+                    <div style={{ textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                      <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '600' }}>
+                        {columnIndexToLetter(mapping.columnIndex)}열
+                      </span>
+                    </div>
+                    <select
+                      value={mapping.type}
+                      onChange={(e) => {
+                        const updated = [...sheetConfig.columnMappings]
+                        updated[idx] = { ...updated[idx], type: e.target.value }
+                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                      }}
+                      style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer' }}
+                    >
+                      <option value="이름" style={{ background: '#1e1e2e' }}>이름</option>
+                      <option value="날짜" style={{ background: '#1e1e2e' }}>날짜</option>
+                      <option value="숫자" style={{ background: '#1e1e2e' }}>숫자</option>
+                      <option value="퍼센트" style={{ background: '#1e1e2e' }}>퍼센트</option>
+                    </select>
+                    <button
+                      onClick={() => {
+                        const updated = sheetConfig.columnMappings.filter((_, i) => i !== idx)
+                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                      }}
+                      style={{ background: 'none', border: 'none', color: '#f87171', fontSize: '18px', cursor: 'pointer', padding: '4px' }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* 저장 버튼 */}
+              <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={saveSheetConfig}
+                  disabled={sheetConfigSaving}
+                  style={{
+                    padding: '14px 32px',
+                    background: sheetConfigSaving ? 'rgba(99,102,241,0.3)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    border: 'none',
+                    borderRadius: '12px',
+                    color: '#fff',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    cursor: sheetConfigSaving ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.3s ease'
+                  }}
+                >
+                  {sheetConfigSaving ? '저장 중...' : '💾 설정 저장'}
+                </button>
               </div>
             </div>
           )}
