@@ -147,6 +147,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   })
   const [sheetConfigLoading, setSheetConfigLoading] = useState(false)
   const [sheetConfigSaving, setSheetConfigSaving] = useState(false)
+  const [sheetColumnShift, setSheetColumnShift] = useState({ show: false, fromIndex: '', count: 1 })
 
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
@@ -5348,18 +5349,79 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
               {/* 컬럼 매핑 */}
               <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '24px 32px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
                   <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#f87171' }}>컬럼 매핑</h3>
-                  <button
-                    onClick={() => setSheetConfig({
-                      ...sheetConfig,
-                      columnMappings: [...sheetConfig.columnMappings, { fieldKey: '', displayName: '', columnIndex: 0, type: '숫자' }]
-                    })}
-                    style={{ padding: '8px 16px', background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: '8px', color: '#a5b4fc', fontSize: '13px', cursor: 'pointer' }}
-                  >
-                    + 컬럼 추가
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => setSheetColumnShift({ ...sheetColumnShift, show: !sheetColumnShift.show })}
+                      style={{ padding: '8px 16px', background: sheetColumnShift.show ? 'rgba(250,204,21,0.2)' : 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.4)', borderRadius: '8px', color: '#fcd34d', fontSize: '13px', cursor: 'pointer' }}
+                    >
+                      ↕ 열 삽입/삭제 시프트
+                    </button>
+                    <button
+                      onClick={() => setSheetConfig({
+                        ...sheetConfig,
+                        columnMappings: [...sheetConfig.columnMappings, { fieldKey: '', displayName: '', columnIndex: 0, type: '숫자' }]
+                      })}
+                      style={{ padding: '8px 16px', background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: '8px', color: '#a5b4fc', fontSize: '13px', cursor: 'pointer' }}
+                    >
+                      + 컬럼 추가
+                    </button>
+                  </div>
                 </div>
+
+                {/* 열 시프트 패널 */}
+                {sheetColumnShift.show && (
+                  <div style={{ background: 'rgba(250,204,21,0.05)', border: '1px solid rgba(250,204,21,0.2)', borderRadius: '12px', padding: '16px 20px', marginBottom: '16px' }}>
+                    <p style={{ color: '#fcd34d', fontSize: '13px', marginBottom: '12px', fontWeight: '600' }}>
+                      시트에 열을 추가/삭제했을 때, 해당 위치 이후의 매핑 인덱스를 일괄 조정합니다.
+                    </p>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '12px', marginBottom: '6px' }}>기준 열 번호</label>
+                        <input
+                          type="number"
+                          value={sheetColumnShift.fromIndex}
+                          onChange={(e) => setSheetColumnShift({ ...sheetColumnShift, fromIndex: e.target.value })}
+                          placeholder="예: 10"
+                          style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', width: '100px' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '12px', marginBottom: '6px' }}>이동 칸수 (+삽입 / -삭제)</label>
+                        <input
+                          type="number"
+                          value={sheetColumnShift.count}
+                          onChange={(e) => setSheetColumnShift({ ...sheetColumnShift, count: parseInt(e.target.value) || 0 })}
+                          style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', width: '100px' }}
+                        />
+                      </div>
+                      <button
+                        onClick={() => {
+                          const from = parseInt(sheetColumnShift.fromIndex)
+                          const shift = sheetColumnShift.count
+                          if (isNaN(from) || shift === 0) return alert('기준 열 번호와 이동 칸수를 입력하세요.')
+                          const updated = sheetConfig.columnMappings.map(m => {
+                            if (m.columnIndex >= from) {
+                              return { ...m, columnIndex: Math.max(0, m.columnIndex + shift) }
+                            }
+                            return m
+                          })
+                          const affected = sheetConfig.columnMappings.filter(m => m.columnIndex >= from).length
+                          setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                          setSheetColumnShift({ show: false, fromIndex: '', count: 1 })
+                          alert(`${affected}개 매핑의 열 번호를 ${shift > 0 ? '+' : ''}${shift} 이동했습니다.`)
+                        }}
+                        style={{ padding: '8px 20px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
+                      >
+                        적용
+                      </button>
+                    </div>
+                    <p style={{ color: '#64748b', fontSize: '12px', marginTop: '10px' }}>
+                      예: K열(10번) 앞에 열 1개 삽입 → 기준 열: 10, 이동 칸수: +1
+                    </p>
+                  </div>
+                )}
 
                 {/* 테이블 헤더 */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px 120px 40px', gap: '12px', padding: '0 8px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '8px' }}>
