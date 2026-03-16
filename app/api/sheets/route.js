@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { getGoogleAccessToken } from '@/lib/googleAuth'
 
 // 기본 컬럼 매핑 (설정 로드 실패 시 폴백)
 const DEFAULT_COLUMNS = [
@@ -71,25 +72,34 @@ export async function GET(request) {
     const config = await loadColumnConfig()
     const { sheetId, range, headerKey, columns } = config
 
-    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&range=${range}`
+    // Google Sheets API v4 (서비스 계정 인증)
+    const accessToken = await getGoogleAccessToken()
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    })
 
-    const response = await fetch(url)
-    const text = await response.text()
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      const googleMsg = errorData.error?.message || ''
+      console.error('Google Sheets API error:', response.status, googleMsg)
 
-    // gviz 응답에서 JSON 부분 추출 (고정 오프셋 대신 중괄호 위치로 파싱)
-    const startIdx = text.indexOf('{')
-    const endIdx = text.lastIndexOf('}')
-    if (startIdx === -1 || endIdx === -1) {
-      console.error('시트 응답이 올바른 형식이 아닙니다:', text.substring(0, 200))
-      return NextResponse.json({ error: '구글 시트 응답 형식 오류. 시트 공유 설정을 확인하세요.' }, { status: 502 })
+      if (response.status === 403) {
+        const serviceEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || ''
+        return NextResponse.json({
+          error: `스프레드시트 접근 권한이 없습니다. 서비스 계정(${serviceEmail})에 뷰어 권한을 부여해주세요.`
+        }, { status: 403 })
+      }
+      return NextResponse.json({ error: googleMsg || '구글 시트 데이터 로드 실패' }, { status: response.status })
     }
-    const json = JSON.parse(text.substring(startIdx, endIdx + 1))
-    const rows = json.table.rows
+
+    const data = await response.json()
+    const rows = data.values || []
 
     // 헤더 행 찾기
     let startIndex = 0
     for (let i = 0; i < rows.length; i++) {
-      if (rows[i].c[0]?.v === headerKey) {
+      if (rows[i][0] === headerKey) {
         startIndex = i + 1
         break
       }
@@ -98,30 +108,34 @@ export async function GET(request) {
     // 전체 데이터 파싱 (컬럼 설정 기반)
     const allData = []
     for (let i = startIndex; i < rows.length; i++) {
-      const row = rows[i].c
-      const rowName = row[0]?.v
+      const row = rows[i]
+      const rowName = row[0]
       if (!rowName) continue
 
       const entry = {}
       for (const col of columns) {
+        const cellValue = row[col.index] || ''
+
         if (col.type === 'name') {
-          entry[col.key] = rowName.replace(/\s+/g, ' ').trim()
+          entry[col.key] = String(rowName).replace(/\s+/g, ' ').trim()
         } else if (col.type === 'date') {
-          entry[col.key] = row[col.index]?.f || null
+          entry[col.key] = cellValue || null
         } else if (col.type === 'percent') {
-          const val = row[col.index]?.v || 0
-          // profitMargin은 소수점 → 퍼센트 변환 필요
+          const val = parseFloat(String(cellValue).replace(/[^0-9.\-]/g, '')) || 0
           if (col.key === 'profitMargin') {
-            entry[col.key] = Math.round(val * 10000) / 100
+            // 소수점(0.35) → 퍼센트(35.00) 변환, 이미 퍼센트면 그대로
+            entry[col.key] = val < 1 && val > -1 ? Math.round(val * 10000) / 100 : val
           } else {
             entry[col.key] = val
           }
         } else {
-          entry[col.key] = row[col.index]?.v || 0
+          // number 타입: 쉼표 제거 후 숫자 변환
+          const val = parseFloat(String(cellValue).replace(/[,₩원%]/g, '')) || 0
+          entry[col.key] = val
         }
       }
 
-      // conversionCost 계산 (gdnConvCost + metaConvCost 평균) - 기존 로직 유지
+      // conversionCost 계산 (gdnConvCost + metaConvCost 평균)
       if (entry.gdnConvCost !== undefined && entry.metaConvCost !== undefined) {
         entry.conversionCost = Math.round((entry.gdnConvCost + entry.metaConvCost) / 2)
       }
@@ -142,6 +156,9 @@ export async function GET(request) {
 
   } catch (error) {
     console.error('시트 API 오류:', error)
-    return NextResponse.json({ error: '시트 데이터 로드 실패' }, { status: 500 })
+    const msg = error.message?.includes('환경변수')
+      ? error.message
+      : '시트 데이터 로드 실패'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
