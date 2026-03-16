@@ -75,7 +75,15 @@ export async function GET(request) {
 
     const response = await fetch(url)
     const text = await response.text()
-    const json = JSON.parse(text.substring(47, text.length - 2))
+
+    // gviz 응답에서 JSON 부분 추출 (고정 오프셋 대신 중괄호 위치로 파싱)
+    const startIdx = text.indexOf('{')
+    const endIdx = text.lastIndexOf('}')
+    if (startIdx === -1 || endIdx === -1) {
+      console.error('시트 응답이 올바른 형식이 아닙니다:', text.substring(0, 200))
+      return NextResponse.json({ error: '구글 시트 응답 형식 오류. 시트 공유 설정을 확인하세요.' }, { status: 502 })
+    }
+    const json = JSON.parse(text.substring(startIdx, endIdx + 1))
     const rows = json.table.rows
 
     // 헤더 행 찾기
