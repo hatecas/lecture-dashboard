@@ -7086,7 +7086,7 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
           }
 
           return (
-            <div style={{ padding: isMobile ? '16px' : '32px' }}>
+            <div style={{ padding: isMobile ? '16px' : '0 32px 32px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
               <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 ⚙️ 구글시트 컬럼 매핑 설정
               </h2>
