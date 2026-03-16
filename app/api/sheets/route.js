@@ -69,8 +69,8 @@ export async function GET(request) {
     const config = await getSheetConfig()
     const sheetId = config.sheet_id
     const range = config.data_range
-    const headerKeyword = config.header_keyword
-    const columnMappings = config.column_mappings || DEFAULT_CONFIG.column_mappings
+    const headerKeyword = config.header_key || config.header_keyword
+    const columnMappings = config.columns || config.column_mappings || DEFAULT_CONFIG.column_mappings
 
     const rows = await fetchSheetData(sheetId, range)
 

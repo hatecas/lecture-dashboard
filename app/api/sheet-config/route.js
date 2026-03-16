@@ -25,7 +25,7 @@ export async function GET(request) {
       return NextResponse.json({
         error: `DB 오류: ${error.message}`,
         hint: error.hint || null,
-        columns_info: '테이블에 필요한 컬럼: sheet_id(text), data_range(text), header_keyword(text), column_mappings(jsonb)'
+        columns_info: '테이블에 필요한 컬럼: sheet_id(text), data_range(text), header_key(text), column_mappings(jsonb)'
       }, { status: 500 })
     }
 
@@ -62,8 +62,8 @@ export async function POST(request) {
     const configData = {
       sheet_id: sheetId,
       data_range: dataRange,
-      header_keyword: headerKeyword,
-      column_mappings: columnMappings,
+      header_key: headerKeyword,
+      columns: columnMappings,
       updated_at: new Date().toISOString()
     }
 

@@ -229,8 +229,8 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
         setSheetConfig({
           sheetId: result.config.sheet_id,
           dataRange: result.config.data_range,
-          headerKeyword: result.config.header_keyword,
-          columnMappings: result.config.column_mappings || []
+          headerKeyword: result.config.header_key,
+          columnMappings: result.config.columns || []
         })
       }
     } catch {}
