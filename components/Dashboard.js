@@ -57,6 +57,11 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
 
+  // 개발자 시트 설정 상태
+  const [sheetConfig, setSheetConfig] = useState(null)
+  const [sheetConfigLoading, setSheetConfigLoading] = useState(false)
+  const [sheetConfigSaving, setSheetConfigSaving] = useState(false)
+
   // 툴 관련 상태
   const [currentTool, setCurrentTool] = useState('crm') // crm, kakao, youtube (inflow는 권한 필요)
   const [toolFiles1, setToolFiles1] = useState([]) // 여러 파일 지원
@@ -1860,6 +1865,35 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
               </span>
             )}
           </button>
+
+          {/* 개발자 전용: 시트 설정 */}
+          {permissions.isDeveloper && (
+            <button onClick={() => { setCurrentTab('dev-settings'); if(isMobile) setMobileMenuOpen(false) }} style={{
+              width: '100%',
+              padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+              background: currentTab === 'dev-settings' ? 'rgba(99,102,241,0.2)' : 'transparent',
+              backdropFilter: currentTab === 'dev-settings' ? 'blur(10px)' : 'none',
+              border: 'none',
+              borderLeft: currentTab === 'dev-settings' ? '3px solid #818cf8' : '3px solid transparent',
+              color: currentTab === 'dev-settings' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+              fontSize: sidebarCollapsed ? '11px' : '14px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: sidebarCollapsed ? 'column' : 'row',
+              alignItems: 'center',
+              justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+              gap: sidebarCollapsed ? '4px' : '10px',
+              transition: 'all 0.3s ease',
+              borderTop: '1px solid rgba(255,255,255,0.05)',
+              marginTop: '8px',
+              paddingTop: sidebarCollapsed ? '10px' : '14px'
+            }} title="개발자 설정">
+              <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚙️</span>
+              {sidebarCollapsed ? '설정' : '시트 설정'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -6973,6 +7007,353 @@ export default function Dashboard({ onLogout, userName, userId, permissions = {}
           </div>
         )
       })()}
+
+        {/* ==================== 개발자 시트 설정 탭 ==================== */}
+        {currentTab === 'dev-settings' && permissions.isDeveloper && (() => {
+          const loadConfig = async () => {
+            setSheetConfigLoading(true)
+            try {
+              const token = localStorage.getItem('authToken')
+              const res = await fetch('/api/sheet-config', {
+                headers: { 'Authorization': `Bearer ${token}` }
+              })
+              const data = await res.json()
+              setSheetConfig(data.config)
+            } catch (err) {
+              console.error('설정 로드 실패:', err)
+            }
+            setSheetConfigLoading(false)
+          }
+
+          if (!sheetConfig && !sheetConfigLoading) {
+            loadConfig()
+          }
+
+          const saveConfig = async () => {
+            setSheetConfigSaving(true)
+            try {
+              const token = localStorage.getItem('authToken')
+              const res = await fetch('/api/sheet-config', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  sheet_id: sheetConfig.sheet_id,
+                  data_range: sheetConfig.data_range,
+                  header_key: sheetConfig.header_key,
+                  columns: sheetConfig.columns
+                })
+              })
+              const data = await res.json()
+              if (data.success) {
+                alert('설정이 저장되었습니다. 대시보드를 새로고침하면 반영됩니다.')
+              } else {
+                alert('저장 실패: ' + (data.error || '알 수 없는 오류'))
+              }
+            } catch (err) {
+              alert('저장 실패: ' + err.message)
+            }
+            setSheetConfigSaving(false)
+          }
+
+          const updateColumn = (idx, field, value) => {
+            setSheetConfig(prev => {
+              const newColumns = [...prev.columns]
+              newColumns[idx] = { ...newColumns[idx], [field]: field === 'index' ? parseInt(value) || 0 : value }
+              return { ...prev, columns: newColumns }
+            })
+          }
+
+          const addColumn = () => {
+            setSheetConfig(prev => ({
+              ...prev,
+              columns: [...prev.columns, { key: '', label: '', index: 0, type: 'number' }]
+            }))
+          }
+
+          const removeColumn = (idx) => {
+            setSheetConfig(prev => ({
+              ...prev,
+              columns: prev.columns.filter((_, i) => i !== idx)
+            }))
+          }
+
+          const indexToCol = (idx) => {
+            if (idx < 26) return String.fromCharCode(65 + idx)
+            return String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26))
+          }
+
+          return (
+            <div style={{ padding: isMobile ? '16px' : '32px', maxWidth: '900px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⚙️ 구글시트 컬럼 매핑 설정
+              </h2>
+              <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '24px' }}>
+                대시보드 데이터베이스 시트의 열 구조가 바뀌면 여기서 매핑을 수정하세요. 코드 수정 없이 반영됩니다.
+              </p>
+
+              {sheetConfigLoading ? (
+                <p style={{ color: '#64748b' }}>설정 로딩 중...</p>
+              ) : sheetConfig ? (
+                <div>
+                  {/* 시트 기본 설정 */}
+                  <div style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: '12px',
+                    padding: '20px',
+                    marginBottom: '20px',
+                    border: '1px solid rgba(255,255,255,0.06)'
+                  }}>
+                    <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#a5b4fc' }}>시트 기본 정보</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '12px', marginBottom: '4px' }}>시트 ID</label>
+                        <input
+                          value={sheetConfig.sheet_id || ''}
+                          onChange={(e) => setSheetConfig(prev => ({ ...prev, sheet_id: e.target.value }))}
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px'
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '12px', marginBottom: '4px' }}>데이터 범위</label>
+                        <input
+                          value={sheetConfig.data_range || ''}
+                          onChange={(e) => setSheetConfig(prev => ({ ...prev, data_range: e.target.value }))}
+                          placeholder="A:AR"
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px'
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '12px', marginBottom: '4px' }}>헤더 식별 키워드 (A열 값)</label>
+                        <input
+                          value={sheetConfig.header_key || ''}
+                          onChange={(e) => setSheetConfig(prev => ({ ...prev, header_key: e.target.value }))}
+                          placeholder="강사명"
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 컬럼 매핑 테이블 */}
+                  <div style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    borderRadius: '12px',
+                    padding: '20px',
+                    marginBottom: '20px',
+                    border: '1px solid rgba(255,255,255,0.06)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                      <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#a5b4fc' }}>컬럼 매핑</h3>
+                      <button
+                        onClick={addColumn}
+                        style={{
+                          padding: '6px 12px',
+                          background: 'rgba(99,102,241,0.2)',
+                          border: '1px solid rgba(99,102,241,0.3)',
+                          borderRadius: '6px',
+                          color: '#a5b4fc',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        + 컬럼 추가
+                      </button>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                            <th style={{ padding: '8px 6px', textAlign: 'left', color: '#64748b', fontWeight: '500' }}>필드 키</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'left', color: '#64748b', fontWeight: '500' }}>표시 이름</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'center', color: '#64748b', fontWeight: '500', minWidth: '90px' }}>열 번호</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'center', color: '#64748b', fontWeight: '500' }}>타입</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'center', color: '#64748b', fontWeight: '500', width: '40px' }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sheetConfig.columns.map((col, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                              <td style={{ padding: '6px' }}>
+                                <input
+                                  value={col.key}
+                                  onChange={(e) => updateColumn(idx, 'key', e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    padding: '6px 8px',
+                                    background: 'rgba(255,255,255,0.05)',
+                                    border: '1px solid rgba(255,255,255,0.08)',
+                                    borderRadius: '4px',
+                                    color: '#e2e8f0',
+                                    fontSize: '12px',
+                                    fontFamily: 'monospace'
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: '6px' }}>
+                                <input
+                                  value={col.label}
+                                  onChange={(e) => updateColumn(idx, 'label', e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    padding: '6px 8px',
+                                    background: 'rgba(255,255,255,0.05)',
+                                    border: '1px solid rgba(255,255,255,0.08)',
+                                    borderRadius: '4px',
+                                    color: '#e2e8f0',
+                                    fontSize: '12px'
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: '6px', textAlign: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={col.index}
+                                    onChange={(e) => updateColumn(idx, 'index', e.target.value)}
+                                    style={{
+                                      width: '50px',
+                                      padding: '6px 4px',
+                                      background: 'rgba(255,255,255,0.05)',
+                                      border: '1px solid rgba(255,255,255,0.08)',
+                                      borderRadius: '4px',
+                                      color: '#e2e8f0',
+                                      fontSize: '12px',
+                                      textAlign: 'center'
+                                    }}
+                                  />
+                                  <span style={{ color: '#6366f1', fontSize: '11px', fontWeight: '600', minWidth: '24px' }}>
+                                    {indexToCol(col.index)}열
+                                  </span>
+                                </div>
+                              </td>
+                              <td style={{ padding: '6px', textAlign: 'center' }}>
+                                <select
+                                  value={col.type}
+                                  onChange={(e) => updateColumn(idx, 'type', e.target.value)}
+                                  style={{
+                                    padding: '6px 4px',
+                                    background: 'rgba(255,255,255,0.05)',
+                                    border: '1px solid rgba(255,255,255,0.08)',
+                                    borderRadius: '4px',
+                                    color: '#e2e8f0',
+                                    fontSize: '12px'
+                                  }}
+                                >
+                                  <option value="name">이름</option>
+                                  <option value="number">숫자</option>
+                                  <option value="percent">퍼센트</option>
+                                  <option value="date">날짜</option>
+                                </select>
+                              </td>
+                              <td style={{ padding: '6px', textAlign: 'center' }}>
+                                <button
+                                  onClick={() => removeColumn(idx)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#ef4444',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    padding: '2px 6px'
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* 저장 버튼 */}
+                  <button
+                    onClick={saveConfig}
+                    disabled={sheetConfigSaving}
+                    style={{
+                      padding: '14px 32px',
+                      background: sheetConfigSaving ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      border: 'none',
+                      borderRadius: '10px',
+                      color: '#fff',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: sheetConfigSaving ? 'wait' : 'pointer'
+                    }}
+                  >
+                    {sheetConfigSaving ? '저장 중...' : '설정 저장'}
+                  </button>
+
+                  {/* 테이블 생성 안내 */}
+                  <div style={{
+                    marginTop: '24px',
+                    padding: '16px',
+                    background: 'rgba(251,191,36,0.05)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(251,191,36,0.15)',
+                    fontSize: '12px',
+                    color: '#94a3b8'
+                  }}>
+                    <p style={{ fontWeight: '600', color: '#fbbf24', marginBottom: '8px' }}>Supabase 테이블이 없으면 아래 SQL을 실행하세요:</p>
+                    <pre style={{
+                      background: 'rgba(0,0,0,0.3)',
+                      padding: '12px',
+                      borderRadius: '6px',
+                      overflow: 'auto',
+                      fontSize: '11px',
+                      lineHeight: '1.5',
+                      color: '#e2e8f0'
+                    }}>{`CREATE TABLE sheet_column_config (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  config_name text NOT NULL DEFAULT 'default',
+  sheet_id text,
+  data_range text DEFAULT 'A:AR',
+  header_key text DEFAULT '강사명',
+  columns jsonb NOT NULL DEFAULT '[]',
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE sheet_column_config ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON sheet_column_config
+  FOR ALL USING (true) WITH CHECK (true);`}</pre>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ color: '#64748b' }}>설정을 불러올 수 없습니다.</p>
+              )}
+            </div>
+          )
+        })()}
 
     </div>
   )

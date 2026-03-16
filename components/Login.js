@@ -64,6 +64,7 @@ export default function Login({ onLogin }) {
         })
         onLogin(data.name || data.username, {
           canUseInflow: data.can_use_inflow || false,
+          isDeveloper: data.username === 'jinwoo',
           userId: data.id
         })
       }
