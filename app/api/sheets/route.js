@@ -108,11 +108,15 @@ export async function GET(request) {
         if (m.type === '날짜') {
           entry[m.fieldKey] = rawVal || null
         } else if (m.type === '퍼센트') {
-          const val = parseFloat(rawVal) || 0
-          // Google Sheets API는 이미 퍼센트를 소수로 반환 (0.15 = 15%)
-          entry[m.fieldKey] = Math.round(val * 10000) / 100
+          const val = typeof rawVal === 'number' ? rawVal : (parseFloat(rawVal) || 0)
+          // 소수(0.4578) → 45.78로 변환, 이미 퍼센트(19.91)면 그대로
+          if (val !== 0 && Math.abs(val) < 1) {
+            entry[m.fieldKey] = Math.round(val * 10000) / 100
+          } else {
+            entry[m.fieldKey] = val
+          }
         } else {
-          const val = parseFloat(rawVal) || 0
+          const val = typeof rawVal === 'number' ? rawVal : (parseFloat(rawVal) || 0)
           entry[m.fieldKey] = val
         }
       }
