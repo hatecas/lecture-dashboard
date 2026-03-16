@@ -10,6 +10,7 @@ export async function GET(request) {
   }
 
   try {
+    // 먼저 테이블 구조 확인
     const { data, error } = await supabase
       .from('sheet_column_config')
       .select('*')
@@ -18,15 +19,22 @@ export async function GET(request) {
       .single()
 
     if (error && error.code === 'PGRST116') {
-      // No rows found - return defaults
       return NextResponse.json({ config: null })
     }
-    if (error) throw error
+    if (error) {
+      return NextResponse.json({
+        error: `DB 오류: ${error.message}`,
+        hint: error.hint || null,
+        columns_info: '테이블에 필요한 컬럼: sheet_id(text), data_range(text), header_keyword(text), column_mappings(jsonb)'
+      }, { status: 500 })
+    }
 
-    return NextResponse.json({ config: data })
+    // 테이블 컬럼 구조 반환 (디버깅용)
+    const columns = data ? Object.keys(data) : []
+
+    return NextResponse.json({ config: data, columns })
   } catch (error) {
-    console.error('Sheet config fetch error:', error)
-    return NextResponse.json({ error: '시트 설정을 불러올 수 없습니다.' }, { status: 500 })
+    return NextResponse.json({ error: `시트 설정 로드 실패: ${error.message}` }, { status: 500 })
   }
 }
 
@@ -51,40 +59,48 @@ export async function POST(request) {
       .limit(1)
       .single()
 
+    const configData = {
+      sheet_id: sheetId,
+      data_range: dataRange,
+      header_keyword: headerKeyword,
+      column_mappings: columnMappings,
+      updated_at: new Date().toISOString()
+    }
+
     let result
     if (existing) {
       const { data, error } = await supabase
         .from('sheet_column_config')
-        .update({
-          sheet_id: sheetId,
-          data_range: dataRange,
-          header_keyword: headerKeyword,
-          column_mappings: columnMappings,
-          updated_at: new Date().toISOString()
-        })
+        .update(configData)
         .eq('id', existing.id)
         .select()
         .single()
-      if (error) throw error
+      if (error) {
+        return NextResponse.json({
+          error: `저장 실패: ${error.message}`,
+          hint: error.hint || null,
+          detail: error.details || null
+        }, { status: 500 })
+      }
       result = data
     } else {
       const { data, error } = await supabase
         .from('sheet_column_config')
-        .insert({
-          sheet_id: sheetId,
-          data_range: dataRange,
-          header_keyword: headerKeyword,
-          column_mappings: columnMappings
-        })
+        .insert(configData)
         .select()
         .single()
-      if (error) throw error
+      if (error) {
+        return NextResponse.json({
+          error: `저장 실패: ${error.message}`,
+          hint: error.hint || null,
+          detail: error.details || null
+        }, { status: 500 })
+      }
       result = data
     }
 
     return NextResponse.json({ config: result })
   } catch (error) {
-    console.error('Sheet config save error:', error)
-    return NextResponse.json({ error: '시트 설정을 저장할 수 없습니다.' }, { status: 500 })
+    return NextResponse.json({ error: `시트 설정 저장 실패: ${error.message}` }, { status: 500 })
   }
 }

@@ -250,10 +250,14 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           columnMappings: sheetConfig.columnMappings
         })
       })
-      if (!response.ok) throw new Error('Failed to save')
+      const result = await response.json()
+      if (!response.ok) {
+        alert(`시트 설정 저장 실패\n\n원인: ${result.error || '알 수 없음'}${result.hint ? '\n힌트: ' + result.hint : ''}`)
+        return
+      }
       alert('시트 설정이 저장되었습니다.')
-    } catch {
-      alert('시트 설정 저장에 실패했습니다.')
+    } catch (err) {
+      alert(`시트 설정 저장 실패: ${err.message}`)
     } finally {
       setSheetConfigSaving(false)
     }
