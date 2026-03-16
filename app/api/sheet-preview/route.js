@@ -16,7 +16,13 @@ export async function POST(request) {
     const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&range=${dataRange}`
     const response = await fetch(url)
     const text = await response.text()
-    const json = JSON.parse(text.substring(47, text.length - 2))
+
+    const startIdx = text.indexOf('(')
+    const endIdx = text.lastIndexOf(')')
+    if (startIdx === -1 || endIdx === -1) {
+      return NextResponse.json({ error: '시트 응답 형식 오류' }, { status: 500 })
+    }
+    const json = JSON.parse(text.substring(startIdx + 1, endIdx))
     const rows = json.table.rows
 
     // 최대 10행만 반환

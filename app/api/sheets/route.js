@@ -60,7 +60,15 @@ export async function GET(request) {
 
     const response = await fetch(url)
     const text = await response.text()
-    const json = JSON.parse(text.substring(47, text.length - 2))
+
+    // gviz 응답에서 JSON 부분만 추출 (더 안정적인 파싱)
+    const startIdx = text.indexOf('(')
+    const endIdx = text.lastIndexOf(')')
+    if (startIdx === -1 || endIdx === -1) {
+      console.error('시트 응답 형식 오류 (gviz가 아님):', text.substring(0, 200))
+      return NextResponse.json({ error: '시트 데이터 형식 오류' }, { status: 500 })
+    }
+    const json = JSON.parse(text.substring(startIdx + 1, endIdx))
     const rows = json.table.rows
 
     // 헤더 행 찾기
