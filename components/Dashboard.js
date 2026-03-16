@@ -148,6 +148,9 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   const [sheetConfigLoading, setSheetConfigLoading] = useState(false)
   const [sheetConfigSaving, setSheetConfigSaving] = useState(false)
   const [sheetColumnShift, setSheetColumnShift] = useState({ show: false, fromIndex: '', count: 1 })
+  const [sheetPreviewRaw, setSheetPreviewRaw] = useState(null) // 원본 시트 행 데이터
+  const [sheetPreviewLoading, setSheetPreviewLoading] = useState(false)
+  const [sheetPreviewHighlight, setSheetPreviewHighlight] = useState(null) // 하이라이트할 열 인덱스
 
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
@@ -265,6 +268,26 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
       num = Math.floor(num / 26) - 1
     }
     return letter
+  }
+
+  // 시트 미리보기 데이터 가져오기
+  const fetchSheetPreview = async () => {
+    if (!sheetConfig.sheetId || !sheetConfig.dataRange) return
+    setSheetPreviewLoading(true)
+    try {
+      const url = `https://docs.google.com/spreadsheets/d/${sheetConfig.sheetId}/gviz/tq?tqx=out:json&range=${sheetConfig.dataRange}`
+      const response = await fetch(url)
+      const text = await response.text()
+      const json = JSON.parse(text.substring(47, text.length - 2))
+      const rows = json.table.rows
+      // 최대 5행만 미리보기
+      const preview = rows.slice(0, 8).map(r => (r.c || []).map(c => c?.f || c?.v || ''))
+      setSheetPreviewRaw(preview)
+    } catch {
+      setSheetPreviewRaw(null)
+    } finally {
+      setSheetPreviewLoading(false)
+    }
   }
 
   // 시트 탭 목록 가져오기
@@ -620,6 +643,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     }
     if (currentTab === 'sheet-settings') {
       loadSheetConfig()
+      fetchSheetPreview()
     }
   }, [currentTab])
 
@@ -5305,218 +5329,384 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
 
           {/* 시트 설정 탭 */}
           {currentTab === 'sheet-settings' && (
-            <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
-              <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                ⚙ 구글시트 컬럼 매핑 설정
-              </h2>
-              <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '28px' }}>
-                데이시트 데이터베이스 시트의 열 구조가 바뀌면 여기서 매핑을 수정하세요. 코드 수정 없이 반영됩니다.
-              </p>
-
-              {/* 시트 기본 정보 */}
-              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '24px 32px', marginBottom: '24px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#f87171', marginBottom: '20px' }}>시트 기본 정보</h3>
-                <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
-                  <div style={{ flex: 3, minWidth: '200px' }}>
-                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>시트 ID</label>
-                    <input
-                      type="text"
-                      value={sheetConfig.sheetId}
-                      onChange={(e) => setSheetConfig({ ...sheetConfig, sheetId: e.target.value })}
-                      style={{ width: '100%', padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#fff', fontSize: '14px' }}
-                    />
-                  </div>
-                  <div style={{ flex: 1, minWidth: '120px' }}>
-                    <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>데이터 범위</label>
-                    <input
-                      type="text"
-                      value={sheetConfig.dataRange}
-                      onChange={(e) => setSheetConfig({ ...sheetConfig, dataRange: e.target.value })}
-                      style={{ width: '100%', padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#fff', fontSize: '14px' }}
-                    />
-                  </div>
+            <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '100%', margin: '0 auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <div>
+                  <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    ⚙ 구글시트 컬럼 매핑 설정
+                  </h2>
+                  <p style={{ color: '#64748b', fontSize: '13px' }}>
+                    왼쪽에서 매핑을 수정하면 오른쪽 미리보기에 실시간 반영됩니다.
+                  </p>
                 </div>
-                <div style={{ maxWidth: '400px' }}>
-                  <label style={{ display: 'block', color: '#94a3b8', fontSize: '13px', marginBottom: '8px' }}>헤더 식별 키워드 (A열 값)</label>
-                  <input
-                    type="text"
-                    value={sheetConfig.headerKeyword}
-                    onChange={(e) => setSheetConfig({ ...sheetConfig, headerKeyword: e.target.value })}
-                    style={{ width: '100%', padding: '12px 16px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: '#fff', fontSize: '14px' }}
-                  />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={fetchSheetPreview}
+                    disabled={sheetPreviewLoading}
+                    style={{ padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', color: '#94a3b8', fontSize: '13px', cursor: 'pointer' }}
+                  >
+                    {sheetPreviewLoading ? '로딩...' : '🔄 미리보기 새로고침'}
+                  </button>
+                  <button
+                    onClick={saveSheetConfig}
+                    disabled={sheetConfigSaving}
+                    style={{
+                      padding: '10px 24px',
+                      background: sheetConfigSaving ? 'rgba(99,102,241,0.3)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      border: 'none',
+                      borderRadius: '10px',
+                      color: '#fff',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: sheetConfigSaving ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {sheetConfigSaving ? '저장 중...' : '💾 설정 저장'}
+                  </button>
                 </div>
               </div>
 
-              {/* 컬럼 매핑 */}
-              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '16px', padding: '24px 32px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-                  <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#f87171' }}>컬럼 매핑</h3>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={() => setSheetColumnShift({ ...sheetColumnShift, show: !sheetColumnShift.show })}
-                      style={{ padding: '8px 16px', background: sheetColumnShift.show ? 'rgba(250,204,21,0.2)' : 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.4)', borderRadius: '8px', color: '#fcd34d', fontSize: '13px', cursor: 'pointer' }}
-                    >
-                      ↕ 열 삽입/삭제 시프트
-                    </button>
-                    <button
-                      onClick={() => setSheetConfig({
-                        ...sheetConfig,
-                        columnMappings: [...sheetConfig.columnMappings, { fieldKey: '', displayName: '', columnIndex: 0, type: '숫자' }]
-                      })}
-                      style={{ padding: '8px 16px', background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: '8px', color: '#a5b4fc', fontSize: '13px', cursor: 'pointer' }}
-                    >
-                      + 컬럼 추가
-                    </button>
-                  </div>
-                </div>
+              {/* 좌우 분할 레이아웃 */}
+              <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
 
-                {/* 열 시프트 패널 */}
-                {sheetColumnShift.show && (
-                  <div style={{ background: 'rgba(250,204,21,0.05)', border: '1px solid rgba(250,204,21,0.2)', borderRadius: '12px', padding: '16px 20px', marginBottom: '16px' }}>
-                    <p style={{ color: '#fcd34d', fontSize: '13px', marginBottom: '12px', fontWeight: '600' }}>
-                      시트에 열을 추가/삭제했을 때, 해당 위치 이후의 매핑 인덱스를 일괄 조정합니다.
-                    </p>
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                      <div>
-                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '12px', marginBottom: '6px' }}>기준 열 번호</label>
+                {/* 왼쪽: 설정 패널 */}
+                <div style={{ flex: '0 0 520px', minWidth: 0 }}>
+                  {/* 시트 기본 정보 */}
+                  <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '14px', padding: '20px 24px', marginBottom: '16px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#f87171', marginBottom: '16px' }}>시트 기본 정보</h3>
+                    <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                      <div style={{ flex: 3 }}>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '11px', marginBottom: '6px' }}>시트 ID</label>
                         <input
-                          type="number"
-                          value={sheetColumnShift.fromIndex}
-                          onChange={(e) => setSheetColumnShift({ ...sheetColumnShift, fromIndex: e.target.value })}
-                          placeholder="예: 10"
-                          style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', width: '100px' }}
+                          type="text"
+                          value={sheetConfig.sheetId}
+                          onChange={(e) => setSheetConfig({ ...sheetConfig, sheetId: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
                         />
                       </div>
-                      <div>
-                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '12px', marginBottom: '6px' }}>이동 칸수 (+삽입 / -삭제)</label>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: 'block', color: '#94a3b8', fontSize: '11px', marginBottom: '6px' }}>범위</label>
                         <input
-                          type="number"
-                          value={sheetColumnShift.count}
-                          onChange={(e) => setSheetColumnShift({ ...sheetColumnShift, count: parseInt(e.target.value) || 0 })}
-                          style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', width: '100px' }}
+                          type="text"
+                          value={sheetConfig.dataRange}
+                          onChange={(e) => setSheetConfig({ ...sheetConfig, dataRange: e.target.value })}
+                          style={{ width: '100%', padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
                         />
                       </div>
-                      <button
-                        onClick={() => {
-                          const from = parseInt(sheetColumnShift.fromIndex)
-                          const shift = sheetColumnShift.count
-                          if (isNaN(from) || shift === 0) return alert('기준 열 번호와 이동 칸수를 입력하세요.')
-                          const updated = sheetConfig.columnMappings.map(m => {
-                            if (m.columnIndex >= from) {
-                              return { ...m, columnIndex: Math.max(0, m.columnIndex + shift) }
-                            }
-                            return m
-                          })
-                          const affected = sheetConfig.columnMappings.filter(m => m.columnIndex >= from).length
-                          setSheetConfig({ ...sheetConfig, columnMappings: updated })
-                          setSheetColumnShift({ show: false, fromIndex: '', count: 1 })
-                          alert(`${affected}개 매핑의 열 번호를 ${shift > 0 ? '+' : ''}${shift} 이동했습니다.`)
-                        }}
-                        style={{ padding: '8px 20px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
-                      >
-                        적용
-                      </button>
                     </div>
-                    <p style={{ color: '#64748b', fontSize: '12px', marginTop: '10px' }}>
-                      예: K열(10번) 앞에 열 1개 삽입 → 기준 열: 10, 이동 칸수: +1
-                    </p>
+                    <div>
+                      <label style={{ display: 'block', color: '#94a3b8', fontSize: '11px', marginBottom: '6px' }}>헤더 식별 키워드 (A열 값)</label>
+                      <input
+                        type="text"
+                        value={sheetConfig.headerKeyword}
+                        onChange={(e) => setSheetConfig({ ...sheetConfig, headerKeyword: e.target.value })}
+                        style={{ width: '260px', padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
+                      />
+                    </div>
                   </div>
-                )}
 
-                {/* 테이블 헤더 */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px 120px 40px', gap: '12px', padding: '0 8px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '8px' }}>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600' }}>필드 키</div>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600' }}>표시 이름</div>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600', textAlign: 'center' }}>열 번호</div>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600', textAlign: 'center' }}></div>
-                  <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '600' }}>타입</div>
-                  <div></div>
+                  {/* 컬럼 매핑 */}
+                  <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '14px', padding: '20px 24px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '8px' }}>
+                      <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#f87171' }}>컬럼 매핑</h3>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          onClick={() => setSheetColumnShift({ ...sheetColumnShift, show: !sheetColumnShift.show })}
+                          style={{ padding: '6px 12px', background: sheetColumnShift.show ? 'rgba(250,204,21,0.2)' : 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.4)', borderRadius: '6px', color: '#fcd34d', fontSize: '11px', cursor: 'pointer' }}
+                        >
+                          ↕ 시프트
+                        </button>
+                        <button
+                          onClick={() => setSheetConfig({
+                            ...sheetConfig,
+                            columnMappings: [...sheetConfig.columnMappings, { fieldKey: '', displayName: '', columnIndex: 0, type: '숫자' }]
+                          })}
+                          style={{ padding: '6px 12px', background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: '6px', color: '#a5b4fc', fontSize: '11px', cursor: 'pointer' }}
+                        >
+                          + 추가
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 열 시프트 패널 */}
+                    {sheetColumnShift.show && (
+                      <div style={{ background: 'rgba(250,204,21,0.05)', border: '1px solid rgba(250,204,21,0.2)', borderRadius: '10px', padding: '12px 16px', marginBottom: '12px' }}>
+                        <p style={{ color: '#fcd34d', fontSize: '11px', marginBottom: '10px', fontWeight: '600' }}>
+                          열 추가/삭제 시 이후 매핑 인덱스를 일괄 조정
+                        </p>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                          <div>
+                            <label style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '4px' }}>기준 열</label>
+                            <input
+                              type="number"
+                              value={sheetColumnShift.fromIndex}
+                              onChange={(e) => setSheetColumnShift({ ...sheetColumnShift, fromIndex: e.target.value })}
+                              placeholder="10"
+                              style={{ padding: '6px 8px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff', fontSize: '12px', width: '70px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '4px' }}>이동 칸수</label>
+                            <input
+                              type="number"
+                              value={sheetColumnShift.count}
+                              onChange={(e) => setSheetColumnShift({ ...sheetColumnShift, count: parseInt(e.target.value) || 0 })}
+                              style={{ padding: '6px 8px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff', fontSize: '12px', width: '70px' }}
+                            />
+                          </div>
+                          <button
+                            onClick={() => {
+                              const from = parseInt(sheetColumnShift.fromIndex)
+                              const shift = sheetColumnShift.count
+                              if (isNaN(from) || shift === 0) return alert('기준 열 번호와 이동 칸수를 입력하세요.')
+                              const updated = sheetConfig.columnMappings.map(m => {
+                                if (m.columnIndex >= from) {
+                                  return { ...m, columnIndex: Math.max(0, m.columnIndex + shift) }
+                                }
+                                return m
+                              })
+                              const affected = sheetConfig.columnMappings.filter(m => m.columnIndex >= from).length
+                              setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                              setSheetColumnShift({ show: false, fromIndex: '', count: 1 })
+                              alert(`${affected}개 매핑을 ${shift > 0 ? '+' : ''}${shift} 이동`)
+                            }}
+                            style={{ padding: '6px 14px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}
+                          >
+                            적용
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 매핑 목록 */}
+                    <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                      {sheetConfig.columnMappings.map((mapping, idx) => (
+                        <div
+                          key={idx}
+                          onMouseEnter={() => setSheetPreviewHighlight(mapping.columnIndex)}
+                          onMouseLeave={() => setSheetPreviewHighlight(null)}
+                          style={{
+                            display: 'flex', gap: '6px', padding: '6px 4px', alignItems: 'center',
+                            borderBottom: '1px solid rgba(255,255,255,0.03)',
+                            background: sheetPreviewHighlight === mapping.columnIndex ? 'rgba(99,102,241,0.1)' : 'transparent',
+                            borderRadius: '6px', transition: 'background 0.15s'
+                          }}
+                        >
+                          <input
+                            type="text"
+                            value={mapping.fieldKey}
+                            onChange={(e) => {
+                              const updated = [...sheetConfig.columnMappings]
+                              updated[idx] = { ...updated[idx], fieldKey: e.target.value }
+                              setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                            }}
+                            placeholder="필드키"
+                            style={{ flex: 2, padding: '8px 8px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff', fontSize: '12px', minWidth: 0 }}
+                          />
+                          <input
+                            type="text"
+                            value={mapping.displayName}
+                            onChange={(e) => {
+                              const updated = [...sheetConfig.columnMappings]
+                              updated[idx] = { ...updated[idx], displayName: e.target.value }
+                              setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                            }}
+                            placeholder="표시이름"
+                            style={{ flex: 2, padding: '8px 8px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff', fontSize: '12px', minWidth: 0 }}
+                          />
+                          <input
+                            type="number"
+                            value={mapping.columnIndex}
+                            onChange={(e) => {
+                              const updated = [...sheetConfig.columnMappings]
+                              updated[idx] = { ...updated[idx], columnIndex: parseInt(e.target.value) || 0 }
+                              setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                            }}
+                            style={{ width: '50px', padding: '8px 4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff', fontSize: '12px', textAlign: 'center' }}
+                          />
+                          <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                            {columnIndexToLetter(mapping.columnIndex)}
+                          </span>
+                          <select
+                            value={mapping.type}
+                            onChange={(e) => {
+                              const updated = [...sheetConfig.columnMappings]
+                              updated[idx] = { ...updated[idx], type: e.target.value }
+                              setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                            }}
+                            style={{ width: '70px', padding: '8px 4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', color: '#fff', fontSize: '11px', cursor: 'pointer' }}
+                          >
+                            <option value="이름" style={{ background: '#1e1e2e' }}>이름</option>
+                            <option value="날짜" style={{ background: '#1e1e2e' }}>날짜</option>
+                            <option value="숫자" style={{ background: '#1e1e2e' }}>숫자</option>
+                            <option value="퍼센트" style={{ background: '#1e1e2e' }}>퍼센트</option>
+                          </select>
+                          <button
+                            onClick={() => {
+                              const updated = sheetConfig.columnMappings.filter((_, i) => i !== idx)
+                              setSheetConfig({ ...sheetConfig, columnMappings: updated })
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#f87171', fontSize: '14px', cursor: 'pointer', padding: '2px 4px', flexShrink: 0 }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                {/* 매핑 행들 */}
-                {sheetConfig.columnMappings.map((mapping, idx) => (
-                  <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px 80px 120px 40px', gap: '12px', padding: '8px', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                    <input
-                      type="text"
-                      value={mapping.fieldKey}
-                      onChange={(e) => {
-                        const updated = [...sheetConfig.columnMappings]
-                        updated[idx] = { ...updated[idx], fieldKey: e.target.value }
-                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
-                      }}
-                      style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px' }}
-                    />
-                    <input
-                      type="text"
-                      value={mapping.displayName}
-                      onChange={(e) => {
-                        const updated = [...sheetConfig.columnMappings]
-                        updated[idx] = { ...updated[idx], displayName: e.target.value }
-                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
-                      }}
-                      style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px' }}
-                    />
-                    <input
-                      type="number"
-                      value={mapping.columnIndex}
-                      onChange={(e) => {
-                        const updated = [...sheetConfig.columnMappings]
-                        updated[idx] = { ...updated[idx], columnIndex: parseInt(e.target.value) || 0 }
-                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
-                      }}
-                      style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', textAlign: 'center' }}
-                    />
-                    <div style={{ textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
-                      <span style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '600' }}>
-                        {columnIndexToLetter(mapping.columnIndex)}열
+                {/* 오른쪽: 실시간 미리보기 */}
+                <div style={{ flex: 1, minWidth: 0, position: 'sticky', top: '20px' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                    <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#10b981' }}>실시간 미리보기</h3>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>
+                        {sheetPreviewRaw ? `원본 ${sheetPreviewRaw.length}행` : '데이터 없음'}
                       </span>
                     </div>
-                    <select
-                      value={mapping.type}
-                      onChange={(e) => {
-                        const updated = [...sheetConfig.columnMappings]
-                        updated[idx] = { ...updated[idx], type: e.target.value }
-                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
-                      }}
-                      style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '13px', cursor: 'pointer' }}
-                    >
-                      <option value="이름" style={{ background: '#1e1e2e' }}>이름</option>
-                      <option value="날짜" style={{ background: '#1e1e2e' }}>날짜</option>
-                      <option value="숫자" style={{ background: '#1e1e2e' }}>숫자</option>
-                      <option value="퍼센트" style={{ background: '#1e1e2e' }}>퍼센트</option>
-                    </select>
-                    <button
-                      onClick={() => {
-                        const updated = sheetConfig.columnMappings.filter((_, i) => i !== idx)
-                        setSheetConfig({ ...sheetConfig, columnMappings: updated })
-                      }}
-                      style={{ background: 'none', border: 'none', color: '#f87171', fontSize: '18px', cursor: 'pointer', padding: '4px' }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
 
-              {/* 저장 버튼 */}
-              <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  onClick={saveSheetConfig}
-                  disabled={sheetConfigSaving}
-                  style={{
-                    padding: '14px 32px',
-                    background: sheetConfigSaving ? 'rgba(99,102,241,0.3)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                    border: 'none',
-                    borderRadius: '12px',
-                    color: '#fff',
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    cursor: sheetConfigSaving ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.3s ease'
-                  }}
-                >
-                  {sheetConfigSaving ? '저장 중...' : '💾 설정 저장'}
-                </button>
+                    {sheetPreviewLoading ? (
+                      <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                        시트 데이터 불러오는 중...
+                      </div>
+                    ) : sheetPreviewRaw ? (
+                      <div style={{ overflowX: 'auto' }}>
+                        {/* 원본 시트 데이터 (상단) */}
+                        <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '8px', fontWeight: '600' }}>원본 시트 데이터</div>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                            <thead>
+                              <tr>
+                                {sheetPreviewRaw[0] && sheetPreviewRaw[0].map((_, colIdx) => (
+                                  <th key={colIdx} style={{
+                                    padding: '6px 8px',
+                                    background: sheetPreviewHighlight === colIdx ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.05)',
+                                    color: sheetPreviewHighlight === colIdx ? '#a5b4fc' : '#64748b',
+                                    fontWeight: '600',
+                                    textAlign: 'center',
+                                    whiteSpace: 'nowrap',
+                                    borderBottom: '1px solid rgba(255,255,255,0.08)',
+                                    transition: 'all 0.15s',
+                                    position: 'relative'
+                                  }}>
+                                    {columnIndexToLetter(colIdx)}
+                                    {sheetConfig.columnMappings.some(m => m.columnIndex === colIdx) && (
+                                      <span style={{ display: 'block', fontSize: '9px', color: '#6366f1', fontWeight: '700' }}>
+                                        {sheetConfig.columnMappings.find(m => m.columnIndex === colIdx)?.displayName}
+                                      </span>
+                                    )}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sheetPreviewRaw.slice(0, 5).map((row, rowIdx) => (
+                                <tr key={rowIdx}>
+                                  {row.map((cell, colIdx) => (
+                                    <td key={colIdx} style={{
+                                      padding: '5px 8px',
+                                      color: sheetPreviewHighlight === colIdx ? '#e2e8f0' : '#94a3b8',
+                                      background: sheetPreviewHighlight === colIdx ? 'rgba(99,102,241,0.1)' : 'transparent',
+                                      whiteSpace: 'nowrap',
+                                      maxWidth: '100px',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      borderBottom: '1px solid rgba(255,255,255,0.03)',
+                                      transition: 'all 0.15s'
+                                    }}>
+                                      {String(cell || '')}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* 매핑 적용 결과 (하단) */}
+                        <div style={{ padding: '12px 16px' }}>
+                          <div style={{ fontSize: '11px', color: '#10b981', marginBottom: '8px', fontWeight: '600' }}>매핑 적용 결과</div>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                            <thead>
+                              <tr>
+                                {sheetConfig.columnMappings.map((m, idx) => (
+                                  <th key={idx}
+                                    onMouseEnter={() => setSheetPreviewHighlight(m.columnIndex)}
+                                    onMouseLeave={() => setSheetPreviewHighlight(null)}
+                                    style={{
+                                      padding: '6px 8px',
+                                      background: sheetPreviewHighlight === m.columnIndex ? 'rgba(16,185,129,0.2)' : 'rgba(16,185,129,0.05)',
+                                      color: sheetPreviewHighlight === m.columnIndex ? '#34d399' : '#10b981',
+                                      fontWeight: '600',
+                                      textAlign: 'center',
+                                      whiteSpace: 'nowrap',
+                                      borderBottom: '1px solid rgba(16,185,129,0.15)',
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s'
+                                    }}
+                                  >
+                                    {m.displayName || m.fieldKey}
+                                    <span style={{ display: 'block', fontSize: '9px', color: '#64748b' }}>{columnIndexToLetter(m.columnIndex)}열</span>
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(() => {
+                                // 헤더 키워드로 시작행 찾기
+                                let startIdx = 0
+                                for (let i = 0; i < sheetPreviewRaw.length; i++) {
+                                  if (sheetPreviewRaw[i][0] === sheetConfig.headerKeyword) {
+                                    startIdx = i + 1
+                                    break
+                                  }
+                                }
+                                return sheetPreviewRaw.slice(startIdx, startIdx + 5).map((row, rowIdx) => (
+                                  <tr key={rowIdx}>
+                                    {sheetConfig.columnMappings.map((m, colIdx) => {
+                                      let val = row[m.columnIndex] || ''
+                                      if (m.type === '퍼센트' && typeof val === 'number') {
+                                        val = (val * 100).toFixed(1) + '%'
+                                      } else if (m.type === '숫자' && typeof val === 'number') {
+                                        val = val.toLocaleString()
+                                      }
+                                      return (
+                                        <td key={colIdx}
+                                          onMouseEnter={() => setSheetPreviewHighlight(m.columnIndex)}
+                                          onMouseLeave={() => setSheetPreviewHighlight(null)}
+                                          style={{
+                                            padding: '5px 8px',
+                                            color: sheetPreviewHighlight === m.columnIndex ? '#e2e8f0' : '#94a3b8',
+                                            background: sheetPreviewHighlight === m.columnIndex ? 'rgba(16,185,129,0.08)' : 'transparent',
+                                            whiteSpace: 'nowrap',
+                                            maxWidth: '100px',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            textAlign: m.type === '숫자' || m.type === '퍼센트' ? 'right' : 'left',
+                                            borderBottom: '1px solid rgba(255,255,255,0.03)',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.15s'
+                                          }}
+                                        >
+                                          {String(val)}
+                                        </td>
+                                      )
+                                    })}
+                                  </tr>
+                                ))
+                              })()}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                        미리보기를 불러오려면 새로고침을 클릭하세요
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
