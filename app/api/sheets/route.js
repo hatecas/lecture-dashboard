@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { supabase } from '@/lib/supabase'
+import { getGoogleAccessToken } from '@/lib/googleAuth'
 
 // 기본 설정값 (DB에 설정이 없을 때 사용)
 const DEFAULT_CONFIG = {
@@ -39,6 +40,21 @@ async function getSheetConfig() {
   }
 }
 
+// Google Sheets API로 데이터 가져오기 (서비스 계정 인증)
+async function fetchSheetData(sheetId, range) {
+  const accessToken = await getGoogleAccessToken()
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  })
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`Google Sheets API 오류: ${response.status} - ${err}`)
+  }
+  const data = await response.json()
+  return data.values || []
+}
+
 export async function GET(request) {
   // API 인증 검증
   const auth = await verifyApiAuth(request)
@@ -56,25 +72,12 @@ export async function GET(request) {
     const headerKeyword = config.header_keyword
     const columnMappings = config.column_mappings || DEFAULT_CONFIG.column_mappings
 
-    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&range=${range}`
-
-    const response = await fetch(url)
-    const text = await response.text()
-
-    // gviz 응답에서 JSON 부분만 추출 (더 안정적인 파싱)
-    const startIdx = text.indexOf('(')
-    const endIdx = text.lastIndexOf(')')
-    if (startIdx === -1 || endIdx === -1) {
-      console.error('시트 응답 형식 오류 (gviz가 아님):', text.substring(0, 200))
-      return NextResponse.json({ error: '시트 데이터 형식 오류' }, { status: 500 })
-    }
-    const json = JSON.parse(text.substring(startIdx + 1, endIdx))
-    const rows = json.table.rows
+    const rows = await fetchSheetData(sheetId, range)
 
     // 헤더 행 찾기
     let startIndex = 0
     for (let i = 0; i < rows.length; i++) {
-      if (rows[i].c[0]?.v === headerKeyword) {
+      if (rows[i][0] === headerKeyword) {
         startIndex = i + 1
         break
       }
@@ -89,10 +92,10 @@ export async function GET(request) {
     // 전체 데이터 파싱
     const allData = []
     for (let i = startIndex; i < rows.length; i++) {
-      const row = rows[i].c
+      const row = rows[i]
       const nameMapping = mappingMap['name']
       const nameIdx = nameMapping ? nameMapping.columnIndex : 0
-      const rowName = row[nameIdx]?.v
+      const rowName = row[nameIdx]
       if (!rowName) continue
 
       const entry = { name: rowName.replace(/\s+/g, ' ').trim() }
@@ -100,13 +103,17 @@ export async function GET(request) {
       for (const m of columnMappings) {
         if (m.fieldKey === 'name') continue
 
+        const rawVal = row[m.columnIndex]
+
         if (m.type === '날짜') {
-          entry[m.fieldKey] = row[m.columnIndex]?.f || null
+          entry[m.fieldKey] = rawVal || null
         } else if (m.type === '퍼센트') {
-          const val = row[m.columnIndex]?.v || 0
+          const val = parseFloat(rawVal) || 0
+          // Google Sheets API는 이미 퍼센트를 소수로 반환 (0.15 = 15%)
           entry[m.fieldKey] = Math.round(val * 10000) / 100
         } else {
-          entry[m.fieldKey] = row[m.columnIndex]?.v || 0
+          const val = parseFloat(rawVal) || 0
+          entry[m.fieldKey] = val
         }
       }
 
@@ -119,9 +126,6 @@ export async function GET(request) {
       if (entry.conversionRate !== undefined) {
         entry.purchaseConversionRate = entry.conversionRate
       }
-
-      // 기존 호환: kakaoRoomDb = kakaoRoomDb
-      // (이미 올바른 키로 매핑됨)
 
       allData.push(entry)
     }

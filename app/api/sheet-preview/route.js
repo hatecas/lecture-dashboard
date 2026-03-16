@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { getGoogleAccessToken } from '@/lib/googleAuth'
 
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
@@ -13,24 +14,23 @@ export async function POST(request) {
       return NextResponse.json({ error: '시트 ID와 범위가 필요합니다.' }, { status: 400 })
     }
 
-    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&range=${dataRange}`
-    const response = await fetch(url)
-    const text = await response.text()
+    const accessToken = await getGoogleAccessToken()
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${dataRange}`
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    })
 
-    const startIdx = text.indexOf('(')
-    const endIdx = text.lastIndexOf(')')
-    if (startIdx === -1 || endIdx === -1) {
-      return NextResponse.json({ error: '시트 응답 형식 오류' }, { status: 500 })
+    if (!response.ok) {
+      const err = await response.text()
+      console.error('Sheet preview API error:', err)
+      return NextResponse.json({ error: '시트 데이터 접근 실패' }, { status: 500 })
     }
-    const json = JSON.parse(text.substring(startIdx + 1, endIdx))
-    const rows = json.table.rows
+
+    const data = await response.json()
+    const rows = data.values || []
 
     // 최대 10행만 반환
-    const preview = rows.slice(0, 10).map(r =>
-      (r.c || []).map(c => c?.f || c?.v || '')
-    )
-
-    return NextResponse.json({ rows: preview })
+    return NextResponse.json({ rows: rows.slice(0, 10) })
   } catch (error) {
     console.error('Sheet preview error:', error)
     return NextResponse.json({ error: '시트 미리보기 로드 실패' }, { status: 500 })
