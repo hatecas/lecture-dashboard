@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = {
 async function getSheetConfig() {
   try {
     const { data, error } = await supabase
-      .from('sheet_config')
+      .from('sheet_column_config')
       .select('*')
       .order('id', { ascending: true })
       .limit(1)
@@ -43,7 +43,7 @@ async function getSheetConfig() {
 // Google Sheets API로 데이터 가져오기 (서비스 계정 인증)
 async function fetchSheetData(sheetId, range) {
   const accessToken = await getGoogleAccessToken()
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` }
   })

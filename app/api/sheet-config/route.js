@@ -11,7 +11,7 @@ export async function GET(request) {
 
   try {
     const { data, error } = await supabase
-      .from('sheet_config')
+      .from('sheet_column_config')
       .select('*')
       .order('id', { ascending: true })
       .limit(1)
@@ -46,7 +46,7 @@ export async function POST(request) {
 
     // Check if config exists
     const { data: existing } = await supabase
-      .from('sheet_config')
+      .from('sheet_column_config')
       .select('id')
       .limit(1)
       .single()
@@ -54,7 +54,7 @@ export async function POST(request) {
     let result
     if (existing) {
       const { data, error } = await supabase
-        .from('sheet_config')
+        .from('sheet_column_config')
         .update({
           sheet_id: sheetId,
           data_range: dataRange,
@@ -69,7 +69,7 @@ export async function POST(request) {
       result = data
     } else {
       const { data, error } = await supabase
-        .from('sheet_config')
+        .from('sheet_column_config')
         .insert({
           sheet_id: sheetId,
           data_range: dataRange,

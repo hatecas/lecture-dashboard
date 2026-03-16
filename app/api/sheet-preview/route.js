@@ -15,7 +15,7 @@ export async function POST(request) {
     }
 
     const accessToken = await getGoogleAccessToken()
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${dataRange}`
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${dataRange}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` }
     })
