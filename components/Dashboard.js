@@ -128,21 +128,21 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   // 시트 설정 상태
   const [sheetConfig, setSheetConfig] = useState({
     sheetId: '1cG6wewwrBrNZYI9y_PCAA943Y4qqWAJiWzI1zleDXiw',
-    dataRange: 'A:AR',
+    dataRange: 'A:AS',
     headerKeyword: '강사명',
     columnMappings: [
       { fieldKey: 'name', displayName: '강사명', columnIndex: 0, type: '이름' },
       { fieldKey: 'freeClassDate', displayName: '무료강의날짜', columnIndex: 1, type: '날짜' },
       { fieldKey: 'revenue', displayName: '최종매출액', columnIndex: 8, type: '숫자' },
-      { fieldKey: 'operatingProfit', displayName: '영업이익', columnIndex: 10, type: '숫자' },
-      { fieldKey: 'profitMargin', displayName: '영업이익률', columnIndex: 11, type: '퍼센트' },
-      { fieldKey: 'adSpend', displayName: '광고비', columnIndex: 17, type: '숫자' },
-      { fieldKey: 'gdnConvCost', displayName: 'GDN전환단가', columnIndex: 18, type: '숫자' },
-      { fieldKey: 'metaConvCost', displayName: '메타전환단가', columnIndex: 19, type: '숫자' },
-      { fieldKey: 'kakaoRoomDb', displayName: '카톡방', columnIndex: 28, type: '숫자' },
-      { fieldKey: 'liveViewers', displayName: '동시접속', columnIndex: 29, type: '숫자' },
-      { fieldKey: 'totalPurchases', displayName: '결제건수', columnIndex: 34, type: '숫자' },
-      { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 43, type: '퍼센트' }
+      { fieldKey: 'operatingProfit', displayName: '영업이익', columnIndex: 11, type: '숫자' },
+      { fieldKey: 'profitMargin', displayName: '영업이익률', columnIndex: 12, type: '퍼센트' },
+      { fieldKey: 'adSpend', displayName: '광고비', columnIndex: 18, type: '숫자' },
+      { fieldKey: 'gdnConvCost', displayName: 'GDN전환단가', columnIndex: 19, type: '숫자' },
+      { fieldKey: 'metaConvCost', displayName: '메타전환단가', columnIndex: 20, type: '숫자' },
+      { fieldKey: 'kakaoRoomDb', displayName: '카톡방', columnIndex: 29, type: '숫자' },
+      { fieldKey: 'liveViewers', displayName: '동시접속', columnIndex: 30, type: '숫자' },
+      { fieldKey: 'totalPurchases', displayName: '결제건수', columnIndex: 35, type: '숫자' },
+      { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 44, type: '퍼센트' }
     ]
   })
   const [sheetConfigLoading, setSheetConfigLoading] = useState(false)
