@@ -270,19 +270,19 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
     return letter
   }
 
-  // 시트 미리보기 데이터 가져오기
+  // 시트 미리보기 데이터 가져오기 (서버 API 경유)
   const fetchSheetPreview = async () => {
     if (!sheetConfig.sheetId || !sheetConfig.dataRange) return
     setSheetPreviewLoading(true)
     try {
-      const url = `https://docs.google.com/spreadsheets/d/${sheetConfig.sheetId}/gviz/tq?tqx=out:json&range=${sheetConfig.dataRange}`
-      const response = await fetch(url)
-      const text = await response.text()
-      const json = JSON.parse(text.substring(47, text.length - 2))
-      const rows = json.table.rows
-      // 최대 5행만 미리보기
-      const preview = rows.slice(0, 8).map(r => (r.c || []).map(c => c?.f || c?.v || ''))
-      setSheetPreviewRaw(preview)
+      const response = await fetch('/api/sheet-preview', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ sheetId: sheetConfig.sheetId, dataRange: sheetConfig.dataRange })
+      })
+      if (!response.ok) throw new Error('Failed')
+      const result = await response.json()
+      setSheetPreviewRaw(result.rows || null)
     } catch {
       setSheetPreviewRaw(null)
     } finally {
