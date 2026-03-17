@@ -128,21 +128,21 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
   // 시트 설정 상태
   const [sheetConfig, setSheetConfig] = useState({
     sheetId: '1cG6wewwrBrNZYI9y_PCAA943Y4qqWAJiWzI1zleDXiw',
-    dataRange: 'A:AS',
+    dataRange: 'A:AT',
     headerKeyword: '강사명',
     columnMappings: [
       { fieldKey: 'name', displayName: '강사명', columnIndex: 0, type: '이름' },
       { fieldKey: 'freeClassDate', displayName: '무료강의날짜', columnIndex: 1, type: '날짜' },
       { fieldKey: 'revenue', displayName: '최종매출액', columnIndex: 8, type: '숫자' },
-      { fieldKey: 'operatingProfit', displayName: '영업이익', columnIndex: 11, type: '숫자' },
-      { fieldKey: 'profitMargin', displayName: '영업이익률', columnIndex: 12, type: '퍼센트' },
-      { fieldKey: 'adSpend', displayName: '광고비', columnIndex: 18, type: '숫자' },
-      { fieldKey: 'gdnConvCost', displayName: 'GDN전환단가', columnIndex: 19, type: '숫자' },
-      { fieldKey: 'metaConvCost', displayName: '메타전환단가', columnIndex: 20, type: '숫자' },
-      { fieldKey: 'kakaoRoomDb', displayName: '카톡방', columnIndex: 29, type: '숫자' },
-      { fieldKey: 'liveViewers', displayName: '동시접속', columnIndex: 30, type: '숫자' },
-      { fieldKey: 'totalPurchases', displayName: '결제건수', columnIndex: 35, type: '숫자' },
-      { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 44, type: '퍼센트' }
+      { fieldKey: 'operatingProfit', displayName: '영업이익', columnIndex: 12, type: '숫자' },
+      { fieldKey: 'profitMargin', displayName: '영업이익률', columnIndex: 13, type: '퍼센트' },
+      { fieldKey: 'adSpend', displayName: '광고비', columnIndex: 19, type: '숫자' },
+      { fieldKey: 'gdnConvCost', displayName: 'GDN전환단가', columnIndex: 20, type: '숫자' },
+      { fieldKey: 'metaConvCost', displayName: '메타전환단가', columnIndex: 21, type: '숫자' },
+      { fieldKey: 'kakaoRoomDb', displayName: '카톡방', columnIndex: 30, type: '숫자' },
+      { fieldKey: 'liveViewers', displayName: '동시접속', columnIndex: 31, type: '숫자' },
+      { fieldKey: 'totalPurchases', displayName: '결제건수', columnIndex: 36, type: '숫자' },
+      { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 45, type: '퍼센트' }
     ]
   })
   const [sheetConfigLoading, setSheetConfigLoading] = useState(false)
@@ -1721,29 +1721,55 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
             )}
           </button>
 
-          {/* 시트 설정 */}
-          <button onClick={() => { setCurrentTab('sheet-settings'); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'sheet-settings' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'sheet-settings' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'sheet-settings' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'sheet-settings' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="시트 설정">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚙</span>
-            시트 설정
-          </button>
+          {/* jinwoo 전용: 시트 설정 + 시트 바로가기 */}
+          {userName === 'jinwoo' && (
+            <>
+              <button onClick={() => { setCurrentTab('sheet-settings'); if(isMobile) setMobileMenuOpen(false) }} style={{
+                width: '100%',
+                padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+                background: currentTab === 'sheet-settings' ? 'rgba(99,102,241,0.2)' : 'transparent',
+                backdropFilter: currentTab === 'sheet-settings' ? 'blur(10px)' : 'none',
+                border: 'none',
+                borderLeft: currentTab === 'sheet-settings' ? '3px solid #818cf8' : '3px solid transparent',
+                color: currentTab === 'sheet-settings' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+                fontSize: sidebarCollapsed ? '11px' : '14px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: sidebarCollapsed ? 'column' : 'row',
+                alignItems: 'center',
+                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                gap: sidebarCollapsed ? '4px' : '10px',
+                transition: 'all 0.3s ease'
+              }} title="시트 설정">
+                <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚙</span>
+                {sidebarCollapsed ? '시트설정' : '시트 설정'}
+              </button>
+              <a href="https://docs.google.com/spreadsheets/d/1NciqOt6PaUggmroaov60UycBbkdIY6eVXSXfwLyvCRo/edit?gid=1217448453#gid=1217448453" target="_blank" rel="noopener noreferrer" style={{
+                width: '100%',
+                padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+                background: 'transparent',
+                border: 'none',
+                borderLeft: '3px solid transparent',
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: sidebarCollapsed ? '11px' : '14px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: sidebarCollapsed ? 'column' : 'row',
+                alignItems: 'center',
+                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                gap: sidebarCollapsed ? '4px' : '10px',
+                transition: 'all 0.3s ease',
+                textDecoration: 'none'
+              }} title="시간별 구매 추이 시트">
+                <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⏰</span>
+                {sidebarCollapsed ? '구매추이' : '구매 추이 시트'}
+              </a>
+            </>
+          )}
         </div>
       </div>
 
