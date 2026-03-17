@@ -153,6 +153,23 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [sheetPreviewHighlight, setSheetPreviewHighlight] = useState(null) // 하이라이트할 열 인덱스
   const [showSessionChart, setShowSessionChart] = useState(false) // 기수별 차트 모달
 
+  // 시트 결제자 데이터 상태
+  const [payerSheetYear, setPayerSheetYear] = useState('26')
+  const [payerSheetTabs, setPayerSheetTabs] = useState([])
+  const [payerSheetLoading, setPayerSheetLoading] = useState(false)
+  const [payerSheetSelectedTab, setPayerSheetSelectedTab] = useState(null)
+  const [payerSheetData, setPayerSheetData] = useState(null)
+  const [payerSheetDataLoading, setPayerSheetDataLoading] = useState(false)
+  const [payerSheetSearch, setPayerSheetSearch] = useState('')
+  const [payerMatchFiles, setPayerMatchFiles] = useState([])
+  const [payerMatchProcessing, setPayerMatchProcessing] = useState(false)
+  const [payerMatchLog, setPayerMatchLog] = useState([])
+  const [payerMatchResult, setPayerMatchResult] = useState(null)
+  const [payerTabMappings, setPayerTabMappings] = useState({})
+  const [payerEditingTab, setPayerEditingTab] = useState(null)
+  const [payerEditInstructor, setPayerEditInstructor] = useState('')
+  const [payerEditCohort, setPayerEditCohort] = useState('')
+
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
   const [csInput, setCsInput] = useState('')
@@ -606,6 +623,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   useEffect(() => {
     loadSessions()
     loadInstructors()
+    loadPayerTabMappings()
 
     // 모바일 감지
     const checkMobile = () => {
@@ -649,6 +667,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     if (currentTab === 'sheet-settings') {
       loadSheetConfig()
       fetchSheetPreview()
+    }
+    if (currentTab === 'payer-data' && payerSheetTabs.length === 0) {
+      loadPayerSheetTabs(payerSheetYear)
     }
   }, [currentTab])
 
@@ -924,6 +945,92 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       setShowAddModal(false)
       loadInstructors()
     }
+  }
+
+  // 결제자 탭 매핑 서버 함수들
+  const loadPayerTabMappings = async () => {
+    try {
+      const response = await fetch('/api/payer-tab-mappings', { headers: getAuthHeaders() })
+      const result = await response.json()
+      if (result.success) {
+        setPayerTabMappings(result.mappings || {})
+      }
+    } catch (e) {
+      console.error('탭 매핑 로드 실패:', e)
+    }
+  }
+
+  const savePayerTabMapping = async (year, tabRaw, instructor, cohort) => {
+    try {
+      await fetch('/api/payer-tab-mappings', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ year, tabRaw, instructor, cohort })
+      })
+      // 로컬 상태 즉시 반영
+      setPayerTabMappings(prev => ({ ...prev, [`${year}_${tabRaw}`]: { instructor, cohort } }))
+    } catch (e) {
+      console.error('탭 매핑 저장 실패:', e)
+    }
+  }
+
+  const deletePayerTabMapping = async (year, tabRaw) => {
+    try {
+      await fetch('/api/payer-tab-mappings', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ year, tabRaw })
+      })
+      setPayerTabMappings(prev => {
+        const next = { ...prev }
+        delete next[`${year}_${tabRaw}`]
+        return next
+      })
+    } catch (e) {
+      console.error('탭 매핑 삭제 실패:', e)
+    }
+  }
+
+  // 시트 결제자 데이터 함수들
+  const loadPayerSheetTabs = async (year) => {
+    setPayerSheetLoading(true)
+    setPayerSheetData(null)
+    setPayerSheetSelectedTab(null)
+    try {
+      const response = await fetch(`/api/payer-sheets?year=${year}`, {
+        headers: getAuthHeaders()
+      })
+      const result = await response.json()
+      if (result.success) {
+        setPayerSheetTabs(result.tabs)
+      } else {
+        setPayerSheetTabs([])
+      }
+    } catch (e) {
+      setPayerSheetTabs([])
+    }
+    setPayerSheetLoading(false)
+  }
+
+  const loadPayerSheetData = async (tab) => {
+    setPayerSheetDataLoading(true)
+    setPayerSheetSelectedTab(tab)
+    try {
+      const response = await fetch('/api/payer-sheets', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ year: payerSheetYear, tabName: tab.raw })
+      })
+      const result = await response.json()
+      if (result.success) {
+        setPayerSheetData(result)
+      } else {
+        setPayerSheetData(null)
+      }
+    } catch (e) {
+      setPayerSheetData(null)
+    }
+    setPayerSheetDataLoading(false)
   }
 
   // 첨부파일 관련 함수들 (강사별)
@@ -1747,6 +1854,28 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚙</span>
                 {sidebarCollapsed ? '시트설정' : '시트 설정'}
               </button>
+              <button onClick={() => { setCurrentTab('payer-data'); if(isMobile) setMobileMenuOpen(false) }} style={{
+                width: '100%',
+                padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+                background: currentTab === 'payer-data' ? 'rgba(99,102,241,0.2)' : 'transparent',
+                backdropFilter: currentTab === 'payer-data' ? 'blur(10px)' : 'none',
+                border: 'none',
+                borderLeft: currentTab === 'payer-data' ? '3px solid #818cf8' : '3px solid transparent',
+                color: currentTab === 'payer-data' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+                fontSize: sidebarCollapsed ? '11px' : '14px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: sidebarCollapsed ? 'column' : 'row',
+                alignItems: 'center',
+                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                gap: sidebarCollapsed ? '4px' : '10px',
+                transition: 'all 0.3s ease'
+              }} title="결제자 데이터">
+                <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>💳</span>
+                {sidebarCollapsed ? '결제자' : '결제자 데이터'}
+              </button>
               <a href="https://docs.google.com/spreadsheets/d/1NciqOt6PaUggmroaov60UycBbkdIY6eVXSXfwLyvCRo/edit?gid=1217448453#gid=1217448453" target="_blank" rel="noopener noreferrer" style={{
                 width: '100%',
                 padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
@@ -2098,6 +2227,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   )}
                 </div>
               </div>
+
 
               {/* 광고 성과 - 글래스모피즘 */}
               {sheetData ? (() => {
@@ -5745,6 +5875,453 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       </div>
                     )}
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 결제자 데이터 탭 */}
+          {currentTab === 'payer-data' && (
+            <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1400px', margin: '0 auto' }}>
+              <div style={{ marginBottom: '20px' }}>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  💳 결제자 매칭
+                  <HelpTooltip text={"[사용 방법]\n1. 왼쪽에서 결제자 시트 탭을 선택합니다\n2. 오른쪽에서 신청자 엑셀 파일을 업로드합니다\n   (여러 파일 가능: 1기_GDN.xlsx, 1기_돈깨비.xlsx 등)\n3. 매칭 시작을 누르면 자동으로 처리됩니다\n\n[매칭 로직]\n• 결제자의 전화번호와 신청자의 전화번호를 비교합니다\n• 같은 번호가 있으면 → 해당 신청자 파일명이 유입경로가 됩니다\n• 같은 사람이 여러 파일에 있으면 → 신청일이 가장 빠른 것 하나만 사용\n• 전화번호가 매칭 안 되면 → '직접구매'로 표시됩니다\n\n[제외 조건]\n• 결제 구분이 '전체환불'인 건은 자동 제외됩니다\n• 결제금액이 0원 이하인 건도 자동 제외됩니다\n• 부분환불은 포함됩니다\n\n[결과 엑셀 컬럼]\n구매자 / 전화번호 / 결제금액 / 결제일 / 신청일 / 유입경로 / 결제수단(카드·계좌이체)"} />
+                </h2>
+                <p style={{ color: '#64748b', fontSize: '13px' }}>결제자 시트를 선택하고 신청자 파일을 업로드하면 전화번호 기반으로 유입경로를 매칭합니다.</p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.5fr', gap: '20px' }}>
+                {/* 왼쪽: 결제자 시트 탭 선택 */}
+                <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      📋 결제자 시트
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
+                        {['25', '26'].map(y => (
+                          <button
+                            key={y}
+                            onClick={() => { setPayerSheetYear(y); loadPayerSheetTabs(y) }}
+                            style={{
+                              padding: '4px 10px',
+                              background: payerSheetYear === y ? 'rgba(99,102,241,0.3)' : 'transparent',
+                              border: 'none',
+                              color: payerSheetYear === y ? '#818cf8' : '#94a3b8',
+                              fontSize: '12px',
+                              fontWeight: payerSheetYear === y ? '600' : '400',
+                              cursor: 'pointer'
+                            }}
+                          >{y}년</button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => loadPayerSheetTabs(payerSheetYear)}
+                        disabled={payerSheetLoading}
+                        style={{
+                          padding: '4px 10px',
+                          background: 'rgba(99,102,241,0.15)',
+                          border: '1px solid rgba(99,102,241,0.3)',
+                          borderRadius: '6px',
+                          color: '#818cf8',
+                          fontSize: '12px',
+                          cursor: payerSheetLoading ? 'wait' : 'pointer'
+                        }}
+                      >{payerSheetLoading ? '로딩...' : '불러오기'}</button>
+                    </div>
+                  </div>
+
+                  {payerSheetTabs.length > 0 && (
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="강사명 또는 기수 검색..."
+                        value={payerSheetSearch}
+                        onChange={e => setPayerSheetSearch(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '6px',
+                          color: '#e2e8f0',
+                          fontSize: '12px',
+                          marginBottom: '8px',
+                          boxSizing: 'border-box',
+                          outline: 'none'
+                        }}
+                      />
+
+                      <div style={{ maxHeight: '500px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {payerSheetTabs
+                          .filter(tab => {
+                            if (!payerSheetSearch) return true
+                            const q = payerSheetSearch.toLowerCase()
+                            const mapping = payerTabMappings[`${payerSheetYear}_${tab.raw}`]
+                            const inst = mapping?.instructor || tab.instructor
+                            const coh = mapping?.cohort || tab.cohort
+                            return inst.toLowerCase().includes(q) || coh.toLowerCase().includes(q) || tab.raw.toLowerCase().includes(q)
+                          })
+                          .map((tab, i) => {
+                            const mapping = payerTabMappings[`${payerSheetYear}_${tab.raw}`]
+                            const displayInstructor = mapping?.instructor || tab.instructor
+                            const displayCohort = mapping?.cohort || tab.cohort
+                            const isEditing = payerEditingTab === tab.raw
+                            const isSelected = payerSheetSelectedTab?.raw === tab.raw
+
+                            return (
+                              <div key={i}>
+                                <div
+                                  onClick={() => {
+                                    const mapped = { ...tab, instructor: displayInstructor, cohort: displayCohort }
+                                    setPayerSheetSelectedTab(mapped)
+                                    setPayerMatchResult(null)
+                                  }}
+                                  style={{
+                                    padding: '8px 12px',
+                                    background: isSelected ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
+                                    border: isSelected ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.05)',
+                                    borderRadius: isEditing ? '6px 6px 0 0' : '6px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+                                    <span style={{ fontSize: '13px', fontWeight: '600', color: mapping ? '#a5b4fc' : '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayInstructor}</span>
+                                    {displayCohort && <span style={{ fontSize: '11px', color: '#818cf8', background: 'rgba(99,102,241,0.1)', padding: '1px 6px', borderRadius: '4px', flexShrink: 0 }}>{displayCohort}</span>}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                    <span style={{ fontSize: '10px', color: '#64748b' }}>{tab.displayDate}</span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (isEditing) {
+                                          setPayerEditingTab(null)
+                                        } else {
+                                          setPayerEditingTab(tab.raw)
+                                          setPayerEditInstructor(displayInstructor)
+                                          setPayerEditCohort(displayCohort)
+                                        }
+                                      }}
+                                      style={{
+                                        padding: '2px 4px',
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: isEditing ? '#818cf8' : '#64748b',
+                                        fontSize: '11px',
+                                        cursor: 'pointer'
+                                      }}
+                                      title="강사/기수 수정"
+                                    >✏️</button>
+                                  </div>
+                                </div>
+
+                                {/* 인라인 편집 폼 */}
+                                {isEditing && (
+                                  <div style={{
+                                    padding: '8px 12px',
+                                    background: 'rgba(99,102,241,0.08)',
+                                    border: '1px solid rgba(99,102,241,0.2)',
+                                    borderTop: 'none',
+                                    borderRadius: '0 0 6px 6px',
+                                    display: 'flex',
+                                    gap: '6px',
+                                    alignItems: 'center'
+                                  }}
+                                  onClick={e => e.stopPropagation()}
+                                  >
+                                    <input
+                                      value={payerEditInstructor}
+                                      onChange={e => setPayerEditInstructor(e.target.value)}
+                                      placeholder="강사명"
+                                      style={{
+                                        flex: 1,
+                                        padding: '5px 8px',
+                                        background: 'rgba(255,255,255,0.08)',
+                                        border: '1px solid rgba(255,255,255,0.15)',
+                                        borderRadius: '4px',
+                                        color: '#e2e8f0',
+                                        fontSize: '12px',
+                                        outline: 'none',
+                                        minWidth: 0
+                                      }}
+                                    />
+                                    <input
+                                      value={payerEditCohort}
+                                      onChange={e => setPayerEditCohort(e.target.value)}
+                                      placeholder="기수"
+                                      style={{
+                                        width: '60px',
+                                        padding: '5px 8px',
+                                        background: 'rgba(255,255,255,0.08)',
+                                        border: '1px solid rgba(255,255,255,0.15)',
+                                        borderRadius: '4px',
+                                        color: '#e2e8f0',
+                                        fontSize: '12px',
+                                        outline: 'none'
+                                      }}
+                                    />
+                                    <button
+                                      onClick={() => {
+                                        savePayerTabMapping(payerSheetYear, tab.raw, payerEditInstructor.trim(), payerEditCohort.trim())
+                                        setPayerEditingTab(null)
+                                        if (payerSheetSelectedTab?.raw === tab.raw) {
+                                          setPayerSheetSelectedTab({ ...tab, instructor: payerEditInstructor.trim(), cohort: payerEditCohort.trim() })
+                                        }
+                                      }}
+                                      style={{ padding: '5px 10px', background: 'rgba(16,185,129,0.2)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '4px', color: '#10b981', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}
+                                    >저장</button>
+                                    {mapping && (
+                                      <button
+                                        onClick={() => {
+                                          deletePayerTabMapping(payerSheetYear, tab.raw)
+                                          setPayerEditingTab(null)
+                                          if (payerSheetSelectedTab?.raw === tab.raw) {
+                                            setPayerSheetSelectedTab({ ...tab })
+                                          }
+                                        }}
+                                        style={{ padding: '5px 8px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px', color: '#f87171', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}
+                                      >초기화</button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  )}
+
+                  {payerSheetTabs.length === 0 && !payerSheetLoading && (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b', fontSize: '12px' }}>
+                      "불러오기"를 눌러 시트 탭 목록을 로드하세요
+                    </div>
+                  )}
+                </div>
+
+                {/* 오른쪽: 신청자 업로드 + 매칭 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* 선택된 시트 정보 */}
+                  <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.2)' }}>
+                    <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🔄 유입경로 매칭
+                    </div>
+
+                    {/* 선택 상태 표시 */}
+                    <div style={{ padding: '12px 16px', background: payerSheetSelectedTab ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)', borderRadius: '8px', border: `1px solid ${payerSheetSelectedTab ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)'}`, marginBottom: '16px' }}>
+                      {payerSheetSelectedTab ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ color: '#10b981', fontSize: '14px' }}>✓</span>
+                          <span style={{ color: '#e2e8f0', fontSize: '13px', fontWeight: '500' }}>
+                            결제자: {payerSheetSelectedTab.instructor} {payerSheetSelectedTab.cohort}
+                          </span>
+                          <span style={{ color: '#64748b', fontSize: '11px' }}>({payerSheetSelectedTab.displayDate})</span>
+                          {payerTabMappings[`${payerSheetYear}_${payerSheetSelectedTab.raw}`] && (
+                            <span style={{ color: '#94a3b8', fontSize: '10px' }}>원본: {payerSheetSelectedTab.raw}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#64748b', fontSize: '13px' }}>왼쪽에서 결제자 시트를 선택해주세요</span>
+                      )}
+                    </div>
+
+                    {/* 신청자 파일 업로드 */}
+                    <div style={{
+                      padding: '20px',
+                      background: 'rgba(99,102,241,0.08)',
+                      borderRadius: '10px',
+                      border: '2px dashed rgba(99,102,241,0.25)',
+                      textAlign: 'center',
+                      marginBottom: '16px'
+                    }}>
+                      <div style={{ fontSize: '28px', marginBottom: '6px' }}>📥</div>
+                      <p style={{ fontSize: '13px', fontWeight: '500', marginBottom: '4px' }}>신청자 데이터</p>
+                      <p style={{ color: '#94a3b8', fontSize: '11px', marginBottom: '10px' }}>D열=전화번호, E열=신청일, 파일명=유입경로 (Excel/CSV, 여러개 가능)</p>
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        multiple
+                        onChange={(e) => { setPayerMatchFiles(Array.from(e.target.files)); setPayerMatchResult(null) }}
+                        style={{ display: 'none' }}
+                        id="payer-match-file"
+                      />
+                      <label
+                        htmlFor="payer-match-file"
+                        style={{
+                          display: 'inline-block',
+                          padding: '7px 16px',
+                          background: 'rgba(99,102,241,0.3)',
+                          borderRadius: '6px',
+                          color: '#a5b4fc',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >파일 선택</label>
+                      {payerMatchFiles.length > 0 && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '60px', overflow: 'auto' }}>
+                          {payerMatchFiles.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 매칭 버튼 */}
+                    <button
+                      onClick={async () => {
+                        if (!payerSheetSelectedTab) {
+                          alert('결제자 시트를 선택해주세요.')
+                          return
+                        }
+                        if (payerMatchFiles.length === 0) {
+                          alert('신청자 파일을 선택해주세요.')
+                          return
+                        }
+                        setPayerMatchProcessing(true)
+                        setPayerMatchLog(['처리 시작...'])
+                        setPayerMatchResult(null)
+
+                        const formData = new FormData()
+                        payerMatchFiles.forEach(f => formData.append('applicants', f))
+                        formData.append('year', payerSheetYear)
+                        formData.append('tabName', payerSheetSelectedTab.raw)
+
+                        try {
+                          const token = localStorage.getItem('authToken')
+                          const res = await fetch('/api/tools/payer-match', {
+                            method: 'POST',
+                            headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                            body: formData
+                          })
+                          const data = await res.json()
+                          if (data.success) {
+                            setPayerMatchResult(data)
+                            setPayerMatchLog(data.logs || ['처리 완료'])
+                          } else {
+                            setPayerMatchLog(['오류: ' + data.error])
+                          }
+                        } catch (err) {
+                          setPayerMatchLog(['오류: ' + err.message])
+                        }
+                        setPayerMatchProcessing(false)
+                      }}
+                      disabled={payerMatchProcessing || !payerSheetSelectedTab || payerMatchFiles.length === 0}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        background: payerMatchProcessing ? '#4c4c6d' : (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        border: 'none',
+                        borderRadius: '10px',
+                        color: (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? '#64748b' : '#fff',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        cursor: payerMatchProcessing ? 'wait' : (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {payerMatchProcessing ? '매칭 처리 중...' : '🔄 매칭 시작'}
+                    </button>
+
+                    {/* 로그 */}
+                    {payerMatchLog.length > 0 && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '10px',
+                        background: 'rgba(0,0,0,0.3)',
+                        borderRadius: '8px',
+                        maxHeight: '120px',
+                        overflow: 'auto',
+                        fontFamily: 'monospace',
+                        fontSize: '11px'
+                      }}>
+                        {payerMatchLog.map((log, i) => (
+                          <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '3px' }}>{log}</div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 매칭 결과 */}
+                    {payerMatchResult && payerMatchResult.success && (
+                      <div style={{ marginTop: '12px', padding: '14px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.3)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                          <span style={{ color: '#10b981', fontWeight: '600', fontSize: '14px' }}>✓ 매칭 완료</span>
+                          <span style={{ color: '#94a3b8', fontSize: '12px' }}>
+                            매칭: {payerMatchResult.matched}명 / 미매칭: {payerMatchResult.unmatched}명 / 전체: {payerMatchResult.total}명
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={() => {
+                              const link = document.createElement('a')
+                              link.href = payerMatchResult.downloadUrl
+                              link.download = `매칭결과_${payerSheetSelectedTab?.instructor}_${payerSheetSelectedTab?.cohort}.xlsx`
+                              link.click()
+                            }}
+                            style={{
+                              padding: '8px 16px',
+                              background: 'rgba(16,185,129,0.2)',
+                              border: '1px solid rgba(16,185,129,0.4)',
+                              borderRadius: '8px',
+                              color: '#10b981',
+                              fontSize: '12px',
+                              cursor: 'pointer'
+                            }}
+                          >📥 결과 다운로드</button>
+                          <button
+                            onClick={() => { setPayerMatchResult(null); setPayerMatchLog([]); setPayerMatchFiles([]) }}
+                            style={{
+                              padding: '8px 16px',
+                              background: 'rgba(99,102,241,0.2)',
+                              border: '1px solid rgba(99,102,241,0.4)',
+                              borderRadius: '8px',
+                              color: '#a5b4fc',
+                              fontSize: '12px',
+                              cursor: 'pointer'
+                            }}
+                          >🔄 초기화</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 매칭 결과 미리보기 테이블 */}
+                  {payerMatchResult && payerMatchResult.success && payerMatchResult.matchedData && (
+                    <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.2)' }}>
+                      <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#e2e8f0' }}>
+                        매칭 결과 미리보기
+                        <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>매칭 {payerMatchResult.matchedData.length}건 + 직접구매 {payerMatchResult.unmatchedData.length}건</span>
+                      </div>
+                      <div style={{ maxHeight: '400px', overflowY: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead>
+                            <tr style={{ background: '#1e293b', position: 'sticky', top: 0, zIndex: 1 }}>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>#</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>구매자</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>전화번호</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'right', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>결제금액</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>유입경로</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>결제수단</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...payerMatchResult.matchedData, ...payerMatchResult.unmatchedData].slice(0, 50).map((row, i) => (
+                              <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                <td style={{ padding: '6px 10px', color: '#64748b' }}>{i + 1}</td>
+                                <td style={{ padding: '6px 10px', color: '#e2e8f0' }}>{row.구매자 || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: '#94a3b8' }}>{row.전화번호 || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: '#10b981', textAlign: 'right' }}>{row.결제금액 || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: row.유입경로 === '(직접구매)' ? '#f59e0b' : '#818cf8' }}>{row.유입경로 || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: '#94a3b8' }}>{row.결제수단 || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
