@@ -131,15 +131,16 @@ export async function POST(request) {
 
     // 헤더로 컬럼 자동 감지
     const headers = rows[0] || []
-    let phoneColIndex = -1, nameColIndex = -1, amountColIndex = -1, dateColIndex = -1, methodColIndex = -1
+    let phoneColIndex = -1, nameColIndex = -1, amountColIndex = -1, dateColIndex = -1, methodColIndex = -1, statusColIndex = -1
 
     for (let i = 0; i < headers.length; i++) {
-      const h = (headers[i] || '').toString().toLowerCase()
+      const h = (headers[i] || '').toString().replace(/\s/g, '').toLowerCase()
       if (phoneColIndex === -1 && (h.includes('전화') || h.includes('연락처') || h.includes('핸드폰') || h.includes('휴대폰') || h.includes('phone'))) phoneColIndex = i
       if (nameColIndex === -1 && (h.includes('이름') || h.includes('성명') || h.includes('구매자') || h.includes('name') || h.includes('수강생'))) nameColIndex = i
-      if (amountColIndex === -1 && (h.includes('결제') && h.includes('금액') || h.includes('금액') || h.includes('amount') || h.includes('price'))) amountColIndex = i
-      if (dateColIndex === -1 && (h.includes('결제') && h.includes('일') || h.includes('결제일') || h.includes('date'))) dateColIndex = i
-      if (methodColIndex === -1 && (h.includes('결제수단') || h.includes('결제방법') || h.includes('결제종류') || h.includes('payment') || h.includes('수단'))) methodColIndex = i
+      if (amountColIndex === -1 && (h.includes('결제금액') || h.includes('금액') || h.includes('amount') || h.includes('price'))) amountColIndex = i
+      if (dateColIndex === -1 && (h.includes('결제일') || h.includes('date'))) dateColIndex = i
+      if (methodColIndex === -1 && (h.includes('결제방법') || h.includes('결제수단') || h.includes('결제종류') || h.includes('payment'))) methodColIndex = i
+      if (statusColIndex === -1 && (h.includes('결제구분') || h.includes('결제상태') || h.includes('결제부분'))) statusColIndex = i
     }
 
     const dataRows = rows.slice(1).filter(row => row.some(cell => cell && cell.toString().trim()))
@@ -153,6 +154,13 @@ export async function POST(request) {
       const amount = amountColIndex >= 0 ? (row[amountColIndex] || '').toString().trim() : ''
       const date = dateColIndex >= 0 ? (row[dateColIndex] || '').toString().trim() : ''
       const method = methodColIndex >= 0 ? (row[methodColIndex] || '').toString().trim() : ''
+      const status = statusColIndex >= 0 ? (row[statusColIndex] || '').toString().trim() : ''
+
+      // 전체환불이면 제외
+      if (status === '전체환불') {
+        refundCount++
+        continue
+      }
 
       // 결제금액이 0 이하면 환불로 제외
       const amountNum = parseFloat(String(amount).replace(/[^0-9.-]/g, '')) || 0
