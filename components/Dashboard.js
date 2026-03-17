@@ -5,7 +5,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
 
-export default function Dashboard({ onLogout, userName, permissions = {} }) {
+export default function Dashboard({ onLogout, userName, loginId, permissions = {} }) {
   const [sessions, setSessions] = useState([])
   const [instructors, setInstructors] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
@@ -1722,7 +1722,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
           </button>
 
           {/* jinwoo 전용: 시트 설정 + 시트 바로가기 */}
-          {userName === 'jinwoo' && (
+          {loginId === 'jinwoo' && (
             <>
               <button onClick={() => { setCurrentTab('sheet-settings'); if(isMobile) setMobileMenuOpen(false) }} style={{
                 width: '100%',
@@ -1961,7 +1961,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
                   <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
                     <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>구매전환율</div>
                     <div style={{ fontSize: '26px', fontWeight: '700', color: '#34d399' }}>
-                      {sheetData?.purchaseConversionRate ? `${(sheetData.purchaseConversionRate * 100).toFixed(2)}%` : `${purchaseConversionRate}%`}
+                      {sheetData?.purchaseConversionRate ? `${sheetData.purchaseConversionRate.toFixed(2)}%` : `${purchaseConversionRate}%`}
                     </div>
                     <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>시청자 {sheetData?.liveViewers ? formatNumber(sheetData.liveViewers) : formatNumber(currentSession.live_viewers)}명 → 결제 {sheetData?.totalPurchases ? formatNumber(sheetData.totalPurchases) : currentSession.total_purchases}명</div>
                   </div>
@@ -2372,7 +2372,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               .map(d => ({
                 ...d,
                 roas: d.adSpend > 0 ? parseFloat((d.revenue / d.adSpend).toFixed(1)) : 0,
-                conversionRate: d.purchaseConversionRate ? parseFloat((d.purchaseConversionRate * 100).toFixed(2)) : 0
+                conversionRate: d.purchaseConversionRate ? parseFloat(d.purchaseConversionRate.toFixed(2)) : 0
               }))
               .filter(d => {
                 const val = d[rankingMetric]
@@ -2465,7 +2465,7 @@ export default function Dashboard({ onLogout, userName, permissions = {} }) {
               { label: '카톡방 DB', key: 'kakaoRoomDb', format: v => formatNumber(v) + '명', higherBetter: true },
               { label: '동시접속', key: 'liveViewers', format: v => formatNumber(v) + '명', higherBetter: true },
               { label: '결제건수', key: 'totalPurchases', format: v => formatNumber(v) + '건', higherBetter: true },
-              { label: '구매전환율', key: 'conversionRate', format: v => (v * 100).toFixed(2) + '%', higherBetter: true, calc: d => d.purchaseConversionRate },
+              { label: '구매전환율', key: 'conversionRate', format: v => Number(v).toFixed(2) + '%', higherBetter: true, calc: d => d.purchaseConversionRate },
               { label: '전환비용', key: 'conversionCost', format: v => formatNumber(v) + '원', higherBetter: false },
               { label: 'GDN 전환단가', key: 'gdnConvCost', format: v => formatNumber(Math.round(v)) + '원', higherBetter: false },
               { label: '메타 전환단가', key: 'metaConvCost', format: v => formatNumber(Math.round(v)) + '원', higherBetter: false },

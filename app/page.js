@@ -173,6 +173,7 @@ export default function Home() {
   const handleLogin = (name, permissions = {}) => {
     localStorage.setItem('isLoggedIn', 'true')
     localStorage.setItem('userName', name || '')
+    localStorage.setItem('loginId', permissions.loginId || '')
     localStorage.setItem('userPermissions', JSON.stringify(permissions))
     setUserName(name || '')
     setUserPermissions(permissions)
@@ -225,7 +226,7 @@ export default function Home() {
 
   return (
     <>
-      <Dashboard onLogout={handleLogout} userName={userName} permissions={userPermissions} />
+      <Dashboard onLogout={handleLogout} userName={userName} loginId={userPermissions.loginId || localStorage.getItem('loginId') || ''} permissions={userPermissions} />
 
       {/* 세션 만료 알림 모달 */}
       {showExpiryModal && (
