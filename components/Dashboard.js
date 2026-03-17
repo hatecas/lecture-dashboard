@@ -165,6 +165,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [payerMatchProcessing, setPayerMatchProcessing] = useState(false)
   const [payerMatchLog, setPayerMatchLog] = useState([])
   const [payerMatchResult, setPayerMatchResult] = useState(null)
+  const [payerTabMappings, setPayerTabMappings] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('payerTabMappings') || '{}') } catch { return {} }
+  })
+  const [payerEditingTab, setPayerEditingTab] = useState(null)
+  const [payerEditInstructor, setPayerEditInstructor] = useState('')
+  const [payerEditCohort, setPayerEditCohort] = useState('')
 
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
@@ -5905,33 +5911,148 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           .filter(tab => {
                             if (!payerSheetSearch) return true
                             const q = payerSheetSearch.toLowerCase()
-                            return tab.instructor.toLowerCase().includes(q) || tab.cohort.toLowerCase().includes(q) || tab.raw.toLowerCase().includes(q)
+                            const mapping = payerTabMappings[tab.raw]
+                            const inst = mapping?.instructor || tab.instructor
+                            const coh = mapping?.cohort || tab.cohort
+                            return inst.toLowerCase().includes(q) || coh.toLowerCase().includes(q) || tab.raw.toLowerCase().includes(q)
                           })
-                          .map((tab, i) => (
-                          <div
-                            key={i}
-                            onClick={() => { setPayerSheetSelectedTab(tab); setPayerMatchResult(null) }}
-                            style={{
-                              padding: '8px 12px',
-                              background: payerSheetSelectedTab?.raw === tab.raw ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
-                              border: payerSheetSelectedTab?.raw === tab.raw ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.05)',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              transition: 'all 0.15s ease'
-                            }}
-                            onMouseEnter={e => { if (payerSheetSelectedTab?.raw !== tab.raw) e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
-                            onMouseLeave={e => { if (payerSheetSelectedTab?.raw !== tab.raw) e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '13px', fontWeight: '600', color: '#e2e8f0' }}>{tab.instructor}</span>
-                              {tab.cohort && <span style={{ fontSize: '11px', color: '#818cf8', background: 'rgba(99,102,241,0.1)', padding: '1px 6px', borderRadius: '4px' }}>{tab.cohort}</span>}
-                            </div>
-                            <span style={{ fontSize: '10px', color: '#64748b' }}>{tab.displayDate}</span>
-                          </div>
-                        ))}
+                          .map((tab, i) => {
+                            const mapping = payerTabMappings[tab.raw]
+                            const displayInstructor = mapping?.instructor || tab.instructor
+                            const displayCohort = mapping?.cohort || tab.cohort
+                            const isEditing = payerEditingTab === tab.raw
+                            const isSelected = payerSheetSelectedTab?.raw === tab.raw
+
+                            return (
+                              <div key={i}>
+                                <div
+                                  onClick={() => {
+                                    const mapped = { ...tab, instructor: displayInstructor, cohort: displayCohort }
+                                    setPayerSheetSelectedTab(mapped)
+                                    setPayerMatchResult(null)
+                                  }}
+                                  style={{
+                                    padding: '8px 12px',
+                                    background: isSelected ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
+                                    border: isSelected ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.05)',
+                                    borderRadius: isEditing ? '6px 6px 0 0' : '6px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+                                    <span style={{ fontSize: '13px', fontWeight: '600', color: mapping ? '#a5b4fc' : '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayInstructor}</span>
+                                    {displayCohort && <span style={{ fontSize: '11px', color: '#818cf8', background: 'rgba(99,102,241,0.1)', padding: '1px 6px', borderRadius: '4px', flexShrink: 0 }}>{displayCohort}</span>}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                    <span style={{ fontSize: '10px', color: '#64748b' }}>{tab.displayDate}</span>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (isEditing) {
+                                          setPayerEditingTab(null)
+                                        } else {
+                                          setPayerEditingTab(tab.raw)
+                                          setPayerEditInstructor(displayInstructor)
+                                          setPayerEditCohort(displayCohort)
+                                        }
+                                      }}
+                                      style={{
+                                        padding: '2px 4px',
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: isEditing ? '#818cf8' : '#64748b',
+                                        fontSize: '11px',
+                                        cursor: 'pointer'
+                                      }}
+                                      title="강사/기수 수정"
+                                    >✏️</button>
+                                  </div>
+                                </div>
+
+                                {/* 인라인 편집 폼 */}
+                                {isEditing && (
+                                  <div style={{
+                                    padding: '8px 12px',
+                                    background: 'rgba(99,102,241,0.08)',
+                                    border: '1px solid rgba(99,102,241,0.2)',
+                                    borderTop: 'none',
+                                    borderRadius: '0 0 6px 6px',
+                                    display: 'flex',
+                                    gap: '6px',
+                                    alignItems: 'center'
+                                  }}
+                                  onClick={e => e.stopPropagation()}
+                                  >
+                                    <input
+                                      value={payerEditInstructor}
+                                      onChange={e => setPayerEditInstructor(e.target.value)}
+                                      placeholder="강사명"
+                                      style={{
+                                        flex: 1,
+                                        padding: '5px 8px',
+                                        background: 'rgba(255,255,255,0.08)',
+                                        border: '1px solid rgba(255,255,255,0.15)',
+                                        borderRadius: '4px',
+                                        color: '#e2e8f0',
+                                        fontSize: '12px',
+                                        outline: 'none',
+                                        minWidth: 0
+                                      }}
+                                    />
+                                    <input
+                                      value={payerEditCohort}
+                                      onChange={e => setPayerEditCohort(e.target.value)}
+                                      placeholder="기수"
+                                      style={{
+                                        width: '60px',
+                                        padding: '5px 8px',
+                                        background: 'rgba(255,255,255,0.08)',
+                                        border: '1px solid rgba(255,255,255,0.15)',
+                                        borderRadius: '4px',
+                                        color: '#e2e8f0',
+                                        fontSize: '12px',
+                                        outline: 'none'
+                                      }}
+                                    />
+                                    <button
+                                      onClick={() => {
+                                        const newMappings = { ...payerTabMappings, [tab.raw]: { instructor: payerEditInstructor.trim(), cohort: payerEditCohort.trim() } }
+                                        setPayerTabMappings(newMappings)
+                                        localStorage.setItem('payerTabMappings', JSON.stringify(newMappings))
+                                        setPayerEditingTab(null)
+                                        // 선택된 탭이면 업데이트
+                                        if (payerSheetSelectedTab?.raw === tab.raw) {
+                                          setPayerSheetSelectedTab({ ...tab, instructor: payerEditInstructor.trim(), cohort: payerEditCohort.trim() })
+                                        }
+                                      }}
+                                      style={{ padding: '5px 10px', background: 'rgba(16,185,129,0.2)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '4px', color: '#10b981', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}
+                                    >저장</button>
+                                    {mapping && (
+                                      <button
+                                        onClick={() => {
+                                          const newMappings = { ...payerTabMappings }
+                                          delete newMappings[tab.raw]
+                                          setPayerTabMappings(newMappings)
+                                          localStorage.setItem('payerTabMappings', JSON.stringify(newMappings))
+                                          setPayerEditingTab(null)
+                                          if (payerSheetSelectedTab?.raw === tab.raw) {
+                                            setPayerSheetSelectedTab({ ...tab })
+                                          }
+                                        }}
+                                        style={{ padding: '5px 8px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '4px', color: '#f87171', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}
+                                      >초기화</button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
                       </div>
                     </div>
                   )}
@@ -5954,12 +6075,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     {/* 선택 상태 표시 */}
                     <div style={{ padding: '12px 16px', background: payerSheetSelectedTab ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)', borderRadius: '8px', border: `1px solid ${payerSheetSelectedTab ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)'}`, marginBottom: '16px' }}>
                       {payerSheetSelectedTab ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                           <span style={{ color: '#10b981', fontSize: '14px' }}>✓</span>
                           <span style={{ color: '#e2e8f0', fontSize: '13px', fontWeight: '500' }}>
                             결제자: {payerSheetSelectedTab.instructor} {payerSheetSelectedTab.cohort}
                           </span>
                           <span style={{ color: '#64748b', fontSize: '11px' }}>({payerSheetSelectedTab.displayDate})</span>
+                          {payerTabMappings[payerSheetSelectedTab.raw] && (
+                            <span style={{ color: '#94a3b8', fontSize: '10px' }}>원본: {payerSheetSelectedTab.raw}</span>
+                          )}
                         </div>
                       ) : (
                         <span style={{ color: '#64748b', fontSize: '13px' }}>왼쪽에서 결제자 시트를 선택해주세요</span>
