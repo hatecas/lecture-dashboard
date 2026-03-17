@@ -175,7 +175,7 @@ export async function POST(request) {
       }
 
       if (name || phoneRaw) {
-        validPayers.push({ name, phoneRaw, phone: normalizePhone(phoneRaw), amount, date, method })
+        validPayers.push({ name, phoneRaw, phone: normalizePhone(phoneRaw), amount, date, method, status: status || '결제완료' })
       }
     }
 
@@ -199,7 +199,8 @@ export async function POST(request) {
           결제일: payer.date,
           신청일: matchedApplicant.신청일,
           유입경로: matchedApplicant.유입경로,
-          결제수단: payer.method
+          결제수단: payer.method,
+          결제상태: payer.status
         })
         matched++
       } else {
@@ -210,7 +211,8 @@ export async function POST(request) {
           결제일: payer.date,
           신청일: '',
           유입경로: '(직접구매)',
-          결제수단: payer.method
+          결제수단: payer.method,
+          결제상태: payer.status
         })
         unmatched++
       }
