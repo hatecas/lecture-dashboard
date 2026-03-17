@@ -77,28 +77,18 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const pollingRef = useRef(null)
   const viewPollingRef = useRef(null) // 채팅 보기 자동 새로고침용
 
-  // 업데이트 공지 모달
-  const [showUpdateModal, setShowUpdateModal] = useState(false)
-  const UPDATE_VERSION = '2025-02-12' // 업데이트 날짜 키
-  const UPDATE_NOTES = [
-    { icon: '📊', title: '시트 통합 다중 시트 지원', desc: '여러 Google Sheets를 추가/전환할 수 있습니다. 시트 추가 버튼으로 URL만 넣으면 자동 등록됩니다.' },
-    { icon: '🎬', title: '유튜브 세션 자동 로드', desc: '유튜브 채팅 수집 탭 진입 시 세션 목록이 자동으로 로드됩니다.' },
-    { icon: '🐛', title: '모달 버그 수정', desc: '모달 닫은 후 다시 열리는 버그를 수정했습니다.' },
-    { icon: '⚡', title: '성능 개선', desc: '모달 로딩 속도 개선 및 좀비 세션 자동 정리 기능이 추가되었습니다.' },
-  ]
+  // 사용자 기능 권한
+  const defaultFeatures = ['basic-dashboard', 'tools', 'resources', 'lecture-analyzer']
+  const [userFeatures, setUserFeatures] = useState(permissions.features || defaultFeatures)
+  const hasFeature = (key) => loginId === 'jinwoo' || userFeatures.includes(key)
 
-  useEffect(() => {
-    const dismissed = localStorage.getItem(`update_dismissed_${UPDATE_VERSION}`)
-    if (!dismissed) {
-      setShowUpdateModal(true)
-    }
-  }, [])
-
-  const dismissUpdateToday = () => {
-    const today = new Date().toISOString().split('T')[0]
-    localStorage.setItem(`update_dismissed_${UPDATE_VERSION}`, today)
-    setShowUpdateModal(false)
-  }
+  // 권한 설정 페이지 상태
+  const [permUsers, setPermUsers] = useState([])
+  const [permAllFeatures, setPermAllFeatures] = useState([])
+  const [permLoading, setPermLoading] = useState(false)
+  const [permSaving, setPermSaving] = useState(null) // 저장 중인 userId
+  const [permEditMap, setPermEditMap] = useState({}) // userId -> feature[] 편집 상태
+  const [permExpandedUser, setPermExpandedUser] = useState(null) // 펼쳐진 유저 id
 
   // 리소스 허브 상태
   const [currentResource, setCurrentResource] = useState(null) // 현재 선택된 탭 gid
@@ -670,6 +660,19 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }
     if (currentTab === 'payer-data' && payerSheetTabs.length === 0) {
       loadPayerSheetTabs(payerSheetYear)
+    }
+    if (currentTab === 'admin-permissions' && loginId === 'jinwoo' && permUsers.length === 0) {
+      setPermLoading(true)
+      fetch(`/api/user-permissions?action=all-users&requestLoginId=${loginId}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            setPermUsers(data.users)
+            setPermAllFeatures(data.allFeatures)
+          }
+        })
+        .catch(() => {})
+        .finally(() => setPermLoading(false))
     }
   }, [currentTab])
 
@@ -1615,6 +1618,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           )}
         </div>
         <div style={{ flex: 1 }}>
+          {hasFeature('basic-dashboard') && <>
           <button onClick={() => { setCurrentTab('dashboard'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
@@ -1703,12 +1707,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚖️</span>
             대조
           </button>
+          </>}
 
           {/* 구분선 */}
           <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '12px 16px' }} />
 
           {/* 툴 메뉴 */}
-          <button onClick={() => { setCurrentTab('tools'); resetToolState(); if(isMobile) setMobileMenuOpen(false) }} style={{
+          {hasFeature('tools') && <button onClick={() => { setCurrentTab('tools'); resetToolState(); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'tools' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -1729,10 +1734,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           }} title="툴">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🛠️</span>
             툴
-          </button>
+          </button>}
 
           {/* 시트 통합 메뉴 */}
-          <button onClick={() => { setCurrentTab('resources'); if(isMobile) setMobileMenuOpen(false) }} style={{
+          {hasFeature('resources') && <button onClick={() => { setCurrentTab('resources'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'resources' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -1753,10 +1758,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           }} title="시트 통합">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📁</span>
             시트 통합
-          </button>
+          </button>}
 
           {/* CS AI 메뉴 */}
-          <button onClick={() => { setCurrentTab('cs-ai'); if(isMobile) setMobileMenuOpen(false) }} style={{
+          {hasFeature('cs-ai') && <button onClick={() => { setCurrentTab('cs-ai'); if(isMobile) setMobileMenuOpen(false) }} style={{
             width: '100%',
             padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
             background: currentTab === 'cs-ai' ? 'rgba(99,102,241,0.2)' : 'transparent',
@@ -1777,10 +1782,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           }} title="CS AI">
             <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🤖</span>
             CS AI
-          </button>
+          </button>}
 
           {/* 무료강의 분석기 메뉴 */}
-          <button onClick={async () => {
+          {hasFeature('lecture-analyzer') && <button onClick={async () => {
             setCurrentTab('lecture-analyzer');
             if(isMobile) setMobileMenuOpen(false);
             try {
@@ -1827,11 +1832,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 right: sidebarCollapsed ? '6px' : 'auto'
               }} />
             )}
-          </button>
+          </button>}
 
-          {/* jinwoo 전용: 시트 설정 + 시트 바로가기 */}
-          {loginId === 'jinwoo' && (
-            <>
+          {/* 권한 기반: 시트 설정 */}
+          {hasFeature('sheet-settings') && (
               <button onClick={() => { setCurrentTab('sheet-settings'); if(isMobile) setMobileMenuOpen(false) }} style={{
                 width: '100%',
                 padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
@@ -1854,6 +1858,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚙</span>
                 {sidebarCollapsed ? '시트설정' : '시트 설정'}
               </button>
+          )}
+
+          {/* 권한 기반: 결제자 데이터 */}
+          {hasFeature('payer-data') && (
               <button onClick={() => { setCurrentTab('payer-data'); if(isMobile) setMobileMenuOpen(false) }} style={{
                 width: '100%',
                 padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
@@ -1876,6 +1884,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>💳</span>
                 {sidebarCollapsed ? '결제자' : '결제자 데이터'}
               </button>
+          )}
+
+          {/* jinwoo 전용: 구매 추이 시트 + 권한 설정 */}
+          {loginId === 'jinwoo' && (
+            <>
               <a href="https://docs.google.com/spreadsheets/d/1NciqOt6PaUggmroaov60UycBbkdIY6eVXSXfwLyvCRo/edit?gid=1217448453#gid=1217448453" target="_blank" rel="noopener noreferrer" style={{
                 width: '100%',
                 padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
@@ -1898,6 +1911,32 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⏰</span>
                 {sidebarCollapsed ? '구매추이' : '구매 추이 시트'}
               </a>
+
+              {/* 구분선 */}
+              <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '12px 16px' }} />
+
+              <button onClick={() => { setCurrentTab('admin-permissions'); if(isMobile) setMobileMenuOpen(false) }} style={{
+                width: '100%',
+                padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
+                background: currentTab === 'admin-permissions' ? 'rgba(99,102,241,0.2)' : 'transparent',
+                backdropFilter: currentTab === 'admin-permissions' ? 'blur(10px)' : 'none',
+                border: 'none',
+                borderLeft: currentTab === 'admin-permissions' ? '3px solid #818cf8' : '3px solid transparent',
+                color: currentTab === 'admin-permissions' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
+                fontSize: sidebarCollapsed ? '11px' : '14px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: sidebarCollapsed ? 'column' : 'row',
+                alignItems: 'center',
+                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                gap: sidebarCollapsed ? '4px' : '10px',
+                transition: 'all 0.3s ease'
+              }} title="권한 설정">
+                <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🔐</span>
+                {sidebarCollapsed ? '권한' : '권한 설정'}
+              </button>
             </>
           )}
         </div>
@@ -6326,6 +6365,181 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               </div>
             </div>
           )}
+
+          {/* 권한 설정 탭 (jinwoo 전용) */}
+          {currentTab === 'admin-permissions' && loginId === 'jinwoo' && (
+            <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+              <div style={{ marginBottom: '24px' }}>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px' }}>
+                  🔐 권한 설정
+                </h2>
+                <p style={{ color: '#64748b', fontSize: '13px' }}>가입된 계정별로 접근 가능한 기능을 설정합니다.</p>
+              </div>
+
+              {permLoading ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>불러오는 중...</div>
+              ) : (
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '16px',
+                  overflow: 'hidden'
+                }}>
+                  {/* 테이블 헤더 */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr 1fr',
+                    padding: '12px 20px',
+                    borderBottom: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgba(255,255,255,0.03)'
+                  }}>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>이름</span>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>아이디</span>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', textAlign: 'right' }}>권한 수</span>
+                  </div>
+
+                  {permUsers.map((user, idx) => {
+                    const isSuper = user.isSuperAdmin
+                    const editFeatures = permEditMap[user.id] || user.features
+                    const isExpanded = permExpandedUser === user.id
+                    const enabledCount = isSuper ? permAllFeatures.length : editFeatures.length
+
+                    return (
+                      <div key={user.id} style={{
+                        borderBottom: idx < permUsers.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
+                      }}>
+                        {/* 행 (클릭 가능) */}
+                        <div
+                          onClick={() => setPermExpandedUser(isExpanded ? null : user.id)}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr 1fr',
+                            padding: '14px 20px',
+                            cursor: 'pointer',
+                            alignItems: 'center',
+                            background: isExpanded ? 'rgba(99,102,241,0.08)' : 'transparent',
+                            transition: 'background 0.2s'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{
+                              width: '32px', height: '32px', borderRadius: '50%',
+                              background: isSuper ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.1)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '13px', fontWeight: '700', color: '#fff', flexShrink: 0
+                            }}>
+                              {(user.name || user.username || '?')[0].toUpperCase()}
+                            </span>
+                            <span style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0' }}>
+                              {user.name || user.username}
+                              {isSuper && <span style={{ marginLeft: '8px', fontSize: '10px', background: 'rgba(99,102,241,0.3)', padding: '2px 8px', borderRadius: '10px', color: '#a5b4fc' }}>최고 관리자</span>}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: '13px', color: '#94a3b8' }}>@{user.username}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
+                            <span style={{ fontSize: '13px', color: '#a5b4fc', fontWeight: '600' }}>
+                              {enabledCount} / {permAllFeatures.length}
+                            </span>
+                            <span style={{
+                              fontSize: '12px', color: '#64748b',
+                              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                              transition: 'transform 0.2s'
+                            }}>▼</span>
+                          </div>
+                        </div>
+
+                        {/* 펼침 영역 */}
+                        {isExpanded && (
+                          <div style={{
+                            padding: '16px 20px',
+                            background: 'rgba(99,102,241,0.04)',
+                            borderTop: '1px solid rgba(255,255,255,0.06)'
+                          }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '8px', marginBottom: !isSuper ? '16px' : '0' }}>
+                              {permAllFeatures.map(f => {
+                                const checked = isSuper ? true : editFeatures.includes(f.key)
+                                return (
+                                  <label key={f.key} style={{
+                                    display: 'flex', alignItems: 'center', gap: '10px',
+                                    padding: '10px 14px', borderRadius: '10px',
+                                    background: checked ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)',
+                                    border: checked ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                                    cursor: isSuper ? 'default' : 'pointer',
+                                    opacity: isSuper ? 0.7 : 1,
+                                    transition: 'all 0.2s'
+                                  }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={isSuper}
+                                      onChange={() => {
+                                        if (isSuper) return
+                                        setPermEditMap(prev => {
+                                          const current = prev[user.id] || [...user.features]
+                                          const next = current.includes(f.key)
+                                            ? current.filter(k => k !== f.key)
+                                            : [...current, f.key]
+                                          return { ...prev, [user.id]: next }
+                                        })
+                                      }}
+                                      style={{ accentColor: '#6366f1', width: '16px', height: '16px' }}
+                                    />
+                                    <div>
+                                      <div style={{ fontSize: '13px', fontWeight: '600', color: checked ? '#a5b4fc' : 'rgba(255,255,255,0.6)' }}>{f.label}</div>
+                                      <div style={{ fontSize: '11px', color: '#64748b' }}>{f.desc}</div>
+                                    </div>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                            {!isSuper && (
+                              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <button
+                                  onClick={async () => {
+                                    setPermSaving(user.id)
+                                    try {
+                                      const res = await fetch('/api/user-permissions', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          action: 'save-permissions',
+                                          requestLoginId: loginId,
+                                          userId: user.id,
+                                          features: editFeatures
+                                        })
+                                      })
+                                      const data = await res.json()
+                                      if (data.success) {
+                                        setPermUsers(prev => prev.map(u => u.id === user.id ? { ...u, features: [...editFeatures] } : u))
+                                      } else {
+                                        alert(data.error || '저장 실패')
+                                      }
+                                    } catch (e) { alert('저장 중 오류') }
+                                    setPermSaving(null)
+                                  }}
+                                  disabled={permSaving === user.id}
+                                  style={{
+                                    padding: '8px 24px',
+                                    background: permSaving === user.id ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                    border: 'none', borderRadius: '10px',
+                                    color: '#fff', fontSize: '13px', fontWeight: '600',
+                                    cursor: permSaving === user.id ? 'wait' : 'pointer'
+                                  }}
+                                >
+                                  {permSaving === user.id ? '저장 중...' : '저장'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
         {/* 푸터 */}
@@ -6832,75 +7046,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             {/* 현재 파일명 */}
             <div style={{ fontSize: '13px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 20px' }}>
               {uploadProgress.fileName}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 업데이트 공지 모달 */}
-      {showUpdateModal && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.5)', zIndex: 50000,
-          display: 'flex', justifyContent: 'center', alignItems: 'center'
-        }} onClick={() => setShowUpdateModal(false)}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: 'linear-gradient(135deg, #1e293b 0%, #1a1f35 100%)',
-            borderRadius: '16px', padding: '0', width: '420px', maxWidth: '90vw',
-            border: '1px solid rgba(255,255,255,0.1)',
-            boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
-            overflow: 'hidden'
-          }}>
-            {/* 헤더 */}
-            <div style={{
-              padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', position: 'relative'
-            }}>
-              <div>
-                <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>업데이트 안내</div>
-                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginTop: '2px' }}>2025.02.12</div>
-              </div>
-              <button
-                onClick={() => setShowUpdateModal(false)}
-                style={{
-                  background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%',
-                  width: '28px', height: '28px', color: '#fff', fontSize: '16px',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }}
-              >
-                ×
-              </button>
-            </div>
-            {/* 내용 */}
-            <div style={{ padding: '20px 24px' }}>
-              {UPDATE_NOTES.map((note, i) => (
-                <div key={i} style={{
-                  display: 'flex', gap: '12px', padding: '12px 0',
-                  borderBottom: i < UPDATE_NOTES.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
-                }}>
-                  <div style={{ fontSize: '22px', flexShrink: 0, marginTop: '2px' }}>{note.icon}</div>
-                  <div>
-                    <div style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0', marginBottom: '4px' }}>{note.title}</div>
-                    <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5' }}>{note.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {/* 하단 */}
-            <div style={{
-              padding: '14px 24px', borderTop: '1px solid rgba(255,255,255,0.06)',
-              display: 'flex', justifyContent: 'center'
-            }}>
-              <button
-                onClick={dismissUpdateToday}
-                style={{
-                  background: 'transparent', border: 'none',
-                  color: '#64748b', fontSize: '13px', cursor: 'pointer',
-                  padding: '6px 12px', borderRadius: '6px'
-                }}
-              >
-                오늘 하루 보지 않기
-              </button>
             </div>
           </div>
         </div>
