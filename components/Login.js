@@ -62,9 +62,20 @@ export default function Login({ onLogin }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: data.name || data.username })
         })
+        // 사용자 권한 로드
+        let userFeatures = ['basic-dashboard', 'tools', 'resources', 'lecture-analyzer']
+        try {
+          const permRes = await fetch(`/api/user-permissions?action=my-permissions&loginId=${data.username}`)
+          const permData = await permRes.json()
+          if (permData.success) {
+            userFeatures = permData.features
+          }
+        } catch (e) {}
+
         onLogin(data.name || data.username, {
           canUseInflow: data.can_use_inflow || false,
-          loginId: data.username
+          loginId: data.username,
+          features: userFeatures
         })
       }
     } catch (err) {
