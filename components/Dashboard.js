@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
 
@@ -151,6 +151,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [sheetPreviewRaw, setSheetPreviewRaw] = useState(null) // 원본 시트 행 데이터
   const [sheetPreviewLoading, setSheetPreviewLoading] = useState(false)
   const [sheetPreviewHighlight, setSheetPreviewHighlight] = useState(null) // 하이라이트할 열 인덱스
+  const [showSessionChart, setShowSessionChart] = useState(false) // 기수별 차트 모달
 
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
@@ -1944,9 +1945,17 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           {currentTab === 'dashboard' && (
             <>
               {/* 지표 카드 - 글래스모피즘 + 그라데이션 테두리 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <span style={{ fontSize: '15px', fontWeight: '600', color: 'rgba(255,255,255,0.7)' }}>핵심 지표</span>
-                <HelpTooltip text={"선택한 강사/기수의 핵심 성과지표입니다.\n시트 동기화 데이터 또는 직접 입력한 데이터를 표시합니다."} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '15px', fontWeight: '600', color: 'rgba(255,255,255,0.7)' }}>핵심 지표</span>
+                  <HelpTooltip text={"선택한 강사/기수의 핵심 성과지표입니다.\n시트 동기화 데이터 또는 직접 입력한 데이터를 표시합니다."} />
+                </div>
+                <button
+                  onClick={() => setShowSessionChart(true)}
+                  style={{ padding: '7px 14px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.2s ease' }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 15px rgba(99,102,241,0.4)' }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' }}
+                >📊 기수별 차트</button>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px', marginBottom: '24px' }}>
                 <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(96,165,250,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(167,139,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
@@ -5753,6 +5762,93 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           개발자 이진우
         </div>
       </div>
+
+      {/* 기수별 차트 모달 */}
+      {showSessionChart && (() => {
+        const getInstructorName = (name) => name.split(' ').slice(0, -1).join(' ')
+        const getSessionLabel = (name) => name.split(' ').pop()
+        const instructorSessions = allSheetData
+          .filter(d => getInstructorName(d.name) === selectedInstructor)
+          .map(d => ({ ...d, label: getSessionLabel(d.name) }))
+        const CHART_METRICS = [
+          { key: 'revenue', title: '매출', color: '#60a5fa', gradient: ['#3b82f6', '#1d4ed8'], format: v => formatMoney(v), yFormat: v => v >= 1e8 ? (v / 1e8).toFixed(1) + '억' : Math.round(v / 1e4) + '만' },
+          { key: 'kakaoRoomDb', title: 'DB 수 (카톡방)', color: '#34d399', gradient: ['#10b981', '#059669'], format: v => formatNumber(v) + '명', yFormat: v => formatNumber(v) },
+          { key: 'conversionCost', title: '전환단가 (낮을수록 좋음)', color: '#f59e0b', gradient: ['#f59e0b', '#d97706'], format: v => formatNumber(v) + '원', yFormat: v => v >= 1e4 ? Math.round(v / 1e4) + '만' : formatNumber(v), lowerIsBetter: true },
+          { key: 'operatingProfit', title: '영업이익', color: '#a78bfa', gradient: ['#8b5cf6', '#6d28d9'], format: v => formatMoney(v), yFormat: v => v >= 1e8 ? (v / 1e8).toFixed(1) + '억' : Math.round(v / 1e4) + '만' },
+        ]
+        const CustomChartTooltip = ({ active, payload, label, chartConfig }) => {
+          if (!active || !payload?.length) return null
+          return (
+            <div style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', padding: '12px 16px', backdropFilter: 'blur(12px)' }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: '#fff', marginBottom: '6px' }}>{label}</div>
+              <div style={{ fontSize: '13px', color: chartConfig.color, fontWeight: '600' }}>{chartConfig.format(payload[0]?.value)}</div>
+            </div>
+          )
+        }
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(4px)' }} onClick={() => setShowSessionChart(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: 'linear-gradient(135deg, #1e293b 0%, #1a1f35 100%)', borderRadius: '20px', width: '900px', maxWidth: '95vw', maxHeight: '90vh', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 60px rgba(0,0,0,0.5)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', flexShrink: 0 }}>
+                <div>
+                  <div style={{ fontSize: '16px', fontWeight: '700', color: '#fff' }}>📊 {selectedInstructor} - 기수별 차트</div>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginTop: '2px' }}>{instructorSessions.length}개 기수 데이터</div>
+                </div>
+                <button onClick={() => setShowSessionChart(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', color: '#fff', fontSize: '18px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+              </div>
+              <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
+                {instructorSessions.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>{selectedInstructor} 강사의 기수별 데이터가 없습니다.</div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px' }}>
+                    {CHART_METRICS.map(metric => {
+                      const validData = instructorSessions.filter(d => d[metric.key] !== undefined && d[metric.key] !== null && d[metric.key] !== 0)
+                      if (validData.length === 0) return (
+                        <div key={metric.key} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '24px' }}>
+                          <h3 style={{ fontSize: '15px', fontWeight: '600', color: metric.color, margin: '0 0 16px 0' }}>{metric.title}</h3>
+                          <div style={{ height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: '13px' }}>데이터 없음</div>
+                        </div>
+                      )
+                      const values = validData.map(d => d[metric.key])
+                      const maxVal = Math.max(...values)
+                      const minVal = Math.min(...values)
+                      const avgVal = Math.round(values.reduce((s, v) => s + v, 0) / values.length)
+                      const bestVal = metric.lowerIsBetter ? minVal : maxVal
+                      return (
+                        <div key={metric.key} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '24px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h3 style={{ fontSize: '15px', fontWeight: '600', color: metric.color, margin: 0 }}>{metric.title}</h3>
+                            <span style={{ fontSize: '11px', color: '#64748b' }}>평균: {metric.format(avgVal)}</span>
+                          </div>
+                          <ResponsiveContainer width="100%" height={220}>
+                            <BarChart data={validData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                              <defs>
+                                <linearGradient id={`cg-${metric.key}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor={metric.gradient[0]} stopOpacity={0.9} />
+                                  <stop offset="100%" stopColor={metric.gradient[1]} stopOpacity={0.6} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                              <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} interval={0} />
+                              <YAxis tickFormatter={metric.yFormat} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} width={50} />
+                              <Tooltip content={<CustomChartTooltip chartConfig={metric} />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
+                              <Bar dataKey={metric.key} fill={`url(#cg-${metric.key})`} radius={[4, 4, 0, 0]} maxBarSize={52}>
+                                {validData.map((d, idx) => {
+                                  const isBest = d[metric.key] === bestVal
+                                  return <Cell key={idx} fill={isBest ? metric.gradient[0] : `url(#cg-${metric.key})`} stroke={isBest ? metric.color : 'none'} strokeWidth={isBest ? 2 : 0} />
+                                })}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 강의 분석 히스토리 보기 모달 */}
       {laViewItem && (
