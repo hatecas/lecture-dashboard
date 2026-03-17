@@ -161,6 +161,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [payerSheetData, setPayerSheetData] = useState(null)
   const [payerSheetDataLoading, setPayerSheetDataLoading] = useState(false)
   const [payerSheetSearch, setPayerSheetSearch] = useState('')
+  const [payerMatchFiles, setPayerMatchFiles] = useState([])
+  const [payerMatchProcessing, setPayerMatchProcessing] = useState(false)
+  const [payerMatchLog, setPayerMatchLog] = useState([])
+  const [payerMatchResult, setPayerMatchResult] = useState(null)
 
   // CS AI 상태
   const [csMessages, setCsMessages] = useState([])
@@ -5826,180 +5830,332 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
           {/* 결제자 데이터 탭 */}
           {currentTab === 'payer-data' && (
-            <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
-              <div style={{ marginBottom: '24px' }}>
+            <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1400px', margin: '0 auto' }}>
+              <div style={{ marginBottom: '20px' }}>
                 <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  💳 결제자 데이터
+                  💳 결제자 매칭
                 </h2>
-                <p style={{ color: '#64748b', fontSize: '13px' }}>PM이 관리하는 구글 시트에서 결제자 데이터를 직접 불러옵니다.</p>
+                <p style={{ color: '#64748b', fontSize: '13px' }}>결제자 시트를 선택하고 신청자 파일을 업로드하면 전화번호 기반으로 유입경로를 매칭합니다.</p>
               </div>
 
-              <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.2)', marginBottom: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-                  <div style={{ fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    📋 시트 탭 목록
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
-                      {['25', '26'].map(y => (
-                        <button
-                          key={y}
-                          onClick={() => { setPayerSheetYear(y); loadPayerSheetTabs(y) }}
-                          style={{
-                            padding: '6px 14px',
-                            background: payerSheetYear === y ? 'rgba(99,102,241,0.3)' : 'transparent',
-                            border: 'none',
-                            color: payerSheetYear === y ? '#818cf8' : '#94a3b8',
-                            fontSize: '13px',
-                            fontWeight: payerSheetYear === y ? '600' : '400',
-                            cursor: 'pointer'
-                          }}
-                        >{y}년</button>
-                      ))}
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.5fr', gap: '20px' }}>
+                {/* 왼쪽: 결제자 시트 탭 선택 */}
+                <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      📋 결제자 시트
                     </div>
-                    <button
-                      onClick={() => loadPayerSheetTabs(payerSheetYear)}
-                      disabled={payerSheetLoading}
-                      style={{
-                        padding: '6px 14px',
-                        background: 'rgba(99,102,241,0.15)',
-                        border: '1px solid rgba(99,102,241,0.3)',
-                        borderRadius: '8px',
-                        color: '#818cf8',
-                        fontSize: '13px',
-                        cursor: payerSheetLoading ? 'wait' : 'pointer'
-                      }}
-                    >{payerSheetLoading ? '로딩...' : '불러오기'}</button>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
+                        {['25', '26'].map(y => (
+                          <button
+                            key={y}
+                            onClick={() => { setPayerSheetYear(y); loadPayerSheetTabs(y) }}
+                            style={{
+                              padding: '4px 10px',
+                              background: payerSheetYear === y ? 'rgba(99,102,241,0.3)' : 'transparent',
+                              border: 'none',
+                              color: payerSheetYear === y ? '#818cf8' : '#94a3b8',
+                              fontSize: '12px',
+                              fontWeight: payerSheetYear === y ? '600' : '400',
+                              cursor: 'pointer'
+                            }}
+                          >{y}년</button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => loadPayerSheetTabs(payerSheetYear)}
+                        disabled={payerSheetLoading}
+                        style={{
+                          padding: '4px 10px',
+                          background: 'rgba(99,102,241,0.15)',
+                          border: '1px solid rgba(99,102,241,0.3)',
+                          borderRadius: '6px',
+                          color: '#818cf8',
+                          fontSize: '12px',
+                          cursor: payerSheetLoading ? 'wait' : 'pointer'
+                        }}
+                      >{payerSheetLoading ? '로딩...' : '불러오기'}</button>
+                    </div>
                   </div>
-                </div>
 
-                {payerSheetTabs.length > 0 && (
-                  <div>
-                    <input
-                      type="text"
-                      placeholder="강사명 또는 기수 검색..."
-                      value={payerSheetSearch}
-                      onChange={e => setPayerSheetSearch(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '8px',
-                        color: '#e2e8f0',
-                        fontSize: '13px',
-                        marginBottom: '12px',
-                        boxSizing: 'border-box',
-                        outline: 'none'
-                      }}
-                    />
+                  {payerSheetTabs.length > 0 && (
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="강사명 또는 기수 검색..."
+                        value={payerSheetSearch}
+                        onChange={e => setPayerSheetSearch(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '6px',
+                          color: '#e2e8f0',
+                          fontSize: '12px',
+                          marginBottom: '8px',
+                          boxSizing: 'border-box',
+                          outline: 'none'
+                        }}
+                      />
 
-                    <div style={{ maxHeight: '400px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      {payerSheetTabs
-                        .filter(tab => {
-                          if (!payerSheetSearch) return true
-                          const q = payerSheetSearch.toLowerCase()
-                          return tab.instructor.toLowerCase().includes(q) || tab.cohort.toLowerCase().includes(q) || tab.raw.toLowerCase().includes(q)
-                        })
-                        .map((tab, i) => (
-                        <div
-                          key={i}
-                          onClick={() => loadPayerSheetData(tab)}
-                          style={{
-                            padding: '10px 14px',
-                            background: payerSheetSelectedTab?.raw === tab.raw ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
-                            border: payerSheetSelectedTab?.raw === tab.raw ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.05)',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={e => { if (payerSheetSelectedTab?.raw !== tab.raw) e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
-                          onMouseLeave={e => { if (payerSheetSelectedTab?.raw !== tab.raw) e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ fontSize: '13px', fontWeight: '600', color: '#e2e8f0' }}>{tab.instructor}</span>
-                            {tab.cohort && <span style={{ fontSize: '12px', color: '#818cf8', background: 'rgba(99,102,241,0.1)', padding: '2px 8px', borderRadius: '4px' }}>{tab.cohort}</span>}
+                      <div style={{ maxHeight: '500px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {payerSheetTabs
+                          .filter(tab => {
+                            if (!payerSheetSearch) return true
+                            const q = payerSheetSearch.toLowerCase()
+                            return tab.instructor.toLowerCase().includes(q) || tab.cohort.toLowerCase().includes(q) || tab.raw.toLowerCase().includes(q)
+                          })
+                          .map((tab, i) => (
+                          <div
+                            key={i}
+                            onClick={() => { setPayerSheetSelectedTab(tab); setPayerMatchResult(null) }}
+                            style={{
+                              padding: '8px 12px',
+                              background: payerSheetSelectedTab?.raw === tab.raw ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
+                              border: payerSheetSelectedTab?.raw === tab.raw ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.05)',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={e => { if (payerSheetSelectedTab?.raw !== tab.raw) e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+                            onMouseLeave={e => { if (payerSheetSelectedTab?.raw !== tab.raw) e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: '600', color: '#e2e8f0' }}>{tab.instructor}</span>
+                              {tab.cohort && <span style={{ fontSize: '11px', color: '#818cf8', background: 'rgba(99,102,241,0.1)', padding: '1px 6px', borderRadius: '4px' }}>{tab.cohort}</span>}
+                            </div>
+                            <span style={{ fontSize: '10px', color: '#64748b' }}>{tab.displayDate}</span>
                           </div>
-                          <span style={{ fontSize: '11px', color: '#64748b' }}>{tab.displayDate}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {payerSheetTabs.length === 0 && !payerSheetLoading && (
-                  <div style={{ textAlign: 'center', padding: '32px', color: '#64748b', fontSize: '13px' }}>
-                    상단의 "불러오기" 버튼을 눌러 시트 탭 목록을 로드하세요
-                  </div>
-                )}
-
-                {payerSheetDataLoading && (
-                  <div style={{ textAlign: 'center', padding: '20px', color: '#818cf8', fontSize: '13px', marginTop: '12px' }}>
-                    데이터 불러오는 중...
-                  </div>
-                )}
-
-                {payerSheetData && !payerSheetDataLoading && (
-                  <div style={{ marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0' }}>
-                        {payerSheetSelectedTab?.instructor} {payerSheetSelectedTab?.cohort}
-                        <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>총 {payerSheetData.total}명</span>
+                        ))}
                       </div>
                     </div>
+                  )}
 
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-                      {[
-                        { label: '이름', detected: payerSheetData.columns?.nameColIndex >= 0 },
-                        { label: '전화번호', detected: payerSheetData.columns?.phoneColIndex >= 0 },
-                        { label: '결제금액', detected: payerSheetData.columns?.amountColIndex >= 0 },
-                        { label: '결제일', detected: payerSheetData.columns?.dateColIndex >= 0 }
-                      ].map((col, i) => (
-                        <span key={i} style={{
-                          fontSize: '11px',
-                          padding: '3px 8px',
-                          borderRadius: '4px',
-                          background: col.detected ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
-                          color: col.detected ? '#10b981' : '#f59e0b',
-                          border: `1px solid ${col.detected ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'}`
-                        }}>{col.label} {col.detected ? '감지됨' : '미감지'}</span>
-                      ))}
+                  {payerSheetTabs.length === 0 && !payerSheetLoading && (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b', fontSize: '12px' }}>
+                      "불러오기"를 눌러 시트 탭 목록을 로드하세요
+                    </div>
+                  )}
+                </div>
+
+                {/* 오른쪽: 신청자 업로드 + 매칭 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* 선택된 시트 정보 */}
+                  <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.2)' }}>
+                    <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🔄 유입경로 매칭
                     </div>
 
-                    <div style={{ maxHeight: '500px', overflowY: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                        <thead>
-                          <tr style={{ background: 'rgba(255,255,255,0.05)', position: 'sticky', top: 0 }}>
-                            <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>#</th>
-                            <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>이름</th>
-                            <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>전화번호</th>
-                            <th style={{ padding: '8px 12px', textAlign: 'right', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>결제금액</th>
-                            <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>결제일</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {payerSheetData.data.slice(0, 100).map((row, i) => (
-                            <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                              <td style={{ padding: '7px 12px', color: '#64748b' }}>{i + 1}</td>
-                              <td style={{ padding: '7px 12px', color: '#e2e8f0' }}>{row.name || '-'}</td>
-                              <td style={{ padding: '7px 12px', color: '#94a3b8' }}>{row.phone ? row.phone.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3') : '-'}</td>
-                              <td style={{ padding: '7px 12px', color: '#10b981', textAlign: 'right' }}>{row.amount || '-'}</td>
-                              <td style={{ padding: '7px 12px', color: '#94a3b8' }}>{row.date || '-'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {payerSheetData.total > 100 && (
-                        <div style={{ textAlign: 'center', padding: '8px', color: '#64748b', fontSize: '11px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                          상위 100건 표시 중 (전체 {payerSheetData.total}건)
+                    {/* 선택 상태 표시 */}
+                    <div style={{ padding: '12px 16px', background: payerSheetSelectedTab ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)', borderRadius: '8px', border: `1px solid ${payerSheetSelectedTab ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)'}`, marginBottom: '16px' }}>
+                      {payerSheetSelectedTab ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ color: '#10b981', fontSize: '14px' }}>✓</span>
+                          <span style={{ color: '#e2e8f0', fontSize: '13px', fontWeight: '500' }}>
+                            결제자: {payerSheetSelectedTab.instructor} {payerSheetSelectedTab.cohort}
+                          </span>
+                          <span style={{ color: '#64748b', fontSize: '11px' }}>({payerSheetSelectedTab.displayDate})</span>
+                        </div>
+                      ) : (
+                        <span style={{ color: '#64748b', fontSize: '13px' }}>왼쪽에서 결제자 시트를 선택해주세요</span>
+                      )}
+                    </div>
+
+                    {/* 신청자 파일 업로드 */}
+                    <div style={{
+                      padding: '20px',
+                      background: 'rgba(99,102,241,0.08)',
+                      borderRadius: '10px',
+                      border: '2px dashed rgba(99,102,241,0.25)',
+                      textAlign: 'center',
+                      marginBottom: '16px'
+                    }}>
+                      <div style={{ fontSize: '28px', marginBottom: '6px' }}>📥</div>
+                      <p style={{ fontSize: '13px', fontWeight: '500', marginBottom: '4px' }}>신청자 데이터</p>
+                      <p style={{ color: '#94a3b8', fontSize: '11px', marginBottom: '10px' }}>D열=전화번호, E열=신청일, 파일명=유입경로 (Excel/CSV, 여러개 가능)</p>
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        multiple
+                        onChange={(e) => { setPayerMatchFiles(Array.from(e.target.files)); setPayerMatchResult(null) }}
+                        style={{ display: 'none' }}
+                        id="payer-match-file"
+                      />
+                      <label
+                        htmlFor="payer-match-file"
+                        style={{
+                          display: 'inline-block',
+                          padding: '7px 16px',
+                          background: 'rgba(99,102,241,0.3)',
+                          borderRadius: '6px',
+                          color: '#a5b4fc',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >파일 선택</label>
+                      {payerMatchFiles.length > 0 && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '60px', overflow: 'auto' }}>
+                          {payerMatchFiles.map((f, i) => <div key={i}>✓ {f.name}</div>)}
                         </div>
                       )}
                     </div>
+
+                    {/* 매칭 버튼 */}
+                    <button
+                      onClick={async () => {
+                        if (!payerSheetSelectedTab) {
+                          alert('결제자 시트를 선택해주세요.')
+                          return
+                        }
+                        if (payerMatchFiles.length === 0) {
+                          alert('신청자 파일을 선택해주세요.')
+                          return
+                        }
+                        setPayerMatchProcessing(true)
+                        setPayerMatchLog(['처리 시작...'])
+                        setPayerMatchResult(null)
+
+                        const formData = new FormData()
+                        payerMatchFiles.forEach(f => formData.append('applicants', f))
+                        formData.append('year', payerSheetYear)
+                        formData.append('tabName', payerSheetSelectedTab.raw)
+
+                        try {
+                          const token = localStorage.getItem('authToken')
+                          const res = await fetch('/api/tools/payer-match', {
+                            method: 'POST',
+                            headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                            body: formData
+                          })
+                          const data = await res.json()
+                          if (data.success) {
+                            setPayerMatchResult(data)
+                            setPayerMatchLog(data.logs || ['처리 완료'])
+                          } else {
+                            setPayerMatchLog(['오류: ' + data.error])
+                          }
+                        } catch (err) {
+                          setPayerMatchLog(['오류: ' + err.message])
+                        }
+                        setPayerMatchProcessing(false)
+                      }}
+                      disabled={payerMatchProcessing || !payerSheetSelectedTab || payerMatchFiles.length === 0}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        background: payerMatchProcessing ? '#4c4c6d' : (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        border: 'none',
+                        borderRadius: '10px',
+                        color: (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? '#64748b' : '#fff',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        cursor: payerMatchProcessing ? 'wait' : (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {payerMatchProcessing ? '매칭 처리 중...' : '🔄 매칭 시작'}
+                    </button>
+
+                    {/* 로그 */}
+                    {payerMatchLog.length > 0 && (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '10px',
+                        background: 'rgba(0,0,0,0.3)',
+                        borderRadius: '8px',
+                        maxHeight: '120px',
+                        overflow: 'auto',
+                        fontFamily: 'monospace',
+                        fontSize: '11px'
+                      }}>
+                        {payerMatchLog.map((log, i) => (
+                          <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '3px' }}>{log}</div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 매칭 결과 */}
+                    {payerMatchResult && payerMatchResult.success && (
+                      <div style={{ marginTop: '12px', padding: '14px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.3)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                          <span style={{ color: '#10b981', fontWeight: '600', fontSize: '14px' }}>✓ 매칭 완료</span>
+                          <span style={{ color: '#94a3b8', fontSize: '12px' }}>
+                            매칭: {payerMatchResult.matched}명 / 미매칭: {payerMatchResult.unmatched}명 / 전체: {payerMatchResult.total}명
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={() => {
+                              const link = document.createElement('a')
+                              link.href = payerMatchResult.downloadUrl
+                              link.download = `매칭결과_${payerSheetSelectedTab?.instructor}_${payerSheetSelectedTab?.cohort}.xlsx`
+                              link.click()
+                            }}
+                            style={{
+                              padding: '8px 16px',
+                              background: 'rgba(16,185,129,0.2)',
+                              border: '1px solid rgba(16,185,129,0.4)',
+                              borderRadius: '8px',
+                              color: '#10b981',
+                              fontSize: '12px',
+                              cursor: 'pointer'
+                            }}
+                          >📥 결과 다운로드</button>
+                          <button
+                            onClick={() => { setPayerMatchResult(null); setPayerMatchLog([]); setPayerMatchFiles([]) }}
+                            style={{
+                              padding: '8px 16px',
+                              background: 'rgba(99,102,241,0.2)',
+                              border: '1px solid rgba(99,102,241,0.4)',
+                              borderRadius: '8px',
+                              color: '#a5b4fc',
+                              fontSize: '12px',
+                              cursor: 'pointer'
+                            }}
+                          >🔄 초기화</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  {/* 매칭 결과 미리보기 테이블 */}
+                  {payerMatchResult && payerMatchResult.success && payerMatchResult.matchedData && (
+                    <div style={{ background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(255,255,255,0.2)' }}>
+                      <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#e2e8f0' }}>
+                        매칭 결과 미리보기
+                        <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>매칭 {payerMatchResult.matchedData.length}건 + 직접구매 {payerMatchResult.unmatchedData.length}건</span>
+                      </div>
+                      <div style={{ maxHeight: '400px', overflowY: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead>
+                            <tr style={{ background: 'rgba(255,255,255,0.05)', position: 'sticky', top: 0 }}>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>#</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>구매자</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>전화번호</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'right', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>결제금액</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>유입경로</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...payerMatchResult.matchedData, ...payerMatchResult.unmatchedData].slice(0, 50).map((row, i) => (
+                              <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                <td style={{ padding: '6px 10px', color: '#64748b' }}>{i + 1}</td>
+                                <td style={{ padding: '6px 10px', color: '#e2e8f0' }}>{row.구매자 || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: '#94a3b8' }}>{row.전화번호 || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: '#10b981', textAlign: 'right' }}>{row.결제금액 || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: row.유입경로 === '(직접구매)' ? '#f59e0b' : '#818cf8' }}>{row.유입경로 || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
