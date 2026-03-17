@@ -165,9 +165,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [payerMatchProcessing, setPayerMatchProcessing] = useState(false)
   const [payerMatchLog, setPayerMatchLog] = useState([])
   const [payerMatchResult, setPayerMatchResult] = useState(null)
-  const [payerTabMappings, setPayerTabMappings] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('payerTabMappings') || '{}') } catch { return {} }
-  })
+  const [payerTabMappings, setPayerTabMappings] = useState({})
   const [payerEditingTab, setPayerEditingTab] = useState(null)
   const [payerEditInstructor, setPayerEditInstructor] = useState('')
   const [payerEditCohort, setPayerEditCohort] = useState('')
@@ -625,6 +623,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   useEffect(() => {
     loadSessions()
     loadInstructors()
+    loadPayerTabMappings()
 
     // 모바일 감지
     const checkMobile = () => {
@@ -942,6 +941,50 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       setNewInstructor('')
       setShowAddModal(false)
       loadInstructors()
+    }
+  }
+
+  // 결제자 탭 매핑 서버 함수들
+  const loadPayerTabMappings = async () => {
+    try {
+      const response = await fetch('/api/payer-tab-mappings', { headers: getAuthHeaders() })
+      const result = await response.json()
+      if (result.success) {
+        setPayerTabMappings(result.mappings || {})
+      }
+    } catch (e) {
+      console.error('탭 매핑 로드 실패:', e)
+    }
+  }
+
+  const savePayerTabMapping = async (year, tabRaw, instructor, cohort) => {
+    try {
+      await fetch('/api/payer-tab-mappings', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ year, tabRaw, instructor, cohort })
+      })
+      // 로컬 상태 즉시 반영
+      setPayerTabMappings(prev => ({ ...prev, [`${year}_${tabRaw}`]: { instructor, cohort } }))
+    } catch (e) {
+      console.error('탭 매핑 저장 실패:', e)
+    }
+  }
+
+  const deletePayerTabMapping = async (year, tabRaw) => {
+    try {
+      await fetch('/api/payer-tab-mappings', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ year, tabRaw })
+      })
+      setPayerTabMappings(prev => {
+        const next = { ...prev }
+        delete next[`${year}_${tabRaw}`]
+        return next
+      })
+    } catch (e) {
+      console.error('탭 매핑 삭제 실패:', e)
     }
   }
 
@@ -5911,13 +5954,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           .filter(tab => {
                             if (!payerSheetSearch) return true
                             const q = payerSheetSearch.toLowerCase()
-                            const mapping = payerTabMappings[tab.raw]
+                            const mapping = payerTabMappings[`${payerSheetYear}_${tab.raw}`]
                             const inst = mapping?.instructor || tab.instructor
                             const coh = mapping?.cohort || tab.cohort
                             return inst.toLowerCase().includes(q) || coh.toLowerCase().includes(q) || tab.raw.toLowerCase().includes(q)
                           })
                           .map((tab, i) => {
-                            const mapping = payerTabMappings[tab.raw]
+                            const mapping = payerTabMappings[`${payerSheetYear}_${tab.raw}`]
                             const displayInstructor = mapping?.instructor || tab.instructor
                             const displayCohort = mapping?.cohort || tab.cohort
                             const isEditing = payerEditingTab === tab.raw
@@ -6022,11 +6065,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     />
                                     <button
                                       onClick={() => {
-                                        const newMappings = { ...payerTabMappings, [tab.raw]: { instructor: payerEditInstructor.trim(), cohort: payerEditCohort.trim() } }
-                                        setPayerTabMappings(newMappings)
-                                        localStorage.setItem('payerTabMappings', JSON.stringify(newMappings))
+                                        savePayerTabMapping(payerSheetYear, tab.raw, payerEditInstructor.trim(), payerEditCohort.trim())
                                         setPayerEditingTab(null)
-                                        // 선택된 탭이면 업데이트
                                         if (payerSheetSelectedTab?.raw === tab.raw) {
                                           setPayerSheetSelectedTab({ ...tab, instructor: payerEditInstructor.trim(), cohort: payerEditCohort.trim() })
                                         }
@@ -6036,10 +6076,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     {mapping && (
                                       <button
                                         onClick={() => {
-                                          const newMappings = { ...payerTabMappings }
-                                          delete newMappings[tab.raw]
-                                          setPayerTabMappings(newMappings)
-                                          localStorage.setItem('payerTabMappings', JSON.stringify(newMappings))
+                                          deletePayerTabMapping(payerSheetYear, tab.raw)
                                           setPayerEditingTab(null)
                                           if (payerSheetSelectedTab?.raw === tab.raw) {
                                             setPayerSheetSelectedTab({ ...tab })
@@ -6081,7 +6118,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             결제자: {payerSheetSelectedTab.instructor} {payerSheetSelectedTab.cohort}
                           </span>
                           <span style={{ color: '#64748b', fontSize: '11px' }}>({payerSheetSelectedTab.displayDate})</span>
-                          {payerTabMappings[payerSheetSelectedTab.raw] && (
+                          {payerTabMappings[`${payerSheetYear}_${payerSheetSelectedTab.raw}`] && (
                             <span style={{ color: '#94a3b8', fontSize: '10px' }}>원본: {payerSheetSelectedTab.raw}</span>
                           )}
                         </div>
