@@ -1,7 +1,7 @@
 -- 사용자별 기능 권한 관리 테이블
 CREATE TABLE IF NOT EXISTS user_permissions (
   id SERIAL PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
   feature_key TEXT NOT NULL,
   enabled BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
