@@ -5886,6 +5886,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               <div style={{ marginBottom: '20px' }}>
                 <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   💳 결제자 매칭
+                  <HelpTooltip text={"[사용 방법]\n1. 왼쪽에서 결제자 시트 탭을 선택합니다\n2. 오른쪽에서 신청자 엑셀 파일을 업로드합니다\n   (여러 파일 가능: 1기_GDN.xlsx, 1기_돈깨비.xlsx 등)\n3. 매칭 시작을 누르면 자동으로 처리됩니다\n\n[매칭 로직]\n• 결제자의 전화번호와 신청자의 전화번호를 비교합니다\n• 같은 번호가 있으면 → 해당 신청자 파일명이 유입경로가 됩니다\n• 같은 사람이 여러 파일에 있으면 → 신청일이 가장 빠른 것 하나만 사용\n• 전화번호가 매칭 안 되면 → '직접구매'로 표시됩니다\n\n[제외 조건]\n• 결제 구분이 '전체환불'인 건은 자동 제외됩니다\n• 결제금액이 0원 이하인 건도 자동 제외됩니다\n• 부분환불은 포함됩니다\n\n[결과 엑셀 컬럼]\n구매자 / 전화번호 / 결제금액 / 결제일 / 신청일 / 유입경로 / 결제수단(카드·계좌이체)"} />
                 </h2>
                 <p style={{ color: '#64748b', fontSize: '13px' }}>결제자 시트를 선택하고 신청자 파일을 업로드하면 전화번호 기반으로 유입경로를 매칭합니다.</p>
               </div>
