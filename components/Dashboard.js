@@ -668,6 +668,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       loadSheetConfig()
       fetchSheetPreview()
     }
+    if (currentTab === 'payer-data' && payerSheetTabs.length === 0) {
+      loadPayerSheetTabs(payerSheetYear)
+    }
   }, [currentTab])
 
   // 로그아웃 핸들러 (수집 중 확인)
@@ -6293,12 +6296,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       <div style={{ maxHeight: '400px', overflowY: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                           <thead>
-                            <tr style={{ background: 'rgba(255,255,255,0.05)', position: 'sticky', top: 0 }}>
+                            <tr style={{ background: '#1e293b', position: 'sticky', top: 0, zIndex: 1 }}>
                               <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>#</th>
                               <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>구매자</th>
                               <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>전화번호</th>
                               <th style={{ padding: '8px 10px', textAlign: 'right', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>결제금액</th>
                               <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>유입경로</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: '500', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>결제수단</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -6309,6 +6313,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 <td style={{ padding: '6px 10px', color: '#94a3b8' }}>{row.전화번호 || '-'}</td>
                                 <td style={{ padding: '6px 10px', color: '#10b981', textAlign: 'right' }}>{row.결제금액 || '-'}</td>
                                 <td style={{ padding: '6px 10px', color: row.유입경로 === '(직접구매)' ? '#f59e0b' : '#818cf8' }}>{row.유입경로 || '-'}</td>
+                                <td style={{ padding: '6px 10px', color: '#94a3b8' }}>{row.결제수단 || '-'}</td>
                               </tr>
                             ))}
                           </tbody>

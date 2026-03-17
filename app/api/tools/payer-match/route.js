@@ -131,7 +131,7 @@ export async function POST(request) {
 
     // 헤더로 컬럼 자동 감지
     const headers = rows[0] || []
-    let phoneColIndex = -1, nameColIndex = -1, amountColIndex = -1, dateColIndex = -1
+    let phoneColIndex = -1, nameColIndex = -1, amountColIndex = -1, dateColIndex = -1, methodColIndex = -1
 
     for (let i = 0; i < headers.length; i++) {
       const h = (headers[i] || '').toString().toLowerCase()
@@ -139,6 +139,7 @@ export async function POST(request) {
       if (nameColIndex === -1 && (h.includes('이름') || h.includes('성명') || h.includes('구매자') || h.includes('name') || h.includes('수강생'))) nameColIndex = i
       if (amountColIndex === -1 && (h.includes('결제') && h.includes('금액') || h.includes('금액') || h.includes('amount') || h.includes('price'))) amountColIndex = i
       if (dateColIndex === -1 && (h.includes('결제') && h.includes('일') || h.includes('결제일') || h.includes('date'))) dateColIndex = i
+      if (methodColIndex === -1 && (h.includes('결제수단') || h.includes('결제방법') || h.includes('결제종류') || h.includes('payment') || h.includes('수단'))) methodColIndex = i
     }
 
     const dataRows = rows.slice(1).filter(row => row.some(cell => cell && cell.toString().trim()))
@@ -151,6 +152,7 @@ export async function POST(request) {
       const phoneRaw = phoneColIndex >= 0 ? (row[phoneColIndex] || '').toString().trim() : ''
       const amount = amountColIndex >= 0 ? (row[amountColIndex] || '').toString().trim() : ''
       const date = dateColIndex >= 0 ? (row[dateColIndex] || '').toString().trim() : ''
+      const method = methodColIndex >= 0 ? (row[methodColIndex] || '').toString().trim() : ''
 
       // 결제금액이 0 이하면 환불로 제외
       const amountNum = parseFloat(String(amount).replace(/[^0-9.-]/g, '')) || 0
@@ -160,7 +162,7 @@ export async function POST(request) {
       }
 
       if (name || phoneRaw) {
-        validPayers.push({ name, phoneRaw, phone: normalizePhone(phoneRaw), amount, date })
+        validPayers.push({ name, phoneRaw, phone: normalizePhone(phoneRaw), amount, date, method })
       }
     }
 
@@ -183,7 +185,8 @@ export async function POST(request) {
           결제금액: payer.amount,
           결제일: payer.date,
           신청일: matchedApplicant.신청일,
-          유입경로: matchedApplicant.유입경로
+          유입경로: matchedApplicant.유입경로,
+          결제수단: payer.method
         })
         matched++
       } else {
@@ -193,7 +196,8 @@ export async function POST(request) {
           결제금액: payer.amount,
           결제일: payer.date,
           신청일: '',
-          유입경로: '(직접구매)'
+          유입경로: '(직접구매)',
+          결제수단: payer.method
         })
         unmatched++
       }
