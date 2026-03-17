@@ -88,6 +88,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [permLoading, setPermLoading] = useState(false)
   const [permSaving, setPermSaving] = useState(null) // 저장 중인 userId
   const [permEditMap, setPermEditMap] = useState({}) // userId -> feature[] 편집 상태
+  const [permExpandedUser, setPermExpandedUser] = useState(null) // 펼쳐진 유저 id
 
   // 업데이트 공지 모달
   const [showUpdateModal, setShowUpdateModal] = useState(false)
@@ -6387,6 +6388,181 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               </div>
             </div>
           )}
+
+          {/* 권한 설정 탭 (jinwoo 전용) */}
+          {currentTab === 'admin-permissions' && loginId === 'jinwoo' && (
+            <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+              <div style={{ marginBottom: '24px' }}>
+                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px' }}>
+                  🔐 권한 설정
+                </h2>
+                <p style={{ color: '#64748b', fontSize: '13px' }}>가입된 계정별로 접근 가능한 기능을 설정합니다.</p>
+              </div>
+
+              {permLoading ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>불러오는 중...</div>
+              ) : (
+                <div style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '16px',
+                  overflow: 'hidden'
+                }}>
+                  {/* 테이블 헤더 */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr 1fr',
+                    padding: '12px 20px',
+                    borderBottom: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgba(255,255,255,0.03)'
+                  }}>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>이름</span>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>아이디</span>
+                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', textAlign: 'right' }}>권한 수</span>
+                  </div>
+
+                  {permUsers.map((user, idx) => {
+                    const isSuper = user.isSuperAdmin
+                    const editFeatures = permEditMap[user.id] || user.features
+                    const isExpanded = permExpandedUser === user.id
+                    const enabledCount = isSuper ? permAllFeatures.length : editFeatures.length
+
+                    return (
+                      <div key={user.id} style={{
+                        borderBottom: idx < permUsers.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
+                      }}>
+                        {/* 행 (클릭 가능) */}
+                        <div
+                          onClick={() => setPermExpandedUser(isExpanded ? null : user.id)}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr 1fr',
+                            padding: '14px 20px',
+                            cursor: 'pointer',
+                            alignItems: 'center',
+                            background: isExpanded ? 'rgba(99,102,241,0.08)' : 'transparent',
+                            transition: 'background 0.2s'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{
+                              width: '32px', height: '32px', borderRadius: '50%',
+                              background: isSuper ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.1)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '13px', fontWeight: '700', color: '#fff', flexShrink: 0
+                            }}>
+                              {(user.name || user.username || '?')[0].toUpperCase()}
+                            </span>
+                            <span style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0' }}>
+                              {user.name || user.username}
+                              {isSuper && <span style={{ marginLeft: '8px', fontSize: '10px', background: 'rgba(99,102,241,0.3)', padding: '2px 8px', borderRadius: '10px', color: '#a5b4fc' }}>최고 관리자</span>}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: '13px', color: '#94a3b8' }}>@{user.username}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
+                            <span style={{ fontSize: '13px', color: '#a5b4fc', fontWeight: '600' }}>
+                              {enabledCount} / {permAllFeatures.length}
+                            </span>
+                            <span style={{
+                              fontSize: '12px', color: '#64748b',
+                              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                              transition: 'transform 0.2s'
+                            }}>▼</span>
+                          </div>
+                        </div>
+
+                        {/* 펼침 영역 */}
+                        {isExpanded && (
+                          <div style={{
+                            padding: '16px 20px',
+                            background: 'rgba(99,102,241,0.04)',
+                            borderTop: '1px solid rgba(255,255,255,0.06)'
+                          }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '8px', marginBottom: !isSuper ? '16px' : '0' }}>
+                              {permAllFeatures.map(f => {
+                                const checked = isSuper ? true : editFeatures.includes(f.key)
+                                return (
+                                  <label key={f.key} style={{
+                                    display: 'flex', alignItems: 'center', gap: '10px',
+                                    padding: '10px 14px', borderRadius: '10px',
+                                    background: checked ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)',
+                                    border: checked ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                                    cursor: isSuper ? 'default' : 'pointer',
+                                    opacity: isSuper ? 0.7 : 1,
+                                    transition: 'all 0.2s'
+                                  }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={isSuper}
+                                      onChange={() => {
+                                        if (isSuper) return
+                                        setPermEditMap(prev => {
+                                          const current = prev[user.id] || [...user.features]
+                                          const next = current.includes(f.key)
+                                            ? current.filter(k => k !== f.key)
+                                            : [...current, f.key]
+                                          return { ...prev, [user.id]: next }
+                                        })
+                                      }}
+                                      style={{ accentColor: '#6366f1', width: '16px', height: '16px' }}
+                                    />
+                                    <div>
+                                      <div style={{ fontSize: '13px', fontWeight: '600', color: checked ? '#a5b4fc' : 'rgba(255,255,255,0.6)' }}>{f.label}</div>
+                                      <div style={{ fontSize: '11px', color: '#64748b' }}>{f.desc}</div>
+                                    </div>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                            {!isSuper && (
+                              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <button
+                                  onClick={async () => {
+                                    setPermSaving(user.id)
+                                    try {
+                                      const res = await fetch('/api/user-permissions', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          action: 'save-permissions',
+                                          requestLoginId: loginId,
+                                          userId: user.id,
+                                          features: editFeatures
+                                        })
+                                      })
+                                      const data = await res.json()
+                                      if (data.success) {
+                                        setPermUsers(prev => prev.map(u => u.id === user.id ? { ...u, features: [...editFeatures] } : u))
+                                      } else {
+                                        alert(data.error || '저장 실패')
+                                      }
+                                    } catch (e) { alert('저장 중 오류') }
+                                    setPermSaving(null)
+                                  }}
+                                  disabled={permSaving === user.id}
+                                  style={{
+                                    padding: '8px 24px',
+                                    background: permSaving === user.id ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                    border: 'none', borderRadius: '10px',
+                                    color: '#fff', fontSize: '13px', fontWeight: '600',
+                                    cursor: permSaving === user.id ? 'wait' : 'pointer'
+                                  }}
+                                >
+                                  {permSaving === user.id ? '저장 중...' : '저장'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
         {/* 푸터 */}
@@ -6897,131 +7073,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           </div>
         </div>
       )}
-
-          {/* 권한 설정 탭 (jinwoo 전용) */}
-          {currentTab === 'admin-permissions' && loginId === 'jinwoo' && (
-            <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1000px', margin: '0 auto' }}>
-              <div style={{ marginBottom: '24px' }}>
-                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px' }}>
-                  🔐 권한 설정
-                </h2>
-                <p style={{ color: '#64748b', fontSize: '13px' }}>가입된 계정별로 접근 가능한 기능을 설정합니다.</p>
-              </div>
-
-              {permLoading ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>불러오는 중...</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {permUsers.map(user => {
-                    const isSuper = user.isSuperAdmin
-                    const editFeatures = permEditMap[user.id] || user.features
-                    return (
-                      <div key={user.id} style={{
-                        background: isSuper ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.05)',
-                        border: isSuper ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '16px',
-                        padding: '20px'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{
-                              width: '36px', height: '36px', borderRadius: '50%',
-                              background: isSuper ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.1)',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '14px', fontWeight: '700', color: '#fff'
-                            }}>
-                              {(user.name || user.username || '?')[0].toUpperCase()}
-                            </span>
-                            <div>
-                              <div style={{ fontSize: '15px', fontWeight: '600', color: '#fff' }}>
-                                {user.name || user.username}
-                                {isSuper && <span style={{ marginLeft: '8px', fontSize: '11px', background: 'rgba(99,102,241,0.3)', padding: '2px 8px', borderRadius: '10px', color: '#a5b4fc' }}>최고 관리자</span>}
-                              </div>
-                              <div style={{ fontSize: '12px', color: '#64748b' }}>@{user.username}</div>
-                            </div>
-                          </div>
-                          {!isSuper && (
-                            <button
-                              onClick={async () => {
-                                setPermSaving(user.id)
-                                try {
-                                  const res = await fetch('/api/user-permissions', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                      action: 'save-permissions',
-                                      requestLoginId: loginId,
-                                      userId: user.id,
-                                      features: editFeatures
-                                    })
-                                  })
-                                  const data = await res.json()
-                                  if (data.success) {
-                                    setPermUsers(prev => prev.map(u => u.id === user.id ? { ...u, features: [...editFeatures] } : u))
-                                  } else {
-                                    alert(data.error || '저장 실패')
-                                  }
-                                } catch (e) { alert('저장 중 오류') }
-                                setPermSaving(null)
-                              }}
-                              disabled={permSaving === user.id}
-                              style={{
-                                padding: '8px 20px',
-                                background: permSaving === user.id ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                                border: 'none', borderRadius: '10px',
-                                color: '#fff', fontSize: '13px', fontWeight: '600',
-                                cursor: permSaving === user.id ? 'wait' : 'pointer'
-                              }}
-                            >
-                              {permSaving === user.id ? '저장 중...' : '저장'}
-                            </button>
-                          )}
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '8px' }}>
-                          {permAllFeatures.map(f => {
-                            const checked = isSuper ? true : editFeatures.includes(f.key)
-                            return (
-                              <label key={f.key} style={{
-                                display: 'flex', alignItems: 'center', gap: '10px',
-                                padding: '10px 14px', borderRadius: '10px',
-                                background: checked ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)',
-                                border: checked ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
-                                cursor: isSuper ? 'default' : 'pointer',
-                                opacity: isSuper ? 0.7 : 1,
-                                transition: 'all 0.2s'
-                              }}>
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  disabled={isSuper}
-                                  onChange={() => {
-                                    if (isSuper) return
-                                    setPermEditMap(prev => {
-                                      const current = prev[user.id] || [...user.features]
-                                      const next = current.includes(f.key)
-                                        ? current.filter(k => k !== f.key)
-                                        : [...current, f.key]
-                                      return { ...prev, [user.id]: next }
-                                    })
-                                  }}
-                                  style={{ accentColor: '#6366f1', width: '16px', height: '16px' }}
-                                />
-                                <div>
-                                  <div style={{ fontSize: '13px', fontWeight: '600', color: checked ? '#a5b4fc' : 'rgba(255,255,255,0.6)' }}>{f.label}</div>
-                                  <div style={{ fontSize: '11px', color: '#64748b' }}>{f.desc}</div>
-                                </div>
-                              </label>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
 
       {/* 업데이트 공지 모달 */}
       {showUpdateModal && (
