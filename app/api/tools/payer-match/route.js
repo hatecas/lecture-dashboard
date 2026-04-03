@@ -191,11 +191,13 @@ export async function POST(request) {
     for (const payer of validPayers) {
       const matchedApplicant = payer.phone ? applicantMap.get(payer.phone) : null
 
+      const amountNumber = parseFloat(String(payer.amount).replace(/[^0-9.-]/g, '')) || 0
+
       if (matchedApplicant) {
         results.push({
           구매자: payer.name,
           전화번호: payer.phoneRaw,
-          결제금액: payer.amount,
+          결제금액: amountNumber,
           결제일: payer.date,
           신청일: matchedApplicant.신청일,
           유입경로: matchedApplicant.유입경로,
@@ -207,7 +209,7 @@ export async function POST(request) {
         unmatchedList.push({
           구매자: payer.name,
           전화번호: payer.phoneRaw,
-          결제금액: payer.amount,
+          결제금액: amountNumber,
           결제일: payer.date,
           신청일: '',
           유입경로: '(직접구매)',
