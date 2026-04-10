@@ -20,7 +20,8 @@ const DEFAULT_CONFIG = {
     { fieldKey: 'kakaoRoomDb', displayName: '카톡방', columnIndex: 30, type: '숫자' },
     { fieldKey: 'liveViewers', displayName: '동시접속', columnIndex: 31, type: '숫자' },
     { fieldKey: 'totalPurchases', displayName: '결제건수', columnIndex: 36, type: '숫자' },
-    { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 45, type: '퍼센트' }
+    { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 45, type: '퍼센트' },
+    { fieldKey: 'freeClassViewRate', displayName: '무료강의 시청률', columnIndex: 32, type: '퍼센트' }
   ]
 }
 

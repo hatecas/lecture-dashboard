@@ -132,7 +132,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       { fieldKey: 'kakaoRoomDb', displayName: '카톡방', columnIndex: 30, type: '숫자' },
       { fieldKey: 'liveViewers', displayName: '동시접속', columnIndex: 31, type: '숫자' },
       { fieldKey: 'totalPurchases', displayName: '결제건수', columnIndex: 36, type: '숫자' },
-      { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 45, type: '퍼센트' }
+      { fieldKey: 'conversionRate', displayName: '전환률', columnIndex: 45, type: '퍼센트' },
+      { fieldKey: 'freeClassViewRate', displayName: '무료강의 시청률', columnIndex: 32, type: '퍼센트' }
     ]
   })
   const [sheetConfigLoading, setSheetConfigLoading] = useState(false)
@@ -2125,7 +2126,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' }}
                 >📊 기수별 차트</button>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px', marginBottom: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: isMobile ? '12px' : '16px', marginBottom: '24px' }}>
                 <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(96,165,250,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(167,139,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
                   <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
                     <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>매출</div>
@@ -2156,6 +2157,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>광고 전환비용</div>
                     <div style={{ fontSize: '26px', fontWeight: '700', color: '#a78bfa' }}>
                       {sheetData?.conversionCost ? formatNumber(sheetData.conversionCost) : formatNumber(currentSession.conversion_cost)}원
+                    </div>
+                  </div>
+                </div>
+                <div style={{ borderRadius: '16px', padding: '1px', background: 'linear-gradient(135deg, rgba(244,114,182,0.6) 0%, rgba(255,255,255,0.1) 50%, rgba(96,165,250,0.4) 100%)', transition: 'all 0.3s ease' }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.3)' }} onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none' }}>
+                  <div style={{ background: 'rgba(15,23,42,0.9)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderRadius: '15px', padding: '24px', height: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '13px', marginBottom: '8px' }}>무료강의 시청률</div>
+                    <div style={{ fontSize: '26px', fontWeight: '700', color: '#f472b6' }}>
+                      {sheetData?.freeClassViewRate != null ? `${sheetData.freeClassViewRate}%` : '-'}
                     </div>
                   </div>
                 </div>
@@ -2648,6 +2657,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               { label: 'GDN 전환단가', key: 'gdnConvCost', format: v => formatNumber(Math.round(v)) + '원', higherBetter: false },
               { label: '메타 전환단가', key: 'metaConvCost', format: v => formatNumber(Math.round(v)) + '원', higherBetter: false },
               { label: '인당 매출', key: 'revenuePerPurchase', format: v => formatMoney(v), higherBetter: true, calc: d => d.totalPurchases > 0 ? Math.round(d.revenue / d.totalPurchases) : 0 },
+              { label: '무료강의 시청률', key: 'freeClassViewRate', format: v => Number(v).toFixed(2) + '%', higherBetter: true },
             ]
 
             const selectStyle = {
