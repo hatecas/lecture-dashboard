@@ -67,11 +67,18 @@ export async function POST(request) {
 
     // 모든 파일 데이터 병합
     let allData = []
+    const allHeaderSet = new Set()
     for (const file of files) {
       const buffer = await file.arrayBuffer()
       const wb = XLSX.read(buffer)
       const sheet = wb.Sheets[wb.SheetNames[0]]
-      const data = XLSX.utils.sheet_to_json(sheet)
+      // defval: '' 로 빈 셀도 키가 유지되도록 함 (연락처 공백 행 감지용)
+      const data = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+      // 헤더 순서 보존을 위해 header: 1로 헤더 행 추출
+      const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+      if (rawRows.length > 0) {
+        for (const h of rawRows[0]) if (h) allHeaderSet.add(String(h))
+      }
       allData = allData.concat(data)
       logs.push(`파일 "${file.name}": ${data.length}건`)
     }
@@ -79,11 +86,17 @@ export async function POST(request) {
     const originalCount = allData.length
     logs.push(`총 원본 레코드 수: ${originalCount}`)
 
-    // 컬럼 찾기
-    const headers = Object.keys(allData[0] || {})
-    const phoneCol = findPhoneColumn(headers)
+    // 컬럼 찾기 (모든 파일의 헤더에서 탐지)
+    const headers = allHeaderSet.size > 0 ? Array.from(allHeaderSet) : Object.keys(allData[0] || {})
+    let phoneCol = findPhoneColumn(headers)
 
-    logs.push(`전화번호 컬럼: ${phoneCol || '(자동 감지 실패)'}`)
+    // 자동 감지 실패 시 D열(4번째 헤더)을 폴백으로 사용
+    if (!phoneCol && headers.length >= 4) {
+      phoneCol = headers[3]
+      logs.push(`전화번호 컬럼 자동 감지 실패 → D열(${phoneCol})을 연락처로 사용`)
+    } else {
+      logs.push(`전화번호 컬럼: ${phoneCol || '(자동 감지 실패)'}`)
+    }
 
     // 데이터 정리
     const seen = new Set()
