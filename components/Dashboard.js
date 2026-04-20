@@ -63,6 +63,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [toolResult, setToolResult] = useState(null)
   const [toolProcessing, setToolProcessing] = useState(false)
   const [toolLog, setToolLog] = useState([])
+  const [crmDragging, setCrmDragging] = useState(false)
 
   // 유튜브 채팅 수집 상태
   const [ytVideoId, setYtVideoId] = useState('')
@@ -3048,17 +3049,40 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     <p style={{ color: '#94a3b8', fontSize: '13px' }}>CRM 데이터의 중복을 제거하고 연락처 형식을 통일합니다.</p>
                   </div>
 
-                  <div style={{
-                    padding: '20px',
-                    background: 'rgba(99,102,241,0.1)',
-                    borderRadius: '12px',
-                    border: '2px dashed rgba(99,102,241,0.3)',
-                    textAlign: 'center',
-                    marginBottom: '20px'
-                  }}>
-                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📊</div>
-                    <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>CRM 데이터</p>
-                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>정리할 CRM 데이터 (Excel/CSV, 여러개 가능)</p>
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!crmDragging) setCrmDragging(true) }}
+                    onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setCrmDragging(true) }}
+                    onDragLeave={(e) => {
+                      e.preventDefault(); e.stopPropagation()
+                      if (e.currentTarget.contains(e.relatedTarget)) return
+                      setCrmDragging(false)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault(); e.stopPropagation()
+                      setCrmDragging(false)
+                      const dropped = Array.from(e.dataTransfer.files || [])
+                      const allowed = dropped.filter(f => /\.(xlsx|xls|csv)$/i.test(f.name))
+                      if (allowed.length === 0) {
+                        alert('Excel 또는 CSV 파일만 업로드 가능합니다.')
+                        return
+                      }
+                      setToolFiles1(prev => [...prev, ...allowed])
+                    }}
+                    style={{
+                      padding: '20px',
+                      background: crmDragging ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.1)',
+                      borderRadius: '12px',
+                      border: crmDragging ? '2px dashed #6366f1' : '2px dashed rgba(99,102,241,0.3)',
+                      textAlign: 'center',
+                      marginBottom: '20px',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>{crmDragging ? '📥' : '📊'}</div>
+                    <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>
+                      {crmDragging ? '여기에 파일을 놓으세요' : 'CRM 데이터'}
+                    </p>
+                    <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>파일을 드래그하거나 버튼으로 선택 (Excel/CSV, 여러개 가능)</p>
                     <input
                       type="file"
                       accept=".xlsx,.xls,.csv"

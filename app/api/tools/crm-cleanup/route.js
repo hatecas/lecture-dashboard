@@ -90,8 +90,19 @@ export async function POST(request) {
     const cleanedData = []
     let duplicatesRemoved = 0
     let phoneFormatted = 0
+    let emptyPhoneRemoved = 0
 
     for (const row of allData) {
+      // 연락처 컬럼이 비어있는 행 제거
+      if (phoneCol) {
+        const phoneVal = row[phoneCol]
+        const hasPhone = phoneVal !== undefined && phoneVal !== null && String(phoneVal).trim() !== ''
+        if (!hasPhone) {
+          emptyPhoneRemoved++
+          continue
+        }
+      }
+
       // 전화번호 정규화
       if (phoneCol && row[phoneCol]) {
         const original = row[phoneCol]
@@ -121,6 +132,7 @@ export async function POST(request) {
       cleanedData.push(row)
     }
 
+    logs.push(`연락처 공백 제거: ${emptyPhoneRemoved}건`)
     logs.push(`중복 제거: ${duplicatesRemoved}건`)
     logs.push(`전화번호 형식 변경: ${phoneFormatted}건`)
     logs.push(`정리 후 레코드 수: ${cleanedData.length}`)
