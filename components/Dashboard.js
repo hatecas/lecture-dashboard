@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
+import * as XLSX from 'xlsx'
 
 export default function Dashboard({ onLogout, userName, loginId, permissions = {} }) {
   const [sessions, setSessions] = useState([])
@@ -3129,9 +3130,17 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           method: 'POST',
                           body: formData
                         })
+                        if (!res.ok) {
+                          throw new Error(`서버 오류 (${res.status}): 파일 크기가 너무 클 수 있습니다. 파일 수를 줄여서 다시 시도해주세요.`)
+                        }
                         const data = await res.json()
                         if (data.success) {
-                          setToolResult(data)
+                          const wb = XLSX.utils.book_new()
+                          const ws = XLSX.utils.json_to_sheet(data.cleanedData)
+                          XLSX.utils.book_append_sheet(wb, ws, '정리된데이터')
+                          const excelBuffer = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' })
+                          const downloadUrl = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${excelBuffer}`
+                          setToolResult({ ...data, downloadUrl })
                           setToolLog(data.logs || ['처리 완료'])
                         } else {
                           setToolLog(['오류: ' + data.error])
