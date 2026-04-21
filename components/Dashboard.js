@@ -3221,6 +3221,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         const downloadUrl = URL.createObjectURL(blob)
 
                         setToolResult({
+                          success: true,
                           originalCount,
                           cleanedCount: cleanedData.length,
                           duplicatesRemoved,
