@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
+export const maxDuration = 60
+export const dynamic = 'force-dynamic'
+
 // 전화번호 정규화 함수
 function normalizePhone(phone) {
   if (!phone) return ''
@@ -125,15 +128,6 @@ export async function POST(request) {
     logs.push(`전화번호 형식 변경: ${phoneFormatted}건`)
     logs.push(`정리 후 레코드 수: ${cleanedData.length}`)
 
-    // 결과 Excel 생성
-    const newWb = XLSX.utils.book_new()
-    const newWs = XLSX.utils.json_to_sheet(cleanedData)
-    XLSX.utils.book_append_sheet(newWb, newWs, '정리된데이터')
-
-    // Excel 파일을 base64로 변환
-    const excelBuffer = XLSX.write(newWb, { type: 'base64', bookType: 'xlsx' })
-    const downloadUrl = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${excelBuffer}`
-
     return NextResponse.json({
       success: true,
       originalCount,
@@ -141,7 +135,7 @@ export async function POST(request) {
       duplicatesRemoved,
       phoneFormatted,
       logs,
-      downloadUrl
+      cleanedData
     })
 
   } catch (error) {
