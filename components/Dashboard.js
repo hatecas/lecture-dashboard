@@ -3182,8 +3182,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         const newWb = XLSX.utils.book_new()
                         const newWs = XLSX.utils.json_to_sheet(cleanedData)
                         XLSX.utils.book_append_sheet(newWb, newWs, '정리된데이터')
-                        const excelBuffer = XLSX.write(newWb, { type: 'base64', bookType: 'xlsx' })
-                        const downloadUrl = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${excelBuffer}`
+                        const excelArray = XLSX.write(newWb, { type: 'array', bookType: 'xlsx' })
+                        const blob = new Blob([excelArray], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+                        const downloadUrl = URL.createObjectURL(blob)
 
                         setToolResult({
                           originalCount,
