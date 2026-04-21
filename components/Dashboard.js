@@ -3088,29 +3088,111 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       setToolProcessing(true)
                       setToolLog(['처리 시작...'])
 
-                      const formData = new FormData()
-                      toolFiles1.forEach(f => formData.append('files', f))
-
                       try {
-                        const res = await fetch('/api/tools/crm-cleanup', {
-                          method: 'POST',
-                          body: formData
-                        })
-                        if (!res.ok) {
-                          throw new Error(`서버 오류 (${res.status}): 파일 크기가 너무 클 수 있습니다. 파일 수를 줄여서 다시 시도해주세요.`)
+                        const logs = [`${toolFiles1.length}개 파일 업로드됨`]
+                        let allData = []
+                        const allHeaderSet = new Set()
+
+                        const normalizePhone = (phone) => {
+                          if (!phone) return ''
+                          const cleaned = String(phone).replace(/[^0-9]/g, '')
+                          if (cleaned.length === 11 && cleaned.startsWith('010'))
+                            return cleaned.slice(0,3)+'-'+cleaned.slice(3,7)+'-'+cleaned.slice(7)
+                          if (cleaned.length === 10 && cleaned.startsWith('10'))
+                            return '0'+cleaned.slice(0,2)+'-'+cleaned.slice(2,6)+'-'+cleaned.slice(6)
+                          if (cleaned.length >= 9 && cleaned.length <= 10) {
+                            if (cleaned.startsWith('02')) {
+                              return cleaned.length === 9
+                                ? '02-'+cleaned.slice(2,5)+'-'+cleaned.slice(5)
+                                : '02-'+cleaned.slice(2,6)+'-'+cleaned.slice(6)
+                            } else {
+                              return cleaned.length === 10
+                                ? cleaned.slice(0,3)+'-'+cleaned.slice(3,6)+'-'+cleaned.slice(6)
+                                : cleaned.slice(0,3)+'-'+cleaned.slice(3,7)+'-'+cleaned.slice(7)
+                            }
+                          }
+                          return cleaned
                         }
-                        const data = await res.json()
-                        if (data.success) {
-                          const wb = XLSX.utils.book_new()
-                          const ws = XLSX.utils.json_to_sheet(data.cleanedData)
-                          XLSX.utils.book_append_sheet(wb, ws, '정리된데이터')
-                          const excelBuffer = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' })
-                          const downloadUrl = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${excelBuffer}`
-                          setToolResult({ ...data, downloadUrl })
-                          setToolLog(data.logs || ['처리 완료'])
+
+                        const phonePatterns = ['연락처','전화번호','전화','phone','핸드폰','휴대폰','휴대전화','연락번호','mobile','cell']
+                        const findPhoneCol = (headers) => {
+                          for (const h of headers)
+                            for (const p of phonePatterns)
+                              if (String(h).toLowerCase().includes(p.toLowerCase())) return h
+                          return null
+                        }
+
+                        for (const file of toolFiles1) {
+                          const buffer = await file.arrayBuffer()
+                          const wb = XLSX.read(buffer)
+                          const sheet = wb.Sheets[wb.SheetNames[0]]
+                          const data = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+                          const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+                          if (rawRows.length > 0)
+                            for (const h of rawRows[0]) if (h) allHeaderSet.add(String(h))
+                          allData = allData.concat(data)
+                          logs.push(`파일 "${file.name}": ${data.length}건`)
+                        }
+
+                        const originalCount = allData.length
+                        logs.push(`총 원본 레코드 수: ${originalCount}`)
+
+                        const headers = allHeaderSet.size > 0 ? Array.from(allHeaderSet) : Object.keys(allData[0] || {})
+                        let phoneCol = findPhoneCol(headers)
+                        if (!phoneCol && headers.length >= 4) {
+                          phoneCol = headers[3]
+                          logs.push(`전화번호 컬럼 자동 감지 실패 → D열(${phoneCol})을 연락처로 사용`)
                         } else {
-                          setToolLog(['오류: ' + data.error])
+                          logs.push(`전화번호 컬럼: ${phoneCol || '(자동 감지 실패)'}`)
                         }
+
+                        const seen = new Set()
+                        const cleanedData = []
+                        let duplicatesRemoved = 0
+                        let phoneFormatted = 0
+                        let emptyPhoneRemoved = 0
+
+                        for (const row of allData) {
+                          if (phoneCol) {
+                            const phoneVal = row[phoneCol]
+                            if (phoneVal === undefined || phoneVal === null || String(phoneVal).trim() === '') {
+                              emptyPhoneRemoved++
+                              continue
+                            }
+                          }
+                          if (phoneCol && row[phoneCol]) {
+                            const original = row[phoneCol]
+                            const normalized = normalizePhone(row[phoneCol])
+                            row[phoneCol] = normalized
+                            if (original !== normalized) phoneFormatted++
+                            const key = normalized.replace(/-/g, '')
+                            if (seen.has(key)) { duplicatesRemoved++; continue }
+                            seen.add(key)
+                          }
+                          for (const key of Object.keys(row))
+                            if (typeof row[key] === 'string') row[key] = row[key].trim()
+                          cleanedData.push(row)
+                        }
+
+                        logs.push(`연락처 공백 제거: ${emptyPhoneRemoved}건`)
+                        logs.push(`중복 제거: ${duplicatesRemoved}건`)
+                        logs.push(`전화번호 형식 변경: ${phoneFormatted}건`)
+                        logs.push(`정리 후 레코드 수: ${cleanedData.length}`)
+
+                        const newWb = XLSX.utils.book_new()
+                        const newWs = XLSX.utils.json_to_sheet(cleanedData)
+                        XLSX.utils.book_append_sheet(newWb, newWs, '정리된데이터')
+                        const excelBuffer = XLSX.write(newWb, { type: 'base64', bookType: 'xlsx' })
+                        const downloadUrl = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${excelBuffer}`
+
+                        setToolResult({
+                          originalCount,
+                          cleanedCount: cleanedData.length,
+                          duplicatesRemoved,
+                          phoneFormatted,
+                          downloadUrl
+                        })
+                        setToolLog(logs)
                       } catch (err) {
                         setToolLog(['오류: ' + err.message])
                       }
