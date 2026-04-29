@@ -155,12 +155,23 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [kakaoCommitting, setKakaoCommitting] = useState(false)
   const [kakaoCommitResult, setKakaoCommitResult] = useState(null)
 
-  // 주문 동기화(CSV → 결제자 시트 append) 상태
+  // 주문 동기화(nlab DB / CSV → 결제자 시트 append) 상태
+  const [orderSyncMode, setOrderSyncMode] = useState('supabase') // 'supabase' | 'csv'
   const [orderSyncYear, setOrderSyncYear] = useState('26')
   const [orderSyncTabs, setOrderSyncTabs] = useState([])
   const [orderSyncTabsLoading, setOrderSyncTabsLoading] = useState(false)
   const [orderSyncSelectedTab, setOrderSyncSelectedTab] = useState(null)
   const [orderSyncFile, setOrderSyncFile] = useState(null)
+  const [orderSyncInstructors, setOrderSyncInstructors] = useState([])
+  const [orderSyncInstructorsLoading, setOrderSyncInstructorsLoading] = useState(false)
+  const [orderSyncSelectedInstructor, setOrderSyncSelectedInstructor] = useState('')
+  // 조회 기간 (최대 31일). 기본값: 오늘 기준 최근 30일.
+  const [orderSyncDateFrom, setOrderSyncDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 30)
+    return d.toISOString().slice(0, 10)
+  })
+  const [orderSyncDateTo, setOrderSyncDateTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [orderSyncRangeError, setOrderSyncRangeError] = useState('')
   const [orderSyncPreview, setOrderSyncPreview] = useState(null)
   const [orderSyncProcessing, setOrderSyncProcessing] = useState(false)
   const [orderSyncCommitting, setOrderSyncCommitting] = useState(false)
@@ -659,8 +670,36 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     setOrderSyncTabsLoading(false)
   }
 
+  // 강사 목록 로드 (nlab DB의 TossCustomer productTitle 파싱).
+  // 조회 기간 안에 결제 완료된 강의가 있는 강사만 반환된다 (최대 31일).
+  const loadOrderSyncInstructors = async (from, to) => {
+    setOrderSyncInstructorsLoading(true)
+    setOrderSyncRangeError('')
+    const dFrom = from ?? orderSyncDateFrom
+    const dTo = to ?? orderSyncDateTo
+    try {
+      const qs = new URLSearchParams({ from: dFrom, to: dTo }).toString()
+      const res = await fetch(`/api/tools/order-sync?${qs}`, {
+        method: 'GET',
+        headers: getAuthHeaders()
+      })
+      const data = await res.json()
+      if (data.success) {
+        setOrderSyncInstructors(data.teachers || [])
+      } else {
+        setOrderSyncInstructors([])
+        setOrderSyncRangeError(data.error || '조회 실패')
+      }
+    } catch (err) {
+      setOrderSyncInstructors([])
+      setOrderSyncRangeError(err.message || '네트워크 오류')
+    }
+    setOrderSyncInstructorsLoading(false)
+  }
+
   const resetOrderSync = () => {
     setOrderSyncFile(null)
+    setOrderSyncSelectedInstructor('')
     setOrderSyncPreview(null)
     setOrderSyncCommitResult(null)
     setOrderSyncLog([])
@@ -2875,6 +2914,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       if (tool.id === 'order-sync') {
                         resetOrderSync()
                         if (orderSyncTabs.length === 0) loadOrderSyncTabs(orderSyncYear)
+                        if (orderSyncInstructors.length === 0) loadOrderSyncInstructors()
                       }
                       if (tool.id === 'youtube') {
                         try {
@@ -3773,54 +3813,237 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   <div style={{ marginBottom: '20px' }}>
                     <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       📦 주문 내역 → 결제자 시트 동기화
-                      <HelpTooltip text={"nlab.kr 관리자 페이지에서 강사별로\n'전체 주문 내역'을 CSV로 내보낸 뒤\n파일을 업로드하세요.\n\n자동으로 환불 건을 제외하고\n시트에 이미 있는 전화번호와 비교하여\n신규 주문만 결제자 시트에 추가합니다.\n\n- 미리보기로 추가될 행을 먼저 확인\n- 시트에 적용 버튼으로 실제 추가"} />
+                      <HelpTooltip text={"두 가지 방식 지원:\n\n[자동 - nlab DB 직접 연동] (권장)\n강사를 드롭다운에서 선택만 하면\nnlab 운영 DB(Supabase)에서 토스 결제 내역을\n바로 가져와 결제자 시트에 추가합니다.\n\n[수동 - CSV 업로드]\nnlab.kr 어드민에서 전체 주문 내역 CSV를\n직접 받아 업로드하는 기존 방식.\n\n둘 다 자동으로 환불 건을 제외하고\n시트에 이미 있는 전화번호와 비교해\n신규 주문만 추가합니다."} />
                     </h3>
-                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>nlab.kr CSV를 업로드하면 환불을 제외하고 신규 결제자만 결제자 시트에 자동 추가합니다.</p>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>강사 선택만으로 nlab DB의 결제 내역을 결제자 시트에 자동 동기화합니다. (CSV 업로드 모드도 지원)</p>
+                  </div>
+
+                  {/* 모드 토글 */}
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', padding: '4px', background: 'rgba(0,0,0,0.3)', borderRadius: '10px' }}>
+                    {[
+                      { id: 'supabase', label: '🤖 자동 (nlab DB)', desc: '강사 선택만으로 즉시 동기화' },
+                      { id: 'csv', label: '📁 수동 (CSV 업로드)', desc: 'nlab 어드민 CSV 직접 업로드' }
+                    ].map(m => {
+                      const active = orderSyncMode === m.id
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => {
+                            setOrderSyncMode(m.id)
+                            setOrderSyncPreview(null)
+                            setOrderSyncCommitResult(null)
+                            setOrderSyncLog([])
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '10px 12px',
+                            background: active ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'transparent',
+                            border: 'none',
+                            borderRadius: '8px',
+                            color: active ? '#fff' : '#94a3b8',
+                            fontSize: '13px',
+                            fontWeight: active ? '600' : '500',
+                            cursor: 'pointer',
+                            textAlign: 'left'
+                          }}
+                        >
+                          <div style={{ fontSize: '13px', fontWeight: '600' }}>{m.label}</div>
+                          <div style={{ fontSize: '11px', opacity: 0.85, marginTop: '2px' }}>{m.desc}</div>
+                        </button>
+                      )
+                    })}
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-                    {/* CSV 업로드 */}
-                    <div style={{
-                      padding: '20px',
-                      background: 'rgba(34,197,94,0.1)',
-                      borderRadius: '12px',
-                      border: '2px dashed rgba(34,197,94,0.3)',
-                      textAlign: 'center'
-                    }}>
-                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>📥</div>
-                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>주문 CSV 파일</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>nlab.kr 전체 주문 내역 CSV (1개)</p>
-                      <input
-                        type="file"
-                        accept=".csv,.xlsx,.xls"
-                        onChange={(e) => {
-                          setOrderSyncFile(e.target.files?.[0] || null)
-                          setOrderSyncPreview(null)
-                          setOrderSyncCommitResult(null)
-                        }}
-                        style={{ display: 'none' }}
-                        id="order-sync-file"
-                      />
-                      <label
-                        htmlFor="order-sync-file"
-                        style={{
-                          display: 'inline-block',
-                          padding: '8px 16px',
-                          background: 'rgba(34,197,94,0.3)',
-                          borderRadius: '8px',
-                          color: '#86efac',
-                          fontSize: '13px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        파일 선택
-                      </label>
-                      {orderSyncFile && (
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>
-                          ✓ {orderSyncFile.name} ({(orderSyncFile.size / 1024).toFixed(1)}KB)
+                    {/* 좌측: 모드별 입력 */}
+                    {orderSyncMode === 'supabase' ? (
+                      <div style={{
+                        padding: '20px',
+                        background: 'rgba(99,102,241,0.1)',
+                        borderRadius: '12px',
+                        border: '2px dashed rgba(99,102,241,0.3)',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎯</div>
+                        <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>강사 선택</p>
+                        <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>조회 기간 내 결제가 있는 강사만 (최대 31일)</p>
+
+                        {/* 날짜 범위 + 조회 버튼 */}
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+                          <input
+                            type="date"
+                            value={orderSyncDateFrom}
+                            onChange={(e) => setOrderSyncDateFrom(e.target.value)}
+                            style={{
+                              padding: '8px 10px',
+                              background: 'rgba(0,0,0,0.3)',
+                              border: '1px solid rgba(99,102,241,0.4)',
+                              borderRadius: '8px',
+                              color: '#fff',
+                              fontSize: '12px',
+                              colorScheme: 'dark'
+                            }}
+                          />
+                          <span style={{ color: '#64748b', fontSize: '12px' }}>~</span>
+                          <input
+                            type="date"
+                            value={orderSyncDateTo}
+                            onChange={(e) => setOrderSyncDateTo(e.target.value)}
+                            style={{
+                              padding: '8px 10px',
+                              background: 'rgba(0,0,0,0.3)',
+                              border: '1px solid rgba(99,102,241,0.4)',
+                              borderRadius: '8px',
+                              color: '#fff',
+                              fontSize: '12px',
+                              colorScheme: 'dark'
+                            }}
+                          />
+                          <button
+                            onClick={() => {
+                              setOrderSyncSelectedInstructor('')
+                              setOrderSyncPreview(null)
+                              setOrderSyncCommitResult(null)
+                              loadOrderSyncInstructors()
+                            }}
+                            disabled={orderSyncInstructorsLoading}
+                            style={{
+                              padding: '8px 14px',
+                              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                              border: 'none',
+                              borderRadius: '8px',
+                              color: '#fff',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              cursor: orderSyncInstructorsLoading ? 'wait' : 'pointer'
+                            }}
+                          >
+                            {orderSyncInstructorsLoading ? '조회 중...' : '🔍 조회'}
+                          </button>
                         </div>
-                      )}
-                    </div>
+                        {orderSyncRangeError && (
+                          <div style={{ fontSize: '12px', color: '#f87171', marginBottom: '8px' }}>
+                            ⚠️ {orderSyncRangeError}
+                          </div>
+                        )}
+
+                        {/* 빠른 기간 프리셋 */}
+                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+                          {[
+                            { label: '최근 7일', days: 7 },
+                            { label: '최근 14일', days: 14 },
+                            { label: '최근 30일', days: 30 }
+                          ].map(p => (
+                            <button
+                              key={p.days}
+                              onClick={() => {
+                                const to = new Date()
+                                const from = new Date()
+                                from.setDate(from.getDate() - p.days)
+                                const fromStr = from.toISOString().slice(0, 10)
+                                const toStr = to.toISOString().slice(0, 10)
+                                setOrderSyncDateFrom(fromStr)
+                                setOrderSyncDateTo(toStr)
+                                setOrderSyncSelectedInstructor('')
+                                setOrderSyncPreview(null)
+                                setOrderSyncCommitResult(null)
+                                loadOrderSyncInstructors(fromStr, toStr)
+                              }}
+                              disabled={orderSyncInstructorsLoading}
+                              style={{
+                                padding: '4px 10px',
+                                background: 'rgba(99,102,241,0.15)',
+                                border: '1px solid rgba(99,102,241,0.3)',
+                                borderRadius: '6px',
+                                color: '#c7d2fe',
+                                fontSize: '11px',
+                                cursor: orderSyncInstructorsLoading ? 'wait' : 'pointer'
+                              }}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <select
+                          value={orderSyncSelectedInstructor}
+                          onChange={(e) => {
+                            setOrderSyncSelectedInstructor(e.target.value)
+                            setOrderSyncPreview(null)
+                            setOrderSyncCommitResult(null)
+                          }}
+                          disabled={orderSyncInstructors.length === 0}
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            background: 'rgba(0,0,0,0.3)',
+                            border: '1px solid rgba(99,102,241,0.4)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px',
+                            cursor: orderSyncInstructors.length === 0 ? 'not-allowed' : 'pointer'
+                          }}
+                        >
+                          <option value="">
+                            {orderSyncInstructors.length === 0
+                              ? '— 먼저 조회 버튼을 눌러주세요 —'
+                              : `— 강사를 선택하세요 (${orderSyncInstructors.length}명) —`}
+                          </option>
+                          {orderSyncInstructors.map(t => (
+                            <option key={t.name} value={t.name}>
+                              {t.name} · {t.orderCount}건{t.courseCount > 1 ? ` (${t.courseCount}강의)` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {orderSyncSelectedInstructor && (
+                          <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>
+                            ✓ 강사: {orderSyncSelectedInstructor}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{
+                        padding: '20px',
+                        background: 'rgba(34,197,94,0.1)',
+                        borderRadius: '12px',
+                        border: '2px dashed rgba(34,197,94,0.3)',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ fontSize: '32px', marginBottom: '8px' }}>📥</div>
+                        <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>주문 CSV 파일</p>
+                        <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>nlab.kr 전체 주문 내역 CSV (1개)</p>
+                        <input
+                          type="file"
+                          accept=".csv,.xlsx,.xls"
+                          onChange={(e) => {
+                            setOrderSyncFile(e.target.files?.[0] || null)
+                            setOrderSyncPreview(null)
+                            setOrderSyncCommitResult(null)
+                          }}
+                          style={{ display: 'none' }}
+                          id="order-sync-file"
+                        />
+                        <label
+                          htmlFor="order-sync-file"
+                          style={{
+                            display: 'inline-block',
+                            padding: '8px 16px',
+                            background: 'rgba(34,197,94,0.3)',
+                            borderRadius: '8px',
+                            color: '#86efac',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          파일 선택
+                        </label>
+                        {orderSyncFile && (
+                          <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>
+                            ✓ {orderSyncFile.name} ({(orderSyncFile.size / 1024).toFixed(1)}KB)
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* 결제자 시트 탭 선택 */}
                     <div style={{
@@ -3910,54 +4133,91 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   </div>
 
                   {/* 미리보기 버튼 */}
-                  <button
-                    onClick={async () => {
-                      if (!orderSyncFile) { alert('CSV 파일을 선택해주세요.'); return }
-                      if (!orderSyncSelectedTab) { alert('결제자 시트 탭을 선택해주세요.'); return }
-                      setOrderSyncProcessing(true)
-                      setOrderSyncLog(['CSV 분석 + 시트 비교 중...'])
-                      setOrderSyncCommitResult(null)
+                  {(() => {
+                    const sourceReady = orderSyncMode === 'supabase'
+                      ? !!orderSyncSelectedInstructor
+                      : !!orderSyncFile
+                    const tabReady = !!orderSyncSelectedTab
+                    const ready = sourceReady && tabReady
+                    return (
+                      <button
+                        onClick={async () => {
+                          if (orderSyncMode === 'supabase' && !orderSyncSelectedInstructor) {
+                            alert('강사를 선택해주세요.'); return
+                          }
+                          if (orderSyncMode === 'csv' && !orderSyncFile) {
+                            alert('CSV 파일을 선택해주세요.'); return
+                          }
+                          if (!orderSyncSelectedTab) { alert('결제자 시트 탭을 선택해주세요.'); return }
+                          setOrderSyncProcessing(true)
+                          setOrderSyncLog(orderSyncMode === 'supabase'
+                            ? [`nlab DB에서 강사 "${orderSyncSelectedInstructor}" 결제 내역 조회 중...`]
+                            : ['CSV 분석 + 시트 비교 중...'])
+                          setOrderSyncCommitResult(null)
 
-                      const formData = new FormData()
-                      formData.append('orderFile', orderSyncFile)
-                      formData.append('year', orderSyncYear)
-                      formData.append('tabName', orderSyncSelectedTab.raw)
-
-                      try {
-                        const token = localStorage.getItem('authToken')
-                        const res = await fetch('/api/tools/order-sync', {
-                          method: 'POST',
-                          headers: { 'Authorization': token ? `Bearer ${token}` : '' },
-                          body: formData
-                        })
-                        const data = await res.json()
-                        if (data.success) {
-                          setOrderSyncPreview(data)
-                          setOrderSyncLog(data.logs || ['미리보기 완료'])
-                        } else {
-                          setOrderSyncPreview(null)
-                          setOrderSyncLog(['오류: ' + (data.error || '알 수 없음')])
-                        }
-                      } catch (err) {
-                        setOrderSyncLog(['오류: ' + err.message])
-                      }
-                      setOrderSyncProcessing(false)
-                    }}
-                    disabled={orderSyncProcessing || !orderSyncFile || !orderSyncSelectedTab}
-                    style={{
-                      width: '100%',
-                      padding: '14px',
-                      background: orderSyncProcessing ? '#4c4c6d' : (!orderSyncFile || !orderSyncSelectedTab) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                      border: 'none',
-                      borderRadius: '10px',
-                      color: (!orderSyncFile || !orderSyncSelectedTab) ? '#64748b' : '#fff',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      cursor: orderSyncProcessing ? 'wait' : (!orderSyncFile || !orderSyncSelectedTab) ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    {orderSyncProcessing ? '미리보기 생성 중...' : '🔍 미리보기'}
-                  </button>
+                          try {
+                            const token = localStorage.getItem('authToken')
+                            let res
+                            if (orderSyncMode === 'supabase') {
+                              res = await fetch('/api/tools/order-sync', {
+                                method: 'POST',
+                                headers: {
+                                  'Authorization': token ? `Bearer ${token}` : '',
+                                  'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                  instructor: orderSyncSelectedInstructor,
+                                  year: orderSyncYear,
+                                  tabName: orderSyncSelectedTab.raw,
+                                  from: orderSyncDateFrom,
+                                  to: orderSyncDateTo
+                                })
+                              })
+                            } else {
+                              const formData = new FormData()
+                              formData.append('orderFile', orderSyncFile)
+                              formData.append('year', orderSyncYear)
+                              formData.append('tabName', orderSyncSelectedTab.raw)
+                              res = await fetch('/api/tools/order-sync', {
+                                method: 'POST',
+                                headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                                body: formData
+                              })
+                            }
+                            const data = await res.json()
+                            if (data.success) {
+                              setOrderSyncPreview(data)
+                              setOrderSyncLog(data.logs || ['미리보기 완료'])
+                            } else {
+                              setOrderSyncPreview(null)
+                              setOrderSyncLog(['오류: ' + (data.error || '알 수 없음')])
+                            }
+                          } catch (err) {
+                            setOrderSyncLog(['오류: ' + err.message])
+                          }
+                          setOrderSyncProcessing(false)
+                        }}
+                        disabled={orderSyncProcessing || !ready}
+                        style={{
+                          width: '100%',
+                          padding: '14px',
+                          background: orderSyncProcessing ? '#4c4c6d' : !ready ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                          border: 'none',
+                          borderRadius: '10px',
+                          color: !ready ? '#64748b' : '#fff',
+                          fontSize: '14px',
+                          fontWeight: '600',
+                          cursor: orderSyncProcessing ? 'wait' : !ready ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {orderSyncProcessing
+                          ? '미리보기 생성 중...'
+                          : orderSyncMode === 'supabase'
+                            ? '🤖 nlab DB에서 가져오기'
+                            : '🔍 미리보기'}
+                      </button>
+                    )
+                  })()}
 
                   {/* 로그 */}
                   {orderSyncLog.length > 0 && (
