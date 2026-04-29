@@ -146,6 +146,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [sheetPreviewHighlight, setSheetPreviewHighlight] = useState(null) // 하이라이트할 열 인덱스
   const [showSessionChart, setShowSessionChart] = useState(false) // 기수별 차트 모달
 
+  // 카톡 매칭 (시트 연동) 상태
+  const [kakaoYear, setKakaoYear] = useState('26')
+  const [kakaoTabs, setKakaoTabs] = useState([])
+  const [kakaoTabsLoading, setKakaoTabsLoading] = useState(false)
+  const [kakaoSelectedTab, setKakaoSelectedTab] = useState(null)
+  const [kakaoPreview, setKakaoPreview] = useState(null)
+  const [kakaoCommitting, setKakaoCommitting] = useState(false)
+  const [kakaoCommitResult, setKakaoCommitResult] = useState(null)
+
   // 시트 결제자 데이터 상태
   const [payerSheetYear, setPayerSheetYear] = useState('26')
   const [payerSheetTabs, setPayerSheetTabs] = useState([])
@@ -596,12 +605,31 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     setToolResult(null)
     setToolProcessing(false)
     setToolLog([])
+    setKakaoSelectedTab(null)
+    setKakaoPreview(null)
+    setKakaoCommitting(false)
+    setKakaoCommitResult(null)
     // 유튜브 채팅 수집 중지
     if (pollingRef.current) {
       clearInterval(pollingRef.current)
       pollingRef.current = null
     }
     setYtCollecting(false)
+  }
+
+  // 카톡 매칭용 원본 탭 목록 로드 (payer-sheets API 재사용)
+  const loadKakaoTabs = async (year) => {
+    setKakaoTabsLoading(true)
+    try {
+      const res = await fetch(`/api/payer-sheets?year=${year}`, {
+        headers: getAuthHeaders()
+      })
+      const data = await res.json()
+      setKakaoTabs(data.success ? (data.tabs || []) : [])
+    } catch (e) {
+      setKakaoTabs([])
+    }
+    setKakaoTabsLoading(false)
   }
 
   // API 호출용 인증 헤더 생성
@@ -3326,12 +3354,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 </div>
               )}
 
-              {/* 카톡 매칭 툴 */}
+              {/* 카톡 매칭 툴 (시트 직접 기입) */}
               {currentTool === 'kakao' && (
                 <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
                   <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>💬 카카오톡 입장자 매칭 <HelpTooltip text={"카카오톡 오픈채팅 입장 로그와\n결제자 데이터를 이름 기준으로 매칭합니다.\n좌측에 카톡 로그(TXT), 우측에 결제자\n파일을 업로드하세요.\n매칭/미매칭 결과를 확인하고\nExcel로 다운로드할 수 있습니다."} /></h3>
-                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>카카오톡 오픈채팅 입장 로그와 결제자 데이터를 매칭합니다.</p>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>💬 카카오톡 입장자 매칭 <HelpTooltip text={"카톡 오픈채팅 입장 로그(TXT)를 업로드하고\n결제자 시트의 원본 탭을 선택하면\n시트의 이름 컬럼을 기준으로 매칭합니다.\n\n매칭 미리보기 후 확정을 누르면\n매칭된 행의 입장여부 컬럼(없으면 K열)에\n자동으로 'O'를 기입합니다.\n\n동명이인은 안전을 위해 시트에 쓰지 않고\n별도로 표시됩니다."} /></h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>카톡 입장 로그와 결제자 시트를 매칭하여, 매칭된 사람의 K열(입장여부)에 O를 기입합니다.</p>
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
@@ -3345,10 +3373,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}>💬</div>
                       <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>카톡 입장 로그</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>오픈채팅 입장 내역 (TXT/Excel, 여러개 가능)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>오픈채팅 입장 내역 (TXT, 여러개 가능)</p>
                       <input
                         type="file"
-                        accept=".txt,.xlsx,.xls,.csv"
+                        accept=".txt"
                         multiple
                         onChange={(e) => setToolFiles1(Array.from(e.target.files))}
                         style={{ display: 'none' }}
@@ -3375,7 +3403,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       )}
                     </div>
 
-                    {/* 결제자 파일 */}
+                    {/* 결제자 시트 탭 선택 */}
                     <div style={{
                       padding: '20px',
                       background: 'rgba(168,85,247,0.1)',
@@ -3383,34 +3411,79 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       border: '2px dashed rgba(168,85,247,0.3)',
                       textAlign: 'center'
                     }}>
-                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>💳</div>
-                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>결제자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>결제자 이름/연락처 (Excel/CSV, 여러개 가능)</p>
-                      <input
-                        type="file"
-                        accept=".xlsx,.xls,.csv"
-                        multiple
-                        onChange={(e) => setToolFiles2(Array.from(e.target.files))}
-                        style={{ display: 'none' }}
-                        id="kakao-file2"
-                      />
-                      <label
-                        htmlFor="kakao-file2"
-                        style={{
-                          display: 'inline-block',
-                          padding: '8px 16px',
-                          background: 'rgba(168,85,247,0.3)',
-                          borderRadius: '8px',
-                          color: '#c4b5fd',
-                          fontSize: '13px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        파일 선택
-                      </label>
-                      {toolFiles2.length > 0 && (
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
-                          {toolFiles2.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>📊</div>
+                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>결제자 시트 (원본 탭)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>매칭 결과를 시트의 K열에 기입합니다</p>
+
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '10px' }}>
+                        <select
+                          value={kakaoYear}
+                          onChange={(e) => {
+                            setKakaoYear(e.target.value)
+                            setKakaoSelectedTab(null)
+                            setKakaoPreview(null)
+                            setKakaoCommitResult(null)
+                            loadKakaoTabs(e.target.value)
+                          }}
+                          style={{
+                            padding: '8px 12px',
+                            background: 'rgba(0,0,0,0.3)',
+                            border: '1px solid rgba(168,85,247,0.4)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px'
+                          }}
+                        >
+                          <option value="26">2026년</option>
+                          <option value="25">2025년</option>
+                        </select>
+                        <button
+                          onClick={() => loadKakaoTabs(kakaoYear)}
+                          disabled={kakaoTabsLoading}
+                          style={{
+                            padding: '8px 12px',
+                            background: 'rgba(168,85,247,0.3)',
+                            border: 'none',
+                            borderRadius: '8px',
+                            color: '#c4b5fd',
+                            fontSize: '13px',
+                            cursor: kakaoTabsLoading ? 'wait' : 'pointer'
+                          }}
+                        >
+                          {kakaoTabsLoading ? '불러오는 중...' : (kakaoTabs.length > 0 ? '🔄 새로고침' : '📂 탭 불러오기')}
+                        </button>
+                      </div>
+
+                      {kakaoTabs.length > 0 && (
+                        <select
+                          value={kakaoSelectedTab?.raw || ''}
+                          onChange={(e) => {
+                            const tab = kakaoTabs.find(t => t.raw === e.target.value) || null
+                            setKakaoSelectedTab(tab)
+                            setKakaoPreview(null)
+                            setKakaoCommitResult(null)
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            background: 'rgba(0,0,0,0.3)',
+                            border: '1px solid rgba(168,85,247,0.4)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px'
+                          }}
+                        >
+                          <option value="">— 탭을 선택하세요 ({kakaoTabs.length}개) —</option>
+                          {kakaoTabs.map(t => (
+                            <option key={t.raw} value={t.raw}>
+                              {t.displayDate} · {t.instructor} {t.cohort} ({t.raw})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {kakaoSelectedTab && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>
+                          ✓ {kakaoSelectedTab.raw}
                         </div>
                       )}
                     </div>
@@ -3418,35 +3491,44 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
                   <button
                     onClick={async () => {
-                      if (toolFiles1.length === 0 || toolFiles2.length === 0) {
-                        alert('두 쪽 모두 파일을 선택해주세요.')
+                      if (toolFiles1.length === 0) {
+                        alert('카톡 로그 파일을 선택해주세요.')
+                        return
+                      }
+                      if (!kakaoSelectedTab) {
+                        alert('결제자 시트의 원본 탭을 선택해주세요.')
                         return
                       }
                       setToolProcessing(true)
-                      setToolLog(['처리 시작...'])
+                      setKakaoPreview(null)
+                      setKakaoCommitResult(null)
+                      setToolLog(['매칭 미리보기 시작...'])
 
                       const formData = new FormData()
                       toolFiles1.forEach(f => formData.append('kakaoLogs', f))
-                      toolFiles2.forEach(f => formData.append('payers', f))
+                      formData.append('year', kakaoYear)
+                      formData.append('tabName', kakaoSelectedTab.raw)
 
                       try {
-                        const res = await fetch('/api/tools/kakao-match', {
+                        const token = localStorage.getItem('authToken')
+                        const res = await fetch('/api/tools/kakao-match-sheet', {
                           method: 'POST',
+                          headers: { 'Authorization': token ? `Bearer ${token}` : '' },
                           body: formData
                         })
                         const data = await res.json()
                         if (data.success) {
-                          setToolResult(data)
-                          setToolLog(data.logs || ['처리 완료'])
+                          setKakaoPreview(data)
+                          setToolLog(data.logs || ['미리보기 완료'])
                         } else {
-                          setToolLog(['오류: ' + data.error])
+                          setToolLog(['오류: ' + (data.error || '알 수 없는 오류')])
                         }
                       } catch (err) {
                         setToolLog(['오류: ' + err.message])
                       }
                       setToolProcessing(false)
                     }}
-                    disabled={toolProcessing || toolFiles1.length === 0 || toolFiles2.length === 0}
+                    disabled={toolProcessing || toolFiles1.length === 0 || !kakaoSelectedTab}
                     style={{
                       width: '100%',
                       padding: '14px',
@@ -3459,7 +3541,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       cursor: toolProcessing ? 'wait' : 'pointer'
                     }}
                   >
-                    {toolProcessing ? '처리 중...' : '💬 매칭 시작'}
+                    {toolProcessing ? '처리 중...' : '🔍 매칭 미리보기'}
                   </button>
 
                   {/* 로그 출력 */}
@@ -3480,48 +3562,128 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     </div>
                   )}
 
-                  {/* 결과 */}
-                  {toolResult && toolResult.success && (
+                  {/* 미리보기 결과 */}
+                  {kakaoPreview && kakaoPreview.success && !kakaoCommitResult && (
                     <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.3)' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#10b981' }}>{toolResult.matched}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>매칭됨</div>
+                      <div style={{ marginBottom: '12px', fontSize: '13px', color: '#cbd5e1' }}>
+                        대상 시트: <b>{kakaoPreview.tabName}</b> · 입장여부 컬럼: <b>{kakaoPreview.entryColLetter}</b>
+                        {kakaoPreview.entryColHeader ? ` ("${kakaoPreview.entryColHeader}")` : ' (헤더 없음, K열 사용)'}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
+                        <div style={{ textAlign: 'center', padding: '10px', background: 'rgba(16,185,129,0.15)', borderRadius: '8px' }}>
+                          <div style={{ fontSize: '22px', fontWeight: '700', color: '#10b981' }}>{kakaoPreview.matched.length}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>기입 대상</div>
                         </div>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#f87171' }}>{toolResult.unmatched}</div>
+                        <div style={{ textAlign: 'center', padding: '10px', background: 'rgba(148,163,184,0.15)', borderRadius: '8px' }}>
+                          <div style={{ fontSize: '22px', fontWeight: '700', color: '#cbd5e1' }}>{kakaoPreview.skipped.length}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>건너뜀(이미 값)</div>
+                        </div>
+                        <div style={{ textAlign: 'center', padding: '10px', background: 'rgba(251,191,36,0.15)', borderRadius: '8px' }}>
+                          <div style={{ fontSize: '22px', fontWeight: '700', color: '#fbbf24' }}>{kakaoPreview.ambiguous.length}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>동명이인</div>
+                        </div>
+                        <div style={{ textAlign: 'center', padding: '10px', background: 'rgba(248,113,113,0.15)', borderRadius: '8px' }}>
+                          <div style={{ fontSize: '22px', fontWeight: '700', color: '#f87171' }}>{kakaoPreview.unmatched.length}</div>
                           <div style={{ fontSize: '11px', color: '#94a3b8' }}>미매칭</div>
                         </div>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '700', color: '#fcd34d' }}>{toolResult.totalKakao}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>카톡 입장자</div>
-                        </div>
                       </div>
+
+                      {/* 동명이인 알림 */}
+                      {kakaoPreview.ambiguous.length > 0 && (
+                        <div style={{ marginBottom: '12px', padding: '12px', background: 'rgba(251,191,36,0.1)', borderRadius: '8px', border: '1px solid rgba(251,191,36,0.3)' }}>
+                          <div style={{ fontSize: '13px', color: '#fbbf24', fontWeight: '600', marginBottom: '6px' }}>
+                            ⚠️ 동명이인 {kakaoPreview.ambiguous.length}명은 시트에 기입하지 않습니다 (수동 확인 필요)
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#cbd5e1', maxHeight: '120px', overflow: 'auto' }}>
+                            {kakaoPreview.ambiguous.map((a, i) => (
+                              <div key={i} style={{ marginBottom: '4px' }}>
+                                · {a.kakaoName} → 시트 행 {a.candidates.map(c => c.sheetRow).join(', ')}번에 동일 이름
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 미매칭 명단 */}
+                      {kakaoPreview.unmatched.length > 0 && (
+                        <details style={{ marginBottom: '12px', fontSize: '12px', color: '#94a3b8' }}>
+                          <summary style={{ cursor: 'pointer', color: '#f87171' }}>
+                            미매칭 {kakaoPreview.unmatched.length}명 펼쳐보기
+                          </summary>
+                          <div style={{ marginTop: '6px', maxHeight: '120px', overflow: 'auto', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
+                            {kakaoPreview.unmatched.map((u, i) => (
+                              <span key={i} style={{ marginRight: '8px' }}>{u.kakaoName}</span>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+
+                      {/* 건너뜀 명단 */}
+                      {kakaoPreview.skipped.length > 0 && (
+                        <details style={{ marginBottom: '12px', fontSize: '12px', color: '#94a3b8' }}>
+                          <summary style={{ cursor: 'pointer', color: '#cbd5e1' }}>
+                            이미 값이 있어 건너뛴 {kakaoPreview.skipped.length}명
+                          </summary>
+                          <div style={{ marginTop: '6px', maxHeight: '120px', overflow: 'auto', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
+                            {kakaoPreview.skipped.map((s, i) => (
+                              <div key={i}>· {s.sheetName} (행 {s.sheetRow}, 현재값: "{s.currentEntry}")</div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+
                       <div style={{ display: 'flex', gap: '10px' }}>
                         <button
-                          onClick={() => {
-                            const link = document.createElement('a')
-                            link.href = toolResult.downloadUrl
-                            link.download = 'kakao_matched.xlsx'
-                            link.click()
+                          onClick={async () => {
+                            if (kakaoPreview.matched.length === 0) {
+                              alert('기입할 행이 없습니다.')
+                              return
+                            }
+                            if (!confirm(`${kakaoPreview.matched.length}개 행의 ${kakaoPreview.entryColLetter}열에 'O'를 기입합니다. 계속할까요?`)) return
+
+                            setKakaoCommitting(true)
+                            try {
+                              const res = await fetch('/api/tools/kakao-match-sheet', {
+                                method: 'PUT',
+                                headers: getAuthHeaders(),
+                                body: JSON.stringify({
+                                  year: kakaoPreview.year,
+                                  tabName: kakaoPreview.tabName,
+                                  entryColIndex: kakaoPreview.entryColIndex,
+                                  rows: kakaoPreview.matched.map(m => m.sheetRow)
+                                })
+                              })
+                              const data = await res.json()
+                              if (data.success) {
+                                setKakaoCommitResult(data)
+                                setToolLog(prev => [...prev, `✅ 시트 ${data.colLetter}열에 ${data.updatedCells}개 셀 기입 완료`])
+                              } else {
+                                setToolLog(prev => [...prev, '오류: ' + (data.error || '기입 실패')])
+                              }
+                            } catch (err) {
+                              setToolLog(prev => [...prev, '오류: ' + err.message])
+                            }
+                            setKakaoCommitting(false)
                           }}
+                          disabled={kakaoCommitting || kakaoPreview.matched.length === 0}
                           style={{
                             flex: 1,
-                            padding: '10px 20px',
-                            background: 'rgba(16,185,129,0.2)',
-                            border: '1px solid rgba(16,185,129,0.4)',
+                            padding: '12px 20px',
+                            background: kakaoCommitting ? '#4c4c6d' : 'linear-gradient(135deg, #10b981, #059669)',
+                            border: 'none',
                             borderRadius: '8px',
-                            color: '#10b981',
-                            fontSize: '13px',
-                            cursor: 'pointer'
+                            color: '#fff',
+                            fontSize: '14px',
+                            fontWeight: '600',
+                            cursor: (kakaoCommitting || kakaoPreview.matched.length === 0) ? 'not-allowed' : 'pointer'
                           }}
                         >
-                          📥 결과 다운로드
+                          {kakaoCommitting ? '기입 중...' : `✏️ 시트에 'O' 기입 (${kakaoPreview.matched.length}건)`}
                         </button>
                         <button
                           onClick={resetToolState}
                           style={{
-                            padding: '10px 20px',
+                            padding: '12px 20px',
                             background: 'rgba(99,102,241,0.2)',
                             border: '1px solid rgba(99,102,241,0.4)',
                             borderRadius: '8px',
@@ -3533,6 +3695,32 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           🔄 초기화
                         </button>
                       </div>
+                    </div>
+                  )}
+
+                  {/* 기입 완료 결과 */}
+                  {kakaoCommitResult && kakaoCommitResult.success && (
+                    <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16,185,129,0.15)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.4)' }}>
+                      <div style={{ fontSize: '14px', color: '#10b981', fontWeight: '600', marginBottom: '8px' }}>
+                        ✅ 기입 완료
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#cbd5e1', marginBottom: '12px' }}>
+                        시트 <b>{kakaoPreview?.tabName}</b>의 <b>{kakaoCommitResult.colLetter}열</b>에 <b>{kakaoCommitResult.updatedCells}</b>개 셀이 'O'로 업데이트되었습니다.
+                      </div>
+                      <button
+                        onClick={resetToolState}
+                        style={{
+                          padding: '10px 20px',
+                          background: 'rgba(99,102,241,0.2)',
+                          border: '1px solid rgba(99,102,241,0.4)',
+                          borderRadius: '8px',
+                          color: '#a5b4fc',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🔄 초기화
+                      </button>
                     </div>
                   )}
                 </div>
