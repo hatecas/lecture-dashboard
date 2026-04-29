@@ -48,6 +48,41 @@ function findNameColumn(headers) {
   return -1
 }
 
+function findPhoneColumn(headers) {
+  const patterns = ['전화번호', '전화', '연락처', '핸드폰', '휴대폰', '휴대전화', '연락번호', 'phone']
+  for (let i = 0; i < headers.length; i++) {
+    const h = String(headers[i] || '').toLowerCase()
+    for (const p of patterns) {
+      if (h.includes(p.toLowerCase())) return i
+    }
+  }
+  return -1
+}
+
+// 카톡 닉네임에서 (이름, 전화번호 뒷4자리) 추출
+//   "김은정/1745" → { name: "김은정", last4: "1745" }
+//   "김수흥7554"  → { name: "김수흥", last4: "7554" }
+//   "김경수"      → { name: "김경수", last4: "" }
+function parseKakaoNickname(raw) {
+  const trimmed = String(raw || '').trim()
+  // 이름/숫자 (뒷자리는 보통 4자리지만 2자리 이상 허용)
+  const slashMatch = trimmed.match(/^(.+?)\s*\/\s*(\d{2,})\s*$/)
+  if (slashMatch) {
+    return { name: slashMatch[1].trim(), last4: slashMatch[2].slice(-4) }
+  }
+  // 이름숫자 (한글/영문 + 끝 4자리 숫자)
+  const trailMatch = trimmed.match(/^([가-힣a-zA-Z][가-힣a-zA-Z\s]*?)(\d{4})\s*$/)
+  if (trailMatch) {
+    return { name: trailMatch[1].trim(), last4: trailMatch[2] }
+  }
+  return { name: trimmed, last4: '' }
+}
+
+function lastDigits(phone, n = 4) {
+  const cleaned = String(phone || '').replace(/[^0-9]/g, '')
+  return cleaned.slice(-n)
+}
+
 function findEntryColumn(headers) {
   for (let i = 0; i < headers.length; i++) {
     const h = String(headers[i] || '').replace(/\s+/g, '')
@@ -158,6 +193,7 @@ export async function POST(request) {
 
     const headers = rows[0] || []
     const nameColIndex = findNameColumn(headers)
+    const phoneColIndex = findPhoneColumn(headers)
     const entryColIndex = findEntryColumn(headers)
 
     if (nameColIndex < 0) {
@@ -165,9 +201,10 @@ export async function POST(request) {
     }
 
     logs.push(`이름 컬럼: "${headers[nameColIndex]}" (${colIndexToLetter(nameColIndex)})`)
+    logs.push(`전화번호 컬럼: ${phoneColIndex >= 0 ? `"${headers[phoneColIndex]}" (${colIndexToLetter(phoneColIndex)})` : '(없음 - 뒷자리 검증 생략)'}`)
     logs.push(`입장여부 컬럼: "${headers[entryColIndex] || '(헤더 없음, K열 사용)'}" (${colIndexToLetter(entryColIndex)})`)
 
-    // 시트 결제자 인덱스: 정규화된 이름 -> [{ sheetRow, name, currentEntry }]
+    // 시트 결제자 인덱스: 정규화된 이름 -> [{ sheetRow, name, phone, last4, currentEntry }]
     const payerIndex = new Map()
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i]
@@ -176,19 +213,34 @@ export async function POST(request) {
       const norm = normalizeName(rawName)
       if (!norm) continue
       const sheetRow = i + 1
+      const phone = phoneColIndex >= 0 ? (row[phoneColIndex] || '') : ''
       const currentEntry = (row[entryColIndex] || '').toString().trim()
       if (!payerIndex.has(norm)) payerIndex.set(norm, [])
-      payerIndex.get(norm).push({ sheetRow, name: String(rawName).trim(), currentEntry })
+      payerIndex.get(norm).push({
+        sheetRow,
+        name: String(rawName).trim(),
+        phone: String(phone).trim(),
+        last4: lastDigits(phone, 4),
+        currentEntry
+      })
     }
 
-    // 카톡 입장자 정규화 + 중복 제거
+    // 카톡 입장자 닉네임 파싱 (이름/뒷4자리 추출) + 중복 제거
     const seen = new Set()
     const uniqueKakao = []
     for (const e of allKakaoEntries) {
-      const n = normalizeName(e.name)
-      if (!n || seen.has(n)) continue
-      seen.add(n)
-      uniqueKakao.push({ name: e.name, normalized: n })
+      const parsed = parseKakaoNickname(e.name)
+      const norm = normalizeName(parsed.name)
+      if (!norm) continue
+      const dedupKey = `${norm}|${parsed.last4}`
+      if (seen.has(dedupKey)) continue
+      seen.add(dedupKey)
+      uniqueKakao.push({
+        rawName: e.name,
+        parsedName: parsed.name,
+        normalized: norm,
+        last4: parsed.last4
+      })
     }
 
     const matched = []
@@ -196,35 +248,67 @@ export async function POST(request) {
     const ambiguous = []
     const unmatched = []
 
+    const finalize = (entry, candidate) => {
+      if (candidate.currentEntry === '') {
+        matched.push({
+          kakaoName: entry.rawName,
+          sheetRow: candidate.sheetRow,
+          sheetName: candidate.name
+        })
+      } else {
+        skipped.push({
+          kakaoName: entry.rawName,
+          sheetRow: candidate.sheetRow,
+          sheetName: candidate.name,
+          currentEntry: candidate.currentEntry
+        })
+      }
+    }
+
     for (const entry of uniqueKakao) {
-      const candidates = payerIndex.get(entry.normalized)
-      if (!candidates || candidates.length === 0) {
-        unmatched.push({ kakaoName: entry.name })
-      } else if (candidates.length > 1) {
+      const candidates = payerIndex.get(entry.normalized) || []
+
+      if (candidates.length === 0) {
+        unmatched.push({ kakaoName: entry.rawName })
+        continue
+      }
+
+      // 닉네임에 뒷4자리가 있고 시트에 전화번호 컬럼이 있으면 정확 검증
+      if (entry.last4 && phoneColIndex >= 0) {
+        const exact = candidates.filter(c => c.last4 === entry.last4)
+        if (exact.length === 1) {
+          finalize(entry, exact[0])
+        } else if (exact.length === 0) {
+          // 뒷자리가 어떤 후보와도 안 맞으면 미매칭으로 처리 (의도된 식별자가 안 맞음)
+          unmatched.push({
+            kakaoName: entry.rawName,
+            reason: `뒷4자리(${entry.last4})가 일치하는 결제자 없음`
+          })
+        } else {
+          ambiguous.push({
+            kakaoName: entry.rawName,
+            candidates: exact.map(c => ({
+              sheetRow: c.sheetRow,
+              name: c.name,
+              currentEntry: c.currentEntry
+            }))
+          })
+        }
+        continue
+      }
+
+      // 닉네임에 뒷4자리가 없거나 시트에 전화번호 컬럼이 없으면 이름만으로 판정
+      if (candidates.length === 1) {
+        finalize(entry, candidates[0])
+      } else {
         ambiguous.push({
-          kakaoName: entry.name,
+          kakaoName: entry.rawName,
           candidates: candidates.map(c => ({
             sheetRow: c.sheetRow,
             name: c.name,
             currentEntry: c.currentEntry
           }))
         })
-      } else {
-        const c = candidates[0]
-        if (c.currentEntry === '') {
-          matched.push({
-            kakaoName: entry.name,
-            sheetRow: c.sheetRow,
-            sheetName: c.name
-          })
-        } else {
-          skipped.push({
-            kakaoName: entry.name,
-            sheetRow: c.sheetRow,
-            sheetName: c.name,
-            currentEntry: c.currentEntry
-          })
-        }
       }
     }
 
