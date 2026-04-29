@@ -155,6 +155,18 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [kakaoCommitting, setKakaoCommitting] = useState(false)
   const [kakaoCommitResult, setKakaoCommitResult] = useState(null)
 
+  // 주문 동기화(CSV → 결제자 시트 append) 상태
+  const [orderSyncYear, setOrderSyncYear] = useState('26')
+  const [orderSyncTabs, setOrderSyncTabs] = useState([])
+  const [orderSyncTabsLoading, setOrderSyncTabsLoading] = useState(false)
+  const [orderSyncSelectedTab, setOrderSyncSelectedTab] = useState(null)
+  const [orderSyncFile, setOrderSyncFile] = useState(null)
+  const [orderSyncPreview, setOrderSyncPreview] = useState(null)
+  const [orderSyncProcessing, setOrderSyncProcessing] = useState(false)
+  const [orderSyncCommitting, setOrderSyncCommitting] = useState(false)
+  const [orderSyncCommitResult, setOrderSyncCommitResult] = useState(null)
+  const [orderSyncLog, setOrderSyncLog] = useState([])
+
   // 시트 결제자 데이터 상태
   const [payerSheetYear, setPayerSheetYear] = useState('26')
   const [payerSheetTabs, setPayerSheetTabs] = useState([])
@@ -630,6 +642,30 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       setKakaoTabs([])
     }
     setKakaoTabsLoading(false)
+  }
+
+  // 주문 동기화용 탭 목록 로드
+  const loadOrderSyncTabs = async (year) => {
+    setOrderSyncTabsLoading(true)
+    try {
+      const res = await fetch(`/api/payer-sheets?year=${year}`, {
+        headers: getAuthHeaders()
+      })
+      const data = await res.json()
+      setOrderSyncTabs(data.success ? (data.tabs || []) : [])
+    } catch {
+      setOrderSyncTabs([])
+    }
+    setOrderSyncTabsLoading(false)
+  }
+
+  const resetOrderSync = () => {
+    setOrderSyncFile(null)
+    setOrderSyncPreview(null)
+    setOrderSyncCommitResult(null)
+    setOrderSyncLog([])
+    setOrderSyncProcessing(false)
+    setOrderSyncCommitting(false)
   }
 
   // API 호출용 인증 헤더 생성
@@ -2826,6 +2862,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
                 {[
                   { id: 'inflow', icon: '🔀', label: '유입경로 매칭', requiresPermission: 'canUseInflow' },
+                  { id: 'order-sync', icon: '📦', label: '주문 동기화' },
                   { id: 'crm', icon: '📋', label: 'CRM 정리' },
                   { id: 'kakao', icon: '💬', label: '카톡 매칭' },
                   { id: 'youtube', icon: '📡', label: '유튜브 채팅 로그 수집' }
@@ -2835,6 +2872,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     onClick={async () => {
                       setCurrentTool(tool.id)
                       resetToolState()
+                      if (tool.id === 'order-sync') {
+                        resetOrderSync()
+                        if (orderSyncTabs.length === 0) loadOrderSyncTabs(orderSyncYear)
+                      }
                       if (tool.id === 'youtube') {
                         try {
                           const res = await fetch('/api/tools/youtube-chat', {
@@ -3720,6 +3761,365 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         }}
                       >
                         🔄 초기화
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 주문 자동 동기화 툴 */}
+              {currentTool === 'order-sync' && (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      📦 주문 내역 → 결제자 시트 동기화
+                      <HelpTooltip text={"nlab.kr 관리자 페이지에서 강사별로\n'전체 주문 내역'을 CSV로 내보낸 뒤\n파일을 업로드하세요.\n\n자동으로 환불 건을 제외하고\n시트에 이미 있는 전화번호와 비교하여\n신규 주문만 결제자 시트에 추가합니다.\n\n- 미리보기로 추가될 행을 먼저 확인\n- 시트에 적용 버튼으로 실제 추가"} />
+                    </h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>nlab.kr CSV를 업로드하면 환불을 제외하고 신규 결제자만 결제자 시트에 자동 추가합니다.</p>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                    {/* CSV 업로드 */}
+                    <div style={{
+                      padding: '20px',
+                      background: 'rgba(34,197,94,0.1)',
+                      borderRadius: '12px',
+                      border: '2px dashed rgba(34,197,94,0.3)',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>📥</div>
+                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>주문 CSV 파일</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>nlab.kr 전체 주문 내역 CSV (1개)</p>
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls"
+                        onChange={(e) => {
+                          setOrderSyncFile(e.target.files?.[0] || null)
+                          setOrderSyncPreview(null)
+                          setOrderSyncCommitResult(null)
+                        }}
+                        style={{ display: 'none' }}
+                        id="order-sync-file"
+                      />
+                      <label
+                        htmlFor="order-sync-file"
+                        style={{
+                          display: 'inline-block',
+                          padding: '8px 16px',
+                          background: 'rgba(34,197,94,0.3)',
+                          borderRadius: '8px',
+                          color: '#86efac',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        파일 선택
+                      </label>
+                      {orderSyncFile && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>
+                          ✓ {orderSyncFile.name} ({(orderSyncFile.size / 1024).toFixed(1)}KB)
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 결제자 시트 탭 선택 */}
+                    <div style={{
+                      padding: '20px',
+                      background: 'rgba(168,85,247,0.1)',
+                      borderRadius: '12px',
+                      border: '2px dashed rgba(168,85,247,0.3)',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>📊</div>
+                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>결제자 시트 (대상 탭)</p>
+                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>신규 주문이 추가될 강사 탭</p>
+
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '10px' }}>
+                        <select
+                          value={orderSyncYear}
+                          onChange={(e) => {
+                            setOrderSyncYear(e.target.value)
+                            setOrderSyncSelectedTab(null)
+                            setOrderSyncPreview(null)
+                            setOrderSyncCommitResult(null)
+                            loadOrderSyncTabs(e.target.value)
+                          }}
+                          style={{
+                            padding: '8px 12px',
+                            background: 'rgba(0,0,0,0.3)',
+                            border: '1px solid rgba(168,85,247,0.4)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px'
+                          }}
+                        >
+                          <option value="26">2026년</option>
+                          <option value="25">2025년</option>
+                        </select>
+                        <button
+                          onClick={() => loadOrderSyncTabs(orderSyncYear)}
+                          disabled={orderSyncTabsLoading}
+                          style={{
+                            padding: '8px 12px',
+                            background: 'rgba(168,85,247,0.3)',
+                            border: 'none',
+                            borderRadius: '8px',
+                            color: '#c4b5fd',
+                            fontSize: '13px',
+                            cursor: orderSyncTabsLoading ? 'wait' : 'pointer'
+                          }}
+                        >
+                          {orderSyncTabsLoading ? '불러오는 중...' : (orderSyncTabs.length > 0 ? '🔄 새로고침' : '📂 탭 불러오기')}
+                        </button>
+                      </div>
+
+                      {orderSyncTabs.length > 0 && (
+                        <select
+                          value={orderSyncSelectedTab?.raw || ''}
+                          onChange={(e) => {
+                            const tab = orderSyncTabs.find(t => t.raw === e.target.value) || null
+                            setOrderSyncSelectedTab(tab)
+                            setOrderSyncPreview(null)
+                            setOrderSyncCommitResult(null)
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            background: 'rgba(0,0,0,0.3)',
+                            border: '1px solid rgba(168,85,247,0.4)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px'
+                          }}
+                        >
+                          <option value="">— 탭을 선택하세요 ({orderSyncTabs.length}개) —</option>
+                          {orderSyncTabs.map(t => {
+                            const mapping = payerTabMappings[`${orderSyncYear}_${t.raw}`]
+                            const label = mapping ? `${t.displayDate} · ${mapping.instructor} ${mapping.cohort || t.cohort}` : `${t.displayDate} · ${t.instructor} ${t.cohort}`
+                            return <option key={t.raw} value={t.raw}>{label}</option>
+                          })}
+                        </select>
+                      )}
+
+                      {orderSyncSelectedTab && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981' }}>
+                          ✓ {orderSyncSelectedTab.raw}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 미리보기 버튼 */}
+                  <button
+                    onClick={async () => {
+                      if (!orderSyncFile) { alert('CSV 파일을 선택해주세요.'); return }
+                      if (!orderSyncSelectedTab) { alert('결제자 시트 탭을 선택해주세요.'); return }
+                      setOrderSyncProcessing(true)
+                      setOrderSyncLog(['CSV 분석 + 시트 비교 중...'])
+                      setOrderSyncCommitResult(null)
+
+                      const formData = new FormData()
+                      formData.append('orderFile', orderSyncFile)
+                      formData.append('year', orderSyncYear)
+                      formData.append('tabName', orderSyncSelectedTab.raw)
+
+                      try {
+                        const token = localStorage.getItem('authToken')
+                        const res = await fetch('/api/tools/order-sync', {
+                          method: 'POST',
+                          headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                          body: formData
+                        })
+                        const data = await res.json()
+                        if (data.success) {
+                          setOrderSyncPreview(data)
+                          setOrderSyncLog(data.logs || ['미리보기 완료'])
+                        } else {
+                          setOrderSyncPreview(null)
+                          setOrderSyncLog(['오류: ' + (data.error || '알 수 없음')])
+                        }
+                      } catch (err) {
+                        setOrderSyncLog(['오류: ' + err.message])
+                      }
+                      setOrderSyncProcessing(false)
+                    }}
+                    disabled={orderSyncProcessing || !orderSyncFile || !orderSyncSelectedTab}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      background: orderSyncProcessing ? '#4c4c6d' : (!orderSyncFile || !orderSyncSelectedTab) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                      border: 'none',
+                      borderRadius: '10px',
+                      color: (!orderSyncFile || !orderSyncSelectedTab) ? '#64748b' : '#fff',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: orderSyncProcessing ? 'wait' : (!orderSyncFile || !orderSyncSelectedTab) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {orderSyncProcessing ? '미리보기 생성 중...' : '🔍 미리보기'}
+                  </button>
+
+                  {/* 로그 */}
+                  {orderSyncLog.length > 0 && (
+                    <div style={{
+                      marginTop: '16px',
+                      padding: '12px',
+                      background: 'rgba(0,0,0,0.3)',
+                      borderRadius: '8px',
+                      maxHeight: '160px',
+                      overflow: 'auto',
+                      fontFamily: 'monospace',
+                      fontSize: '12px'
+                    }}>
+                      {orderSyncLog.map((log, i) => (
+                        <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '4px' }}>{log}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 미리보기 결과 */}
+                  {orderSyncPreview && orderSyncPreview.success && !orderSyncCommitResult && (
+                    <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(99,102,241,0.1)', borderRadius: '10px', border: '1px solid rgba(99,102,241,0.3)' }}>
+                      <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '12px' }}>
+                        대상 시트: <b style={{ color: '#cbd5e1' }}>{orderSyncPreview.tabName}</b>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '16px' }}>
+                        {[
+                          { label: '신규 추가', value: orderSyncPreview.stats.newCount, color: '#10b981' },
+                          { label: '시트 중복', value: orderSyncPreview.stats.duplicates, color: '#fbbf24' },
+                          { label: '환불 제외', value: orderSyncPreview.stats.refunded, color: '#f87171' },
+                          { label: '연락처 누락', value: orderSyncPreview.stats.invalid, color: '#cbd5e1' }
+                        ].map((stat, i) => (
+                          <div key={i} style={{ padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', textAlign: 'center' }}>
+                            <div style={{ fontSize: '20px', fontWeight: '700', color: stat.color }}>{stat.value}</div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{stat.label}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 신규 행 미리보기 (최대 10건) */}
+                      {orderSyncPreview.newOrders.length > 0 && (
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>
+                            추가될 신규 주문 (상위 10건 미리보기)
+                          </div>
+                          <div style={{ maxHeight: '240px', overflow: 'auto', background: 'rgba(0,0,0,0.3)', borderRadius: '6px' }}>
+                            <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+                              <thead style={{ position: 'sticky', top: 0, background: 'rgba(15,23,42,0.95)' }}>
+                                <tr>
+                                  {['이름', '전화', '상품명', '결제금액', '상태'].map(h => (
+                                    <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {orderSyncPreview.newOrders.slice(0, 10).map((o, i) => (
+                                  <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <td style={{ padding: '6px 8px', color: '#e2e8f0' }}>{o.name}</td>
+                                    <td style={{ padding: '6px 8px', color: '#cbd5e1' }}>{o.phone}</td>
+                                    <td style={{ padding: '6px 8px', color: '#cbd5e1', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.product}</td>
+                                    <td style={{ padding: '6px 8px', color: '#a5b4fc' }}>{o.amount}</td>
+                                    <td style={{ padding: '6px 8px', color: '#10b981' }}>{o.status}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {orderSyncPreview.newOrders.length > 10 && (
+                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', textAlign: 'right' }}>
+                              + {orderSyncPreview.newOrders.length - 10}건 더…
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          onClick={async () => {
+                            if (!orderSyncPreview.previewRows || orderSyncPreview.previewRows.length === 0) {
+                              alert('추가할 신규 행이 없습니다.')
+                              return
+                            }
+                            if (!confirm(`결제자 시트에 ${orderSyncPreview.previewRows.length}건의 신규 주문을 추가합니다. 진행할까요?`)) return
+                            setOrderSyncCommitting(true)
+                            try {
+                              const res = await fetch('/api/tools/order-sync', {
+                                method: 'PUT',
+                                headers: getAuthHeaders(),
+                                body: JSON.stringify({
+                                  year: orderSyncYear,
+                                  tabName: orderSyncPreview.tabName,
+                                  rows: orderSyncPreview.previewRows
+                                })
+                              })
+                              const data = await res.json()
+                              if (data.success) {
+                                setOrderSyncCommitResult(data)
+                                setOrderSyncLog(prev => [...prev, `✅ ${data.appendedRows}건 추가됨 (${data.updatedRange})`])
+                              } else {
+                                alert('적용 실패: ' + (data.error || '알 수 없음'))
+                              }
+                            } catch (err) {
+                              alert('네트워크 오류: ' + err.message)
+                            }
+                            setOrderSyncCommitting(false)
+                          }}
+                          disabled={orderSyncCommitting || orderSyncPreview.stats.newCount === 0}
+                          style={{
+                            flex: 1,
+                            padding: '12px',
+                            background: orderSyncCommitting ? '#4c4c6d' : orderSyncPreview.stats.newCount === 0 ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #10b981, #059669)',
+                            border: 'none',
+                            borderRadius: '8px',
+                            color: orderSyncPreview.stats.newCount === 0 ? '#64748b' : '#fff',
+                            fontSize: '14px',
+                            fontWeight: '600',
+                            cursor: orderSyncCommitting ? 'wait' : orderSyncPreview.stats.newCount === 0 ? 'not-allowed' : 'pointer'
+                          }}
+                        >
+                          {orderSyncCommitting ? '추가 중...' : `✓ 시트에 ${orderSyncPreview.stats.newCount}건 추가`}
+                        </button>
+                        <button
+                          onClick={resetOrderSync}
+                          style={{
+                            padding: '12px 20px',
+                            background: 'rgba(99,102,241,0.2)',
+                            border: '1px solid rgba(99,102,241,0.4)',
+                            borderRadius: '8px',
+                            color: '#a5b4fc',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          🔄 초기화
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 적용 결과 */}
+                  {orderSyncCommitResult && orderSyncCommitResult.success && (
+                    <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16,185,129,0.15)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.4)' }}>
+                      <div style={{ fontSize: '14px', color: '#10b981', fontWeight: '600', marginBottom: '8px' }}>
+                        ✅ 시트 동기화 완료
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#cbd5e1', marginBottom: '12px' }}>
+                        <b>{orderSyncPreview?.tabName}</b> 탭에 <b>{orderSyncCommitResult.appendedRows}</b>건 추가됨 ({orderSyncCommitResult.updatedRange})
+                      </div>
+                      <button
+                        onClick={resetOrderSync}
+                        style={{
+                          padding: '10px 20px',
+                          background: 'rgba(99,102,241,0.2)',
+                          border: '1px solid rgba(99,102,241,0.4)',
+                          borderRadius: '8px',
+                          color: '#a5b4fc',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🔄 새 파일 동기화
                       </button>
                     </div>
                   )}
