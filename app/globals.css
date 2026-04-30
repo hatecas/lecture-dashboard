@@ -232,6 +232,11 @@ textarea::placeholder {
   66% { transform: translate(-18px, 16px) rotate(-2deg); }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* 모바일 반응형 */
 @media (max-width: 768px) {
   select {

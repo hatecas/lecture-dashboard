@@ -302,7 +302,7 @@ export default function Login({ onLogin }) {
             >
               {loading ? (
                 <>
-                  <Loader2 size={16} style={{ animation: 'auroraDrift 0.8s linear infinite' }} />
+                  <Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
                   로그인 중
                 </>
               ) : (
