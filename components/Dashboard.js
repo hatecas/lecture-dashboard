@@ -126,6 +126,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [selectedInstructor, setSelectedInstructor] = useState('')
   const [showYoutubeModal, setShowYoutubeModal] = useState(false)
   const autoAnalyzedRef = useRef(new Set())
+  const purchaseTimelineCacheRef = useRef(new Map()) // sessionId -> intervals[]
   const [timelineInterval, setTimelineInterval] = useState(10) // 5, 10, 15, 20, 30분
   const [rankingMetric, setRankingMetric] = useState('revenue')
   const [rankingOrder, setRankingOrder] = useState('desc')
@@ -1188,9 +1189,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       return
     }
 
-    // 같은 세션을 빠르게 다시 누를 때 중복 호출 방지
-    if (autoAnalyzedRef.current.has(selectedSessionId)) return
-    autoAnalyzedRef.current.add(selectedSessionId)
+    // 캐시 히트 시 즉시 반영하고 종료 (API 재호출만 스킵, setState는 항상 함)
+    const cached = purchaseTimelineCacheRef.current.get(selectedSessionId)
+    if (cached) {
+      setPurchaseTimeline(cached)
+      return
+    }
+
+    // 분석 시작 전 빈 배열로 초기화해 이전 세션 차트가 잠깐 남아 보이는 현상 제거
+    setPurchaseTimeline([])
 
     try {
       const response = await fetch('/api/sales-analysis', {
@@ -1202,10 +1209,16 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         })
       })
       const result = await response.json()
+      const sessionIdAtRequestTime = selectedSessionId
       if (result.success && Array.isArray(result.intervals)) {
         // 구버전 캐시 스키마와 호환: { hour, purchases }만 차트가 사용함
-        setPurchaseTimeline(result.intervals.map(r => ({ hour: r.hour, purchases: r.purchases })))
-      } else {
+        const intervals = result.intervals.map(r => ({ hour: r.hour, purchases: r.purchases }))
+        purchaseTimelineCacheRef.current.set(sessionIdAtRequestTime, intervals)
+        // 응답 도착 시 사용자가 다른 세션으로 이미 이동했으면 적용하지 않음 (race 방지)
+        if (sessionIdAtRequestTime === selectedSessionId) {
+          setPurchaseTimeline(intervals)
+        }
+      } else if (sessionIdAtRequestTime === selectedSessionId) {
         setPurchaseTimeline([])
       }
     } catch (e) {
