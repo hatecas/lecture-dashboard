@@ -21,6 +21,7 @@ import {
   CreditCard,
   ShieldCheck,
   Wand2,
+  Library,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
@@ -347,6 +348,21 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_error, setPpError] = useState('')
   const [pp_taskRetrying, setPpTaskRetrying] = useState(null) // 개별 재생성 중인 task key
   const [pp_expanded, setPpExpanded] = useState({})
+
+  // 🛠️ 기획 봇 설정 (관리자 전용) 상태
+  const [pc_loading, setPcLoading] = useState(false)
+  const [pc_loaded, setPcLoaded] = useState(false)
+  const [pc_prompts, setPcPrompts] = useState([])           // [{feature_key, instructions, ...}]
+  const [pc_refs, setPcRefs] = useState([])                 // [{id, feature_key, title, content, ...}]
+  const [pc_selectedFeature, setPcSelectedFeature] = useState('ebook')
+  const [pc_instructionsDraft, setPcInstructionsDraft] = useState('')
+  const [pc_savingInstructions, setPcSavingInstructions] = useState(false)
+  const [pc_newRef, setPcNewRef] = useState({ title: '', content: '' })
+  const [pc_addingRef, setPcAddingRef] = useState(false)
+  const [pc_editingRefId, setPcEditingRefId] = useState(null)
+  const [pc_editRefDraft, setPcEditRefDraft] = useState({ title: '', content: '' })
+  const [pc_busyRefId, setPcBusyRefId] = useState(null)
+  const [pc_message, setPcMessage] = useState('')
 
   // 주문 동기화(nlab DB / CSV → 결제자 시트 append) 상태
   const [orderSyncMode, setOrderSyncMode] = useState('supabase') // 'supabase' | 'csv'
@@ -995,6 +1011,23 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         })
         .catch(() => {})
         .finally(() => setPermLoading(false))
+    }
+    if (currentTab === 'planner-config' && loginId === 'jinwoo' && !pc_loaded) {
+      setPcLoading(true)
+      fetch('/api/admin/planner-config', { headers: getAuthHeaders() })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            setPcPrompts(data.prompts || [])
+            setPcRefs(data.references || [])
+            setPcLoaded(true)
+            // 선택된 기능의 지침을 textarea에 동기화
+            const cur = (data.prompts || []).find(p => p.feature_key === pc_selectedFeature)
+            setPcInstructionsDraft(cur?.instructions || '')
+          }
+        })
+        .catch(() => {})
+        .finally(() => setPcLoading(false))
     }
   }, [currentTab])
 
@@ -2120,10 +2153,16 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   onClick={() => { setCurrentTab('payer-data'); if(isMobile) setMobileMenuOpen(false) }} />
               )}
               {loginId === 'jinwoo' && (
-                <SidebarItem icon={ShieldCheck} label="권한 설정" shortLabel="권한"
-                  active={currentTab === 'admin-permissions'}
-                  collapsed={sidebarCollapsed && !isMobile}
-                  onClick={() => { setCurrentTab('admin-permissions'); if(isMobile) setMobileMenuOpen(false) }} />
+                <>
+                  <SidebarItem icon={Library} label="기획 봇 설정" shortLabel="봇설정"
+                    active={currentTab === 'planner-config'}
+                    collapsed={sidebarCollapsed && !isMobile}
+                    onClick={() => { setCurrentTab('planner-config'); if(isMobile) setMobileMenuOpen(false) }} />
+                  <SidebarItem icon={ShieldCheck} label="권한 설정" shortLabel="권한"
+                    active={currentTab === 'admin-permissions'}
+                    collapsed={sidebarCollapsed && !isMobile}
+                    onClick={() => { setCurrentTab('admin-permissions'); if(isMobile) setMobileMenuOpen(false) }} />
+                </>
               )}
             </>
           )}
@@ -9154,6 +9193,369 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               </div>
             </div>
           )}
+
+          {/* 🛠️ 기획 봇 설정 탭 (jinwoo 전용) */}
+          {currentTab === 'planner-config' && loginId === 'jinwoo' && (() => {
+            const PLANNER_META = {
+              ebook:             { label: '무료 전자책 기획안',     icon: '📚', enabled: true },
+              boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', enabled: false },
+              alimtalk:          { label: '알림톡 / 채널톡 멘트',    icon: '💬', enabled: false },
+              viralQ:            { label: '바이럴 질문',            icon: '❓', enabled: false },
+              ppt:               { label: '강의 PPT outline',       icon: '📋', enabled: false },
+              salesPage:         { label: '무료 상페 카피',          icon: '📄', enabled: false },
+              groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', enabled: false },
+            }
+
+            const pickFeature = (key) => {
+              setPcSelectedFeature(key)
+              setPcAddingRef(false)
+              setPcEditingRefId(null)
+              const cur = pc_prompts.find(p => p.feature_key === key)
+              setPcInstructionsDraft(cur?.instructions || '')
+              setPcMessage('')
+            }
+
+            const refsForFeature = pc_refs.filter(r => r.feature_key === pc_selectedFeature)
+            const promptForFeature = pc_prompts.find(p => p.feature_key === pc_selectedFeature)
+
+            const saveInstructions = async () => {
+              setPcSavingInstructions(true)
+              setPcMessage('')
+              try {
+                const res = await fetch('/api/admin/planner-config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify({ action: 'save-instructions', featureKey: pc_selectedFeature, instructions: pc_instructionsDraft }),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+                setPcPrompts(prev => {
+                  const others = prev.filter(p => p.feature_key !== pc_selectedFeature)
+                  return [...others, data.prompt]
+                })
+                setPcMessage('✅ 지침 저장됨')
+              } catch (e) {
+                setPcMessage('❌ 저장 실패: ' + e.message)
+              } finally {
+                setPcSavingInstructions(false)
+              }
+            }
+
+            const addReference = async () => {
+              if (!pc_newRef.title.trim() || !pc_newRef.content.trim()) {
+                setPcMessage('❌ 제목과 본문 모두 필수')
+                return
+              }
+              setPcSavingInstructions(true)
+              setPcMessage('')
+              try {
+                const res = await fetch('/api/admin/planner-config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify({
+                    action: 'add-reference',
+                    featureKey: pc_selectedFeature,
+                    title: pc_newRef.title.trim(),
+                    content: pc_newRef.content.trim(),
+                  }),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+                setPcRefs(prev => [...prev, data.reference])
+                setPcNewRef({ title: '', content: '' })
+                setPcAddingRef(false)
+                setPcMessage('✅ 레퍼런스 추가됨')
+              } catch (e) {
+                setPcMessage('❌ 추가 실패: ' + e.message)
+              } finally {
+                setPcSavingInstructions(false)
+              }
+            }
+
+            const startEditRef = (ref) => {
+              setPcEditingRefId(ref.id)
+              setPcEditRefDraft({ title: ref.title, content: ref.content })
+              setPcAddingRef(false)
+            }
+
+            const saveEditRef = async () => {
+              if (!pc_editRefDraft.title.trim() || !pc_editRefDraft.content.trim()) {
+                setPcMessage('❌ 제목과 본문 모두 필수')
+                return
+              }
+              setPcBusyRefId(pc_editingRefId)
+              try {
+                const res = await fetch('/api/admin/planner-config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify({
+                    action: 'update-reference',
+                    id: pc_editingRefId,
+                    title: pc_editRefDraft.title.trim(),
+                    content: pc_editRefDraft.content.trim(),
+                  }),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+                setPcRefs(prev => prev.map(r => r.id === pc_editingRefId ? data.reference : r))
+                setPcEditingRefId(null)
+                setPcMessage('✅ 레퍼런스 수정됨')
+              } catch (e) {
+                setPcMessage('❌ 수정 실패: ' + e.message)
+              } finally {
+                setPcBusyRefId(null)
+              }
+            }
+
+            const toggleRefEnabled = async (ref) => {
+              setPcBusyRefId(ref.id)
+              try {
+                const res = await fetch('/api/admin/planner-config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify({ action: 'update-reference', id: ref.id, enabled: !ref.enabled }),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+                setPcRefs(prev => prev.map(r => r.id === ref.id ? data.reference : r))
+              } catch (e) {
+                setPcMessage('❌ 토글 실패: ' + e.message)
+              } finally {
+                setPcBusyRefId(null)
+              }
+            }
+
+            const deleteRef = async (ref) => {
+              if (!confirm(`"${ref.title}" 레퍼런스를 삭제할까요?`)) return
+              setPcBusyRefId(ref.id)
+              try {
+                const res = await fetch('/api/admin/planner-config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify({ action: 'delete-reference', id: ref.id }),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+                setPcRefs(prev => prev.filter(r => r.id !== ref.id))
+                setPcMessage('✅ 삭제됨')
+              } catch (e) {
+                setPcMessage('❌ 삭제 실패: ' + e.message)
+              } finally {
+                setPcBusyRefId(null)
+              }
+            }
+
+            return (
+              <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
+                <div style={{ marginBottom: '20px' }}>
+                  <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--accent-grad)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
+                      <Library size={18} color="#fff" strokeWidth={2.2} />
+                    </span>
+                    기획 봇 설정
+                  </h2>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.55 }}>
+                    봇별로 작성 지침과 참고할 레퍼런스 자료를 관리합니다. 저장 즉시 다음 기획 생성부터 반영됩니다.
+                  </p>
+                </div>
+
+                {pc_loading && (
+                  <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>불러오는 중…</div>
+                )}
+
+                {!pc_loading && (
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '220px 1fr', gap: '16px' }}>
+                    {/* 좌: 봇 목록 */}
+                    <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '8px', border: '1px solid var(--border)', height: 'fit-content' }}>
+                      <div style={{ padding: '6px 10px', fontSize: '10px', color: 'var(--text-faint)', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase' }}>봇 목록</div>
+                      {Object.entries(PLANNER_META).map(([key, meta]) => {
+                        const isActive = pc_selectedFeature === key
+                        const refCount = pc_refs.filter(r => r.feature_key === key).length
+                        const hasInstructions = !!pc_prompts.find(p => p.feature_key === key)?.instructions
+                        return (
+                          <button key={key} type="button" onClick={() => pickFeature(key)}
+                            disabled={!meta.enabled && !isActive && !hasInstructions && refCount === 0}
+                            style={{
+                              width: '100%',
+                              display: 'flex', alignItems: 'center', gap: '8px',
+                              padding: '10px 12px', marginBottom: '2px',
+                              background: isActive ? 'var(--accent-grad-soft)' : 'transparent',
+                              border: '1px solid ' + (isActive ? 'rgba(129,140,248,0.35)' : 'transparent'),
+                              borderRadius: '8px',
+                              color: isActive ? '#fff' : '#cbd5e1',
+                              fontSize: '13px',
+                              fontWeight: isActive ? 600 : 500,
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              opacity: meta.enabled ? 1 : 0.6,
+                            }}>
+                            <span>{meta.icon}</span>
+                            <span style={{ flex: 1 }}>{meta.label}</span>
+                            {!meta.enabled && (
+                              <span style={{ fontSize: '9px', padding: '1px 5px', background: 'rgba(255,255,255,0.06)', color: '#64748b', borderRadius: '999px' }}>준비중</span>
+                            )}
+                            {refCount > 0 && (
+                              <span style={{ fontSize: '10px', padding: '1px 6px', background: 'rgba(99,102,241,0.20)', color: '#a5b4fc', borderRadius: '999px', fontWeight: 700 }}>{refCount}</span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* 우: 선택된 봇의 지침 + 레퍼런스 */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {pc_message && (
+                        <div style={{
+                          padding: '10px 14px',
+                          background: pc_message.startsWith('✅') ? 'rgba(16,185,129,0.10)' : 'rgba(239,68,68,0.10)',
+                          border: `1px solid ${pc_message.startsWith('✅') ? 'rgba(16,185,129,0.30)' : 'rgba(239,68,68,0.30)'}`,
+                          borderRadius: '8px',
+                          color: pc_message.startsWith('✅') ? '#34d399' : '#fca5a5',
+                          fontSize: '13px',
+                        }}>{pc_message}</div>
+                      )}
+
+                      {/* 지침 */}
+                      <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '20px', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              📝 지침 (instructions)
+                              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· {PLANNER_META[pc_selectedFeature]?.label}</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                              톤·구조·금지표현 등 작성 규칙. 비워두면 코드의 기본값 사용.
+                            </div>
+                          </div>
+                          {promptForFeature?.updated_at && (
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>
+                              마지막 수정: {new Date(promptForFeature.updated_at).toLocaleString('ko-KR')}
+                              {promptForFeature.updated_by ? ` · ${promptForFeature.updated_by}` : ''}
+                            </div>
+                          )}
+                        </div>
+                        <textarea value={pc_instructionsDraft} onChange={(e) => setPcInstructionsDraft(e.target.value)} rows={12}
+                          placeholder="예: - 톤: 강사가 직접 1인칭으로 말하는 느낌&#10;- 도입: 도발적/역설적 한 줄&#10;- 본문: 4섹션, 각 200~400자&#10;- 금지: '꼭 보세요!', '지금 바로!' 같은 표현"
+                          style={{ width: '100%', padding: '12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.6, resize: 'vertical', minHeight: '180px' }} />
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                          <button onClick={saveInstructions} disabled={pc_savingInstructions}
+                            style={{ padding: '9px 18px', background: 'var(--accent-grad)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: pc_savingInstructions ? 'wait' : 'pointer' }}>
+                            {pc_savingInstructions ? '저장 중…' : '💾 지침 저장'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 레퍼런스 */}
+                      <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '20px', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                          <div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              📚 레퍼런스 자료
+                              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· {refsForFeature.length}개</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                              모범 사례를 본문째 추가합니다. AI가 톤·구조를 모방합니다.
+                            </div>
+                          </div>
+                          {!pc_addingRef && (
+                            <button onClick={() => { setPcAddingRef(true); setPcEditingRefId(null); setPcNewRef({ title: '', content: '' }) }}
+                              style={{ padding: '8px 14px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '8px', color: '#c7d2fe', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                              ➕ 새 레퍼런스
+                            </button>
+                          )}
+                        </div>
+
+                        {pc_addingRef && (
+                          <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '10px', padding: '14px', marginBottom: '12px' }}>
+                            <input type="text" value={pc_newRef.title} onChange={(e) => setPcNewRef(s => ({ ...s, title: e.target.value }))}
+                              placeholder="레퍼런스 제목 (예: 청담언니 루시 - 유튜브 수익화)"
+                              style={{ width: '100%', padding: '9px 11px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '13px', marginBottom: '8px', boxSizing: 'border-box' }} />
+                            <textarea value={pc_newRef.content} onChange={(e) => setPcNewRef(s => ({ ...s, content: e.target.value }))} rows={10}
+                              placeholder="모범 사례 본문 (썸네일 카피 + 제목 + 본문 카피 + CTA를 통째로 붙여넣기)"
+                              style={{ width: '100%', padding: '11px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.55, resize: 'vertical', minHeight: '160px' }} />
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                              <button onClick={() => { setPcAddingRef(false); setPcNewRef({ title: '', content: '' }) }}
+                                style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>취소</button>
+                              <button onClick={addReference} disabled={pc_savingInstructions}
+                                style={{ padding: '8px 16px', background: 'var(--accent-grad)', border: 'none', borderRadius: '7px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: pc_savingInstructions ? 'wait' : 'pointer' }}>
+                                {pc_savingInstructions ? '추가 중…' : '추가'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {refsForFeature.length === 0 && !pc_addingRef && (
+                          <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '12.5px', border: '2px dashed rgba(255,255,255,0.10)', borderRadius: '10px' }}>
+                            등록된 레퍼런스가 없습니다. <b>새 레퍼런스</b> 버튼으로 추가하세요. 비어있으면 코드의 기본 샘플이 사용됩니다.
+                          </div>
+                        )}
+
+                        {refsForFeature.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {refsForFeature.map(ref => {
+                              const isEditing = pc_editingRefId === ref.id
+                              const busy = pc_busyRefId === ref.id
+                              return (
+                                <div key={ref.id} style={{
+                                  background: ref.enabled ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.01)',
+                                  border: '1px solid ' + (isEditing ? 'rgba(99,102,241,0.35)' : 'var(--border)'),
+                                  borderRadius: '10px',
+                                  padding: '12px 14px',
+                                  opacity: ref.enabled ? 1 : 0.5,
+                                }}>
+                                  {!isEditing && (
+                                    <>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', gap: '8px' }}>
+                                        <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#fff', flex: 1 }}>{ref.title}</div>
+                                        <div style={{ display: 'flex', gap: '4px' }}>
+                                          <button onClick={() => toggleRefEnabled(ref)} disabled={busy}
+                                            title={ref.enabled ? '비활성화' : '활성화'}
+                                            style={{ padding: '5px 9px', background: ref.enabled ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.05)', border: '1px solid ' + (ref.enabled ? 'rgba(16,185,129,0.30)' : 'var(--border)'), borderRadius: '6px', color: ref.enabled ? '#34d399' : '#64748b', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                                            {ref.enabled ? 'ON' : 'OFF'}
+                                          </button>
+                                          <button onClick={() => startEditRef(ref)} disabled={busy}
+                                            style={{ padding: '5px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '6px', color: '#cbd5e1', fontSize: '11px', cursor: 'pointer' }}>
+                                            ✏️ 수정
+                                          </button>
+                                          <button onClick={() => deleteRef(ref)} disabled={busy}
+                                            style={{ padding: '5px 9px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '6px', color: '#f87171', fontSize: '11px', cursor: 'pointer' }}>
+                                            🗑️
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <div style={{ fontSize: '12px', color: '#94a3b8', whiteSpace: 'pre-wrap', maxHeight: '6em', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
+                                        {ref.content}
+                                      </div>
+                                    </>
+                                  )}
+                                  {isEditing && (
+                                    <>
+                                      <input type="text" value={pc_editRefDraft.title} onChange={(e) => setPcEditRefDraft(s => ({ ...s, title: e.target.value }))}
+                                        style={{ width: '100%', padding: '9px 11px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '13px', marginBottom: '8px', boxSizing: 'border-box' }} />
+                                      <textarea value={pc_editRefDraft.content} onChange={(e) => setPcEditRefDraft(s => ({ ...s, content: e.target.value }))} rows={8}
+                                        style={{ width: '100%', padding: '11px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.55, resize: 'vertical', minHeight: '140px' }} />
+                                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                                        <button onClick={() => { setPcEditingRefId(null) }}
+                                          style={{ padding: '7px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>취소</button>
+                                        <button onClick={saveEditRef} disabled={busy}
+                                          style={{ padding: '7px 14px', background: 'var(--accent-grad)', border: 'none', borderRadius: '7px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: busy ? 'wait' : 'pointer' }}>
+                                          {busy ? '저장 중…' : '저장'}
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* 권한 설정 탭 (jinwoo 전용) */}
           {currentTab === 'admin-permissions' && loginId === 'jinwoo' && (
