@@ -68,16 +68,9 @@ export async function POST(request) {
     const payload = {}
     for (const k of requiredAll) payload[k] = body[k]
     if (body.reservedTime) {
-      // 카카오 알림톡 관례: 즉시=at / 예약=as. 'at'으로 보내면 슝이 reservedTime 무시하고 즉시 발송.
-      payload.sendType = 'as'
-      // ISO + KST 포맷 둘 다 동봉 (슝이 어느 필드를 보든 매칭되도록)
-      const d = new Date(body.reservedTime)
-      const pad = (n) => String(n).padStart(2, '0')
-      // KST 변환 (서버가 어느 TZ든 +9 보정)
-      const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
-      const kstCompact = `${kst.getUTCFullYear()}${pad(kst.getUTCMonth()+1)}${pad(kst.getUTCDate())}${pad(kst.getUTCHours())}${pad(kst.getUTCMinutes())}${pad(kst.getUTCSeconds())}`
-      payload.reservedTime = body.reservedTime  // ISO 그대로
-      payload.reserveDt = kstCompact            // yyyyMMddHHmmss KST (대안 키)
+      // 슝 sendType enum에 'as' 없음 → 'at' 유지하고 예약 시점만 ISO로 전달.
+      // (이전 추측 실패 기록: 'as'로 보내면 BAD_REQUEST enum 에러)
+      payload.reservedTime = body.reservedTime
     }
 
     const res = await fetch(SHOONG_ENDPOINT, {

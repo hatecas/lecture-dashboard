@@ -5591,10 +5591,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
                             }
                             const now = new Date()
-                            const minLead = new Date(now.getTime() + 10 * 60 * 1000) // 최소 +10분
+                            const minLead = new Date(now.getTime() + 5 * 60 * 1000) // 기본 +5분으로 채움
                             const reservedDate = shoongBulkReservedAt ? new Date(shoongBulkReservedAt) : null
                             const leadMinutes = reservedDate ? Math.round((reservedDate.getTime() - now.getTime()) / 60000) : null
-                            const tooSoon = reservedDate && leadMinutes < 10
+                            // 알림톡은 1분 후 예약도 보통 잘 잡힘. 0분 이하만 경고.
+                            const tooSoon = reservedDate && leadMinutes < 1 && leadMinutes >= 0
                             const inPast = reservedDate && leadMinutes < 0
 
                             const presets = [
@@ -5689,7 +5690,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                         {inPast
                                           ? `⚠️ 과거 시각입니다 (${Math.abs(leadMinutes)}분 전). 즉시 발송 처리됩니다.`
                                           : tooSoon
-                                            ? `⚠️ 현재 시각 기준 ${leadMinutes}분 후입니다. 슝/카카오 최소 리드타임(약 10분) 미만이라 즉시 발송될 수 있습니다.`
+                                            ? `⚠️ 1분 미만 임박 — 즉시 발송 처리될 수 있습니다.`
                                             : `✅ 현재 시각 기준 ${leadMinutes >= 60 ? `${Math.floor(leadMinutes/60)}시간 ${leadMinutes%60}분` : `${leadMinutes}분`} 후 예약 발송`
                                         }
                                       </div>
