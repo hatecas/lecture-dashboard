@@ -5437,24 +5437,47 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       const allSelected = shoongBulkCourses.length > 0 && shoongBulkSelectedIds.length === shoongBulkCourses.length
                       return (
                         <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.25)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', fontSize: '12px', color: '#cbd5e1' }}>
-                            <span>
-                              검색 결과: <b style={{ color: '#fff' }}>{shoongBulkCourses.length}개 강의</b> ·
-                              선택 <b style={{ color: '#a78bfa' }}>{selectedCount}개</b> ·
-                              예상 수신자 <b style={{ color: '#34d399' }}>{totalApplicants.toLocaleString()}명</b>
-                              <span style={{ color: '#64748b', marginLeft: '6px' }}>(중복 번호는 발송 시 1회만)</span>
-                            </span>
+                          {/* 전체 선택/해제 버튼 (큼직하게, 상단 별도 줄) */}
+                          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
                             <button
                               type="button"
-                              onClick={() => setShoongBulkSelectedIds(allSelected ? [] : shoongBulkCourses.map(c => c.id))}
+                              onClick={() => setShoongBulkSelectedIds(shoongBulkCourses.map(c => c.id))}
+                              disabled={allSelected}
                               style={{
-                                padding: '4px 10px', background: 'rgba(139,92,246,0.2)',
-                                border: '1px solid rgba(139,92,246,0.4)', borderRadius: '6px',
-                                color: '#c4b5fd', fontSize: '11px', cursor: 'pointer'
+                                flex: 1, padding: '8px 12px',
+                                background: allSelected ? 'rgba(139,92,246,0.1)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                border: '1px solid rgba(139,92,246,0.4)', borderRadius: '8px',
+                                color: allSelected ? '#64748b' : '#fff',
+                                fontSize: '12px', fontWeight: '600',
+                                cursor: allSelected ? 'not-allowed' : 'pointer',
+                                opacity: allSelected ? 0.5 : 1
                               }}
                             >
-                              {allSelected ? '전체 해제' : '전체 선택'}
+                              ✅ 전체 선택 ({shoongBulkCourses.length}개)
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setShoongBulkSelectedIds([])}
+                              disabled={selectedCount === 0}
+                              style={{
+                                flex: 1, padding: '8px 12px',
+                                background: selectedCount === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(239,68,68,0.15)',
+                                border: `1px solid ${selectedCount === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(239,68,68,0.4)'}`,
+                                borderRadius: '8px',
+                                color: selectedCount === 0 ? '#64748b' : '#fca5a5',
+                                fontSize: '12px', fontWeight: '600',
+                                cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+                                opacity: selectedCount === 0 ? 0.5 : 1
+                              }}
+                            >
+                              ❌ 전체 해제
+                            </button>
+                          </div>
+                          <div style={{ marginBottom: '10px', fontSize: '12px', color: '#cbd5e1' }}>
+                            검색 결과: <b style={{ color: '#fff' }}>{shoongBulkCourses.length}개 강의</b> ·
+                            선택 <b style={{ color: '#a78bfa' }}>{selectedCount}개</b> ·
+                            예상 수신자 <b style={{ color: '#34d399' }}>{totalApplicants.toLocaleString()}명</b>
+                            <span style={{ color: '#64748b', marginLeft: '6px' }}>(중복 번호는 발송 시 1회만)</span>
                           </div>
                           <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {shoongBulkCourses.map(c => {
