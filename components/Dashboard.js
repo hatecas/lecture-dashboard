@@ -338,8 +338,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [shoongManualResult, setShoongManualResult] = useState(null)
 
   // 🪄 프로젝트 기획 (멀티 봇 오케스트레이터) 상태
-  const [pp_instructor, setPpInstructor] = useState('')
-  const [pp_sessionName, setPpSessionName] = useState('')
+  // 강사/기수는 selectedInstructor + selectedSessionId(global)와 공유. 자료도 attachments(global) 재사용.
   const [pp_topic, setPpTopic] = useState('')
   const [pp_additionalContext, setPpAdditionalContext] = useState('')
   const [pp_enabledTasks, setPpEnabledTasks] = useState(['ebook']) // 기본 ebook만 ON
@@ -347,7 +346,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_results, setPpResults] = useState(null)
   const [pp_error, setPpError] = useState('')
   const [pp_taskRetrying, setPpTaskRetrying] = useState(null) // 개별 재생성 중인 task key
-  // 평면화: 어떤 섹션이 펼쳐져 있는지
   const [pp_expanded, setPpExpanded] = useState({})
 
   // 주문 동기화(nlab DB / CSV → 결제자 시트 append) 상태
@@ -1039,12 +1037,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }
   }, [selectedSessionId, sessions])
 
-  // 강사 변경 시 첨부파일 로드
+  // 강사/기수 변경 시 첨부파일 로드 (기수 매칭 우선, 없으면 강사 공통도 포함)
   useEffect(() => {
     if (selectedInstructor && instructors.length > 0) {
       loadAttachments()
     }
-  }, [selectedInstructor, instructors])
+  }, [selectedInstructor, instructors, selectedSessionId])
 
   // 전체 시트 데이터 로드 (랭킹/대조용)
   useEffect(() => {
@@ -1357,7 +1355,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     const instructorId = getSelectedInstructorId()
     if (!instructorId) return
     try {
-      const response = await fetch(`/api/files?instructor_id=${instructorId}&t=${Date.now()}`, {
+      const sessionParam = selectedSessionId ? `&session_id=${selectedSessionId}` : ''
+      const response = await fetch(`/api/files?instructor_id=${instructorId}${sessionParam}&t=${Date.now()}`, {
         headers: getAuthHeaders(),
         cache: 'no-store'
       })
@@ -1399,6 +1398,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('instructor_id', instructorId)
+      if (selectedSessionId) formData.append('session_id', selectedSessionId)
       formData.append('file_type', 'file')
 
       try {
@@ -1527,6 +1527,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
     const formData = new FormData()
     formData.append('instructor_id', instructorId)
+    if (selectedSessionId) formData.append('session_id', selectedSessionId)
     formData.append('file_type', 'link')
     formData.append('link_url', newLink.url)
     formData.append('link_title', newLink.title)
@@ -2043,10 +2044,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 active={currentTab === 'dashboard'}
                 collapsed={sidebarCollapsed && !isMobile}
                 onClick={() => { setCurrentTab('dashboard'); if(isMobile) setMobileMenuOpen(false) }} />
-              <SidebarItem icon={FileText} label="상세 정보" shortLabel="상세"
-                active={currentTab === 'detail'}
-                collapsed={sidebarCollapsed && !isMobile}
-                onClick={() => { setCurrentTab('detail'); if(isMobile) setMobileMenuOpen(false) }} />
               <SidebarItem icon={Trophy} label="랭킹"
                 active={currentTab === 'ranking'}
                 collapsed={sidebarCollapsed && !isMobile}
@@ -2322,8 +2319,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           </div>
         )}
         <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
-          {/* 드롭다운 - 대시보드/상세 탭에서만 표시 */}
-          {(currentTab === 'dashboard' || currentTab === 'detail') && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* 드롭다운 - 대시보드 탭에서만 표시 */}
+          {currentTab === 'dashboard' && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             {/* 강사 선택 */}
             <select
               value={selectedInstructor}
@@ -2665,155 +2662,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   <div style={{ background: 'rgba(99,102,241,0.1)', borderRadius: '12px', padding: '16px' }}>
                     <div style={{ color: '#818cf8', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>📋 추천 액션</div>
                     {aiAnalysis.recommendations.map((r, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {r}</div>))}
-                  </div>
-                  <div style={{ marginTop: '16px', padding: '12px 16px', background: 'rgba(236,72,153,0.15)', borderRadius: '10px', borderLeft: '3px solid #ec4899' }}>
-                    <span style={{ color: '#f472b6', fontWeight: '600' }}>💡 핵심 인사이트:</span>
-                    <span style={{ color: '#e2e8f0', marginLeft: '8px' }}>{aiAnalysis.keyInsight}</span>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* 상세 정보 탭 */}
-          {currentTab === 'detail' && (
-            <>
-              {/* 강사 메모 */}
-              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>📝 강사 메모 <HelpTooltip text={"각 기수별 강사 메모를 기록합니다.\n특이사항, 피드백, 개선점 등을\n자유롭게 작성하세요."} /></div>
-                  <button onClick={() => setShowMemoModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}>메모 추가</button>
-                </div>
-                {memos.length > 0 ? (
-                  <div>
-                    {memos.map((memo) => (
-                      <div key={memo.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '20px', marginBottom: '12px' }}>
-                        <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>{memo.memo_date}</div>
-                        <div style={{ color: '#e2e8f0', fontSize: '15px', lineHeight: 1.7 }}>{memo.content}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '60px', color: '#64748b' }}>등록된 강사 메모가 없습니다</div>
-                )}
-              </div>
-
-              {/* 첨부파일 섹션 */}
-              <div
-                style={{
-                  background: isDragging ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
-                  borderRadius: '16px',
-                  padding: '24px',
-                  border: isDragging ? '2px dashed #6366f1' : '1px solid rgba(255,255,255,0.1)',
-                  marginBottom: '24px',
-                  transition: 'all 0.2s ease'
-                }}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>📎 첨부파일 & 링크 <HelpTooltip text={"기수별 관련 파일과 링크를 관리합니다.\n파일 업로드, 폴더 업로드, 드래그&드롭을\n모두 지원합니다.\n링크는 URL, 제목, 설명을 입력할 수 있습니다."} /></div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleFileUpload}
-                      multiple
-                      style={{ display: 'none' }}
-                    />
-                    <input
-                      type="file"
-                      ref={folderInputRef}
-                      onChange={handleFileUpload}
-                      webkitdirectory=""
-                      directory=""
-                      multiple
-                      style={{ display: 'none' }}
-                    />
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={fileUploading}
-                      style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: fileUploading ? 'wait' : 'pointer' }}
-                    >
-                      {fileUploading ? '업로드 중...' : '파일 업로드'}
-                    </button>
-                    <button
-                      onClick={() => folderInputRef.current?.click()}
-                      disabled={fileUploading}
-                      style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', borderRadius: '10px', padding: '10px 18px', color: '#a5b4fc', fontSize: '14px', cursor: fileUploading ? 'wait' : 'pointer' }}
-                    >
-                      📁 폴더 업로드
-                    </button>
-                    <button
-                      onClick={() => setShowFileModal(true)}
-                      style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '10px', padding: '10px 18px', color: '#fff', fontSize: '14px', cursor: 'pointer' }}
-                    >
-                      🔗 링크 추가
-                    </button>
-                  </div>
-                </div>
-
-                {/* 드래그 앤 드롭 안내 */}
-                {isDragging && (
-                  <div style={{ textAlign: 'center', padding: '40px', color: '#a5b4fc', background: 'rgba(99,102,241,0.1)', borderRadius: '12px', marginBottom: '16px' }}>
-                    <div style={{ fontSize: '48px', marginBottom: '12px' }}>📥</div>
-                    <p style={{ fontSize: '16px', fontWeight: '600' }}>여기에 파일을 놓으세요</p>
-                    <p style={{ fontSize: '13px', marginTop: '4px' }}>파일 또는 폴더를 드롭하면 업로드됩니다</p>
-                  </div>
-                )}
-
-                {!isDragging && attachments.length > 0 ? (
-                  <>
-                    <div style={{ marginBottom: '8px', fontSize: '12px', color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>총 {attachments.length}개 파일</span>
-                      <button onClick={deleteAllAttachments} style={{ background: 'rgba(239,68,68,0.2)', border: 'none', color: '#f87171', fontSize: '11px', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>전체삭제</button>
-                    </div>
-                    <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '8px', maxHeight: '300px', overflowY: 'auto' }}>
-                      {attachments.map((file, idx) => (
-                        <div key={file.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: idx < attachments.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', gap: '8px' }}>
-                          <span style={{ fontSize: '14px' }}>{getFileIcon(file.file_type)}</span>
-                          <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, color: file.file_type === 'link' ? '#a5b4fc' : '#e2e8f0', fontSize: '12px', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {file.file_name}
-                          </a>
-                          <span style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap' }}>
-                            {file.file_type === 'link' ? '링크' : formatFileSize(file.file_size)}
-                          </span>
-                          <button onClick={() => deleteAttachment(file.id)} style={{ background: 'none', border: 'none', color: '#f87171', fontSize: '12px', cursor: 'pointer', padding: '2px 6px' }} title="삭제">✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : !isDragging && (
-                  <div style={{ textAlign: 'center', padding: '30px', color: '#64748b', border: '2px dashed rgba(255,255,255,0.1)', borderRadius: '12px' }}>
-                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>📁</div>
-                    <p style={{ fontSize: '13px' }}>파일을 드래그하여 업로드</p>
-                  </div>
-                )}
-              </div>
-
-              {/* AI 분석 */}
-              <button onClick={() => runAiAnalysis('detail')} disabled={analyzing} style={{ background: analyzing ? '#4c4c6d' : 'linear-gradient(135deg, #ec4899, #f43f5e)', border: 'none', borderRadius: '12px', padding: '14px 28px', color: '#fff', fontSize: '15px', fontWeight: '600', cursor: analyzing ? 'wait' : 'pointer', marginBottom: '24px' }}>
-                {analyzing ? '✨ AI 분석 중...' : '✨ AI 종합 분석 실행'}
-              </button>
-
-              {aiAnalysis && (
-                <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(99,102,241,0.3)' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '16px' }}>✨ AI 종합 분석 결과</div>
-                  <p style={{ color: '#cbd5e1', marginBottom: '16px', lineHeight: 1.6 }}>{aiAnalysis.summary}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-                    <div style={{ background: 'rgba(16,185,129,0.1)', borderRadius: '12px', padding: '16px' }}>
-                      <div style={{ color: '#10b981', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>💪 강점</div>
-                      {aiAnalysis.strengths?.map((s, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {s}</div>))}
-                    </div>
-                    <div style={{ background: 'rgba(245,158,11,0.1)', borderRadius: '12px', padding: '16px' }}>
-                      <div style={{ color: '#f59e0b', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>⚠️ 개선점</div>
-                      {aiAnalysis.weaknesses?.map((w, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {w}</div>))}
-                    </div>
-                  </div>
-                  <div style={{ background: 'rgba(99,102,241,0.1)', borderRadius: '12px', padding: '16px' }}>
-                    <div style={{ color: '#818cf8', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>📋 추천 액션</div>
-                    {aiAnalysis.recommendations?.map((r, i) => (<div key={i} style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '4px' }}>• {r}</div>))}
                   </div>
                   <div style={{ marginTop: '16px', padding: '12px 16px', background: 'rgba(236,72,153,0.15)', borderRadius: '10px', borderLeft: '3px solid #ec4899' }}>
                     <span style={{ color: '#f472b6', fontWeight: '600' }}>💡 핵심 인사이트:</span>
@@ -8029,6 +7877,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', desc: 'D-1 / D-day / D+1 시점별 공지',                  enabled: false },
             }
 
+            // 강사/기수는 전역 selectedInstructor + selectedSessionId 사용. 자료는 attachments 재사용.
+            const currentSession = sessions.find(s => s.id === selectedSessionId) || null
+            const sessionsForInstructor = sessions
+              .filter(s => s.instructors?.name === selectedInstructor)
+              .sort((a, b) => getSessionNumber(a.session_name) - getSessionNumber(b.session_name))
+            const instructorNames = [...new Set(sessions.map(s => s.instructors?.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))
+            const ready = !!selectedInstructor && !!selectedSessionId
+            const instructorObj = instructors.find(i => i.name === selectedInstructor)
+
             const toggleTask = (key) => {
               if (!PLANNER_META[key]?.enabled) return
               setPpEnabledTasks(prev =>
@@ -8036,10 +7893,26 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               )
             }
 
+            const buildAttachmentSummary = () => {
+              if (!attachments || attachments.length === 0) return ''
+              const lines = attachments.map((a) => {
+                const tag = a.session_id ? '[기수전용]' : '[강사공통]'
+                if (a.file_type === 'link') {
+                  return `- ${tag} ${a.file_name} → ${a.file_url}${a.description ? ' :: ' + a.description : ''}`
+                }
+                return `- ${tag} ${a.file_name} (${a.file_type}${a.file_size ? `, ${Math.round(a.file_size / 1024)}KB` : ''})${a.description ? ' :: ' + a.description : ''}`
+              })
+              return '\n\n[첨부 자료 목록]\n' + lines.join('\n')
+            }
+
             const runPlanner = async (overrideTasks = null) => {
               const tasks = overrideTasks || pp_enabledTasks
-              if (!pp_instructor.trim() || !pp_topic.trim() || tasks.length === 0) {
-                setPpError('강사명, 주제, 그리고 최소 1개의 항목이 필요합니다.')
+              if (!ready) {
+                setPpError('강사와 기수를 먼저 선택하세요.')
+                return null
+              }
+              if (!pp_topic.trim() || tasks.length === 0) {
+                setPpError('주제와 최소 1개 항목이 필요합니다.')
                 return null
               }
               setPpError('')
@@ -8047,14 +7920,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               else setPpLoading(true)
 
               try {
+                const fullContext = (pp_additionalContext.trim() + buildAttachmentSummary()).trim()
                 const res = await fetch('/api/tools/project-planner', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                   body: JSON.stringify({
-                    instructor: pp_instructor,
-                    sessionName: pp_sessionName,
+                    instructor: selectedInstructor,
+                    sessionName: currentSession?.session_name || '',
                     topic: pp_topic,
-                    additionalContext: pp_additionalContext,
+                    additionalContext: fullContext,
                     enabledTasks: tasks,
                   })
                 })
@@ -8077,7 +7951,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               const data = await runPlanner()
               if (data) {
                 setPpResults(data.results)
-                // 성공한 첫 항목 자동 펼침
                 const firstSuccess = Object.entries(data.results).find(([_, v]) => v.ok)?.[0]
                 if (firstSuccess) setPpExpanded({ [firstSuccess]: true })
               }
@@ -8124,7 +7997,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   </div>
                 )
               }
-              // 다른 task 추가 시 여기에 분기 추가
               return (
                 <pre style={{ fontSize: '12px', color: '#cbd5e1', background: 'rgba(0,0,0,0.30)', padding: '12px', borderRadius: '8px', overflow: 'auto', maxHeight: '400px', margin: 0 }}>
                   {JSON.stringify(plan, null, 2)}
@@ -8147,39 +8019,191 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     프로젝트 기획
                   </h2>
                   <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.55 }}>
-                    강사 정보 + 주제를 입력하면 여러 기획 항목을 한 번에 생성합니다. 현재 활성 항목은 무료 전자책 1개, 나머지는 준비 중.
+                    강사·기수를 선택하면 매칭된 자료를 자동으로 불러옵니다. 자료 추가 후 <b>기획 생성</b>을 누르면 선택 항목들이 한 번에 만들어집니다.
                   </p>
                 </div>
 
-                {/* 입력 폼 */}
-                <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '14px', padding: '20px', border: '1px solid var(--border)', marginBottom: '20px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                {/* ───── 1. 강사 / 기수 선택 ───── */}
+                <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '14px', padding: '20px', border: '1px solid var(--border)', marginBottom: '16px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '15px' }}>👤</span> 강사 / 기수 선택 <span style={{ fontSize: '11px', color: '#f87171', fontWeight: 500 }}>* 필수</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
+                    {/* 강사 */}
                     <div>
-                      <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>강사명 *</label>
-                      <input type="text" value={pp_instructor} onChange={(e) => setPpInstructor(e.target.value)} placeholder="예: 청담언니 루시"
-                        style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
+                      <label style={{ display: 'block', fontSize: '11px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>강사</label>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <select
+                          value={selectedInstructor}
+                          onChange={(e) => {
+                            setSelectedInstructor(e.target.value)
+                            const filtered = sessions.filter(s => s.instructors?.name === e.target.value)
+                              .sort((a, b) => getSessionNumber(a.session_name) - getSessionNumber(b.session_name))
+                            if (filtered.length > 0) {
+                              setSelectedSessionId(filtered[0].id)
+                            } else {
+                              setSelectedSessionId(null)
+                            }
+                          }}
+                          style={{ flex: 1, padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px' }}
+                        >
+                          <option value="" style={{ background: '#1e1e2e', color: '#fff' }}>강사 선택…</option>
+                          {instructorNames.map(name => (
+                            <option key={name} value={name} style={{ background: '#1e1e2e', color: '#fff' }}>{name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => { setAddType('instructor'); setShowAddModal(true) }}
+                          title="새 강사 추가"
+                          style={{ width: '38px', padding: 0, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '8px', color: '#c7d2fe', fontSize: '18px', cursor: 'pointer' }}
+                        >+</button>
+                      </div>
                     </div>
+                    {/* 기수 */}
                     <div>
-                      <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>강의/기수 (선택)</label>
-                      <input type="text" value={pp_sessionName} onChange={(e) => setPpSessionName(e.target.value)} placeholder="예: 유튜브 수익화 1기"
-                        style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
+                      <label style={{ display: 'block', fontSize: '11px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>기수</label>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <select
+                          value={selectedSessionId || ''}
+                          onChange={(e) => setSelectedSessionId(e.target.value || null)}
+                          disabled={!selectedInstructor}
+                          style={{ flex: 1, padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', opacity: selectedInstructor ? 1 : 0.5 }}
+                        >
+                          <option value="" style={{ background: '#1e1e2e', color: '#fff' }}>기수 선택…</option>
+                          {sessionsForInstructor.map(s => (
+                            <option key={s.id} value={s.id} style={{ background: '#1e1e2e', color: '#fff' }}>{s.session_name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!selectedInstructor) { alert('강사를 먼저 선택하세요.'); return }
+                            setAddType('session')
+                            const inst = instructors.find(i => i.name === selectedInstructor)
+                            if (inst) setNewSession(s => ({ ...s, instructor_id: inst.id }))
+                            setShowAddModal(true)
+                          }}
+                          title="새 기수 추가"
+                          disabled={!selectedInstructor}
+                          style={{ width: '38px', padding: 0, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '8px', color: '#c7d2fe', fontSize: '18px', cursor: selectedInstructor ? 'pointer' : 'not-allowed', opacity: selectedInstructor ? 1 : 0.5 }}
+                        >+</button>
+                      </div>
                     </div>
                   </div>
+                  {ready && (
+                    <div style={{ marginTop: '10px', fontSize: '12px', color: '#94a3b8' }}>
+                      현재 선택: <b style={{ color: '#a5b4fc' }}>{selectedInstructor}</b> · <b style={{ color: '#a5b4fc' }}>{currentSession?.session_name}</b>
+                      {' · '}매칭된 자료 <b style={{ color: '#fff' }}>{attachments.length}개</b>
+                    </div>
+                  )}
+                </div>
+
+                {/* ───── 2. 자료 업로드 ───── */}
+                <div
+                  style={{
+                    background: isDragging ? 'rgba(99,102,241,0.10)' : 'rgba(255,255,255,0.04)',
+                    border: isDragging ? '2px dashed rgba(99,102,241,0.55)' : '1px solid var(--border)',
+                    borderRadius: '14px',
+                    padding: '20px',
+                    marginBottom: '16px',
+                    transition: 'background 0.15s ease, border-color 0.15s ease',
+                  }}
+                  onDragOver={ready ? handleDragOver : undefined}
+                  onDragLeave={ready ? handleDragLeave : undefined}
+                  onDrop={ready ? handleDrop : undefined}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '15px' }}>📎</span> 자료 (파일 / 링크)
+                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 강사·기수에 매칭되어 DB에 저장</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple style={{ display: 'none' }} />
+                      <input type="file" ref={folderInputRef} onChange={handleFileUpload} webkitdirectory="" directory="" multiple style={{ display: 'none' }} />
+                      <button onClick={() => fileInputRef.current?.click()} disabled={!ready || fileUploading}
+                        style={{ padding: '7px 12px', background: 'var(--accent-grad)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5 }}>
+                        {fileUploading ? '업로드 중…' : '📁 파일'}
+                      </button>
+                      <button onClick={() => folderInputRef.current?.click()} disabled={!ready || fileUploading}
+                        style={{ padding: '7px 12px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '8px', color: '#c7d2fe', fontSize: '12px', fontWeight: 600, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5 }}>
+                        📂 폴더
+                      </button>
+                      <button onClick={() => setShowFileModal(true)} disabled={!ready}
+                        style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '12px', fontWeight: 600, cursor: ready ? 'pointer' : 'not-allowed', opacity: ready ? 1 : 0.5 }}>
+                        🔗 링크
+                      </button>
+                    </div>
+                  </div>
+
+                  {!ready && (
+                    <div style={{ padding: '14px', background: 'rgba(0,0,0,0.20)', borderRadius: '8px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
+                      강사·기수를 먼저 선택해야 자료 업로드가 가능합니다.
+                    </div>
+                  )}
+
+                  {ready && isDragging && (
+                    <div style={{ padding: '40px', textAlign: 'center', color: '#a5b4fc', fontSize: '13px' }}>
+                      📥 여기에 파일 또는 폴더를 놓으세요
+                    </div>
+                  )}
+
+                  {ready && !isDragging && attachments.length === 0 && (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontSize: '12px', border: '2px dashed rgba(255,255,255,0.10)', borderRadius: '10px' }}>
+                      자료가 없습니다. 파일을 드래그하거나 위 버튼으로 추가하세요.
+                    </div>
+                  )}
+
+                  {ready && !isDragging && attachments.length > 0 && (
+                    <>
+                      <div style={{ marginBottom: '8px', fontSize: '11px', color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>총 <b style={{ color: '#fff' }}>{attachments.length}</b>개</span>
+                        <button onClick={deleteAllAttachments} style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.30)', color: '#f87171', fontSize: '11px', padding: '4px 8px', borderRadius: '6px', cursor: 'pointer' }}>전체 삭제</button>
+                      </div>
+                      <div style={{ background: 'rgba(0,0,0,0.20)', borderRadius: '8px', maxHeight: '260px', overflowY: 'auto' }}>
+                        {attachments.map((file, idx) => {
+                          const tagColor = file.session_id ? '#a5b4fc' : '#94a3b8'
+                          const tagBg = file.session_id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)'
+                          return (
+                            <div key={file.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: idx < attachments.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', gap: '8px' }}>
+                              <span style={{ fontSize: '14px' }}>{getFileIcon(file.file_type)}</span>
+                              <span style={{ fontSize: '10px', padding: '2px 6px', background: tagBg, color: tagColor, borderRadius: '4px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                {file.session_id ? '기수전용' : '강사공통'}
+                              </span>
+                              <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, color: file.file_type === 'link' ? '#a5b4fc' : '#e2e8f0', fontSize: '12px', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {file.file_name}
+                              </a>
+                              <span style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                                {file.file_type === 'link' ? '링크' : formatFileSize(file.file_size)}
+                              </span>
+                              <button onClick={() => deleteAttachment(file.id)} style={{ background: 'none', border: 'none', color: '#f87171', fontSize: '12px', cursor: 'pointer', padding: '2px 6px' }} title="삭제">✕</button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* ───── 3. 주제 / 추가 컨텍스트 / 항목 / 생성 ───── */}
+                <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '14px', padding: '20px', border: '1px solid var(--border)', marginBottom: '16px' }}>
                   <div style={{ marginBottom: '14px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>주제 *</label>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
+                      주제 <span style={{ color: '#f87171' }}>*</span>
+                    </label>
                     <input type="text" value={pp_topic} onChange={(e) => setPpTopic(e.target.value)} placeholder="예: AI 활용 유튜브 수익화"
                       style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
                   </div>
+
                   <div style={{ marginBottom: '14px' }}>
                     <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
-                      추가 컨텍스트 (선택) <span style={{ color: '#64748b', fontSize: '11px', marginLeft: '6px' }}>· 미팅 메모, 강사 톤 샘플, 차별화 포인트 등 자유 기재</span>
+                      추가 컨텍스트 (선택) <span style={{ color: '#64748b', fontSize: '11px', marginLeft: '6px' }}>· 위 첨부 자료에 더해 자유 기재</span>
                     </label>
                     <textarea value={pp_additionalContext} onChange={(e) => setPpAdditionalContext(e.target.value)} rows={4}
                       placeholder="예: 강사 본인이 월 2,500만원 수익화 경험. LUCY AI Studio 보유. 캐치프레이즈는 '설계가 답이다'."
                       style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }} />
                   </div>
 
-                  {/* 항목 체크박스 */}
                   <div style={{ marginBottom: '14px' }}>
                     <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: 500 }}>생성할 항목</label>
                     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '8px' }}>
@@ -8212,18 +8236,18 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     </div>
                   </div>
 
-                  <button onClick={handleGenerate} disabled={pp_loading}
+                  <button onClick={handleGenerate} disabled={pp_loading || !ready}
                     style={{
                       width: '100%', padding: '14px',
-                      background: pp_loading ? 'rgba(99,102,241,0.20)' : 'var(--accent-grad)',
+                      background: (pp_loading || !ready) ? 'rgba(99,102,241,0.20)' : 'var(--accent-grad)',
                       border: 'none', borderRadius: '10px',
                       color: '#fff', fontSize: '15px', fontWeight: 700,
-                      cursor: pp_loading ? 'wait' : 'pointer',
-                      boxShadow: pp_loading ? 'none' : '0 8px 18px rgba(99,102,241,0.30)',
+                      cursor: pp_loading ? 'wait' : (ready ? 'pointer' : 'not-allowed'),
+                      boxShadow: (pp_loading || !ready) ? 'none' : '0 8px 18px rgba(99,102,241,0.30)',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
                     }}>
                     <Wand2 size={16} />
-                    {pp_loading ? '생성 중…' : `🪄 기획 생성 (${pp_enabledTasks.length}개 항목)`}
+                    {pp_loading ? '생성 중…' : (ready ? `🪄 기획 생성 (${pp_enabledTasks.length}개 항목)` : '강사·기수 선택 필요')}
                   </button>
 
                   {pp_error && (
@@ -8231,7 +8255,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   )}
                 </div>
 
-                {/* 결과 */}
+                {/* ───── 결과 ───── */}
                 {pp_results && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {Object.entries(pp_results).map(([taskKey, r]) => {

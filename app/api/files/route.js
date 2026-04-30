@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { verifyApiAuth } from '@/lib/apiAuth'
 
-// 파일 목록 조회 (강사별)
+// 파일 목록 조회
+//   - instructor_id 필수
+//   - session_id 선택: 주어지면 그 기수 + 기수 무관(NULL) 자료 모두 반환 (강사 공통 + 기수 전용)
+//   - session_id 미지정: 강사의 모든 자료 (기수 무관)
 export async function GET(request) {
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
@@ -11,16 +14,24 @@ export async function GET(request) {
 
   const { searchParams } = new URL(request.url)
   const instructorId = searchParams.get('instructor_id')
+  const sessionId = searchParams.get('session_id')
 
   if (!instructorId) {
     return NextResponse.json({ error: 'instructor_id 필요' }, { status: 400 })
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('instructor_attachments')
     .select('*')
     .eq('instructor_id', instructorId)
     .order('created_at', { ascending: false })
+
+  if (sessionId) {
+    // 그 기수 자료 + 강사 공통(session_id NULL)
+    query = query.or(`session_id.eq.${sessionId},session_id.is.null`)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -40,6 +51,8 @@ export async function POST(request) {
     const formData = await request.formData()
     const file = formData.get('file')
     const instructorId = formData.get('instructor_id')
+    const sessionIdRaw = formData.get('session_id')
+    const sessionId = sessionIdRaw && String(sessionIdRaw).trim() ? String(sessionIdRaw).trim() : null
     const fileType = formData.get('file_type') // file, link, text
     const linkUrl = formData.get('link_url')
     const linkTitle = formData.get('link_title')
@@ -55,6 +68,7 @@ export async function POST(request) {
         .from('instructor_attachments')
         .insert({
           instructor_id: instructorId,
+          session_id: sessionId,
           file_type: 'link',
           file_name: linkTitle || linkUrl,
           file_url: linkUrl,
@@ -146,6 +160,7 @@ export async function POST(request) {
       .from('instructor_attachments')
       .insert({
         instructor_id: instructorId,
+        session_id: sessionId,
         file_type: category,
         file_name: fileName,
         file_url: urlData.publicUrl,
