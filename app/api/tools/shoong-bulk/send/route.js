@@ -187,9 +187,19 @@ export async function POST(request) {
     let sent = 0, failed = 0
     const errors = []
 
+    // 예약 발송 시 sendType을 'as'로 + KST 포맷 reserveDt도 함께 전송 (슝 키 호환)
+    let reservedFields = null
+    if (reservedTime) {
+      const d = new Date(reservedTime)
+      const pad = (n) => String(n).padStart(2, '0')
+      const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+      const kstCompact = `${kst.getUTCFullYear()}${pad(kst.getUTCMonth()+1)}${pad(kst.getUTCDate())}${pad(kst.getUTCHours())}${pad(kst.getUTCMinutes())}${pad(kst.getUTCSeconds())}`
+      reservedFields = { reservedTime, reserveDt: kstCompact }
+    }
+
     const sendOne = async (r) => {
       const payload = {
-        sendType: 'at',
+        sendType: reservedFields ? 'as' : 'at',
         phone: r.phone,
         'channelConfig.senderkey': finalSenderKey,
         'channelConfig.templatecode': templatecode
@@ -198,7 +208,7 @@ export async function POST(request) {
       for (const v of tplVars) {
         payload[`variables.${v}`] = v === '고객명' ? r.name : trimmedVars[v]
       }
-      if (reservedTime) payload.reservedTime = reservedTime
+      if (reservedFields) Object.assign(payload, reservedFields)
 
       try {
         const res = await fetch(SHOONG_ENDPOINT, {
