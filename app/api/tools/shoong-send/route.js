@@ -2,17 +2,18 @@ import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 
 // 슝(Shoong) 알림톡 발송 API 프록시.
-// 클라이언트가 보낸 9개 필수 파라미터를 받아 슝 API로 그대로 전달한다.
-// 슝은 IP 화이트리스트로만 호출을 받기 때문에 Vercel에서 호출하면 403 가능성이 높음.
-// 그 경우엔 브라우저 직접 호출 모드를 써야 함.
+// 템플릿별 변수가 다르므로 templatecode에 따라 검증/필터링.
+// reservedTime이 오면 예약발송으로 그대로 forward.
 const SHOONG_ENDPOINT = 'https://api.shoong.kr/send'
 
-const REQUIRED_FIELDS = [
-  'sendType', 'phone',
-  'channelConfig.senderkey', 'channelConfig.templatecode',
-  'variables.고객명', 'variables.유튜브링크',
-  'variables.강좌명', 'variables.강사님', 'variables.링크명'
-]
+// 모든 템플릿이 버튼 라벨로 #{링크명} 사용 — 누락 시 슝이 "미치환 변수" 에러
+const TEMPLATE_VARS = {
+  'start(1)': ['고객명', '유튜브링크', '강좌명', '강사명', '링크명'],
+  'start(2)': ['고객명', '유튜브링크', '강좌명', '강사님', '링크명'],
+  'start(3)': ['고객명', '시청자수', '유튜브링크', '강좌명', '강사님', '링크명']
+}
+
+const COMMON_REQUIRED = ['sendType', 'phone', 'channelConfig.senderkey', 'channelConfig.templatecode']
 
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
@@ -23,8 +24,24 @@ export async function POST(request) {
   try {
     const body = await request.json()
 
-    // 9개 필수 필드 검증
-    const missing = REQUIRED_FIELDS.filter(f => {
+    // 발신프로필키는 비어있으면 서버 env 값으로 fallback
+    if (!body['channelConfig.senderkey']) {
+      const envSenderKey = process.env.SHOONG_SENDER_KEY
+      if (envSenderKey) body['channelConfig.senderkey'] = envSenderKey
+    }
+
+    const tplCode = body['channelConfig.templatecode']
+    const tplVars = TEMPLATE_VARS[tplCode]
+    if (!tplVars) {
+      return NextResponse.json({
+        error: `지원하지 않는 templatecode: ${tplCode}. (지원: ${Object.keys(TEMPLATE_VARS).join(', ')})`
+      }, { status: 400 })
+    }
+
+    // 공통 필드 + 템플릿별 변수 모두 채워졌는지 검증
+    const requiredVarKeys = tplVars.map(v => `variables.${v}`)
+    const requiredAll = [...COMMON_REQUIRED, ...requiredVarKeys]
+    const missing = requiredAll.filter(f => {
       const v = body[f]
       return v === undefined || v === null || (typeof v === 'string' && v.length === 0)
     })
@@ -42,9 +59,13 @@ export async function POST(request) {
       }, { status: 500 })
     }
 
-    // 슝 요청: 도트 표기 키를 그대로 보내야 함 ('channelConfig.senderkey' 등)
+    // 슝으로 보낼 페이로드 구성: 공통 필드 + 템플릿 변수 + (옵션) reservedTime
     const payload = {}
-    for (const k of REQUIRED_FIELDS) payload[k] = body[k]
+    for (const k of requiredAll) payload[k] = body[k]
+    if (body.reservedTime) {
+      // ISO 8601 문자열 그대로 forward (슝이 받는 형식)
+      payload.reservedTime = body.reservedTime
+    }
 
     const res = await fetch(SHOONG_ENDPOINT, {
       method: 'POST',
@@ -64,7 +85,8 @@ export async function POST(request) {
       via: 'vercel-server',
       httpStatus: status,
       ok: res.ok,
-      response: parsed
+      response: parsed,
+      sentPayload: payload
     }, { status: 200 })
 
   } catch (error) {

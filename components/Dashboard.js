@@ -156,6 +156,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [kakaoCommitResult, setKakaoCommitResult] = useState(null)
 
   // 슝(Shoong) 알림톡 발송 테스트 상태
+  // 템플릿별 변수는 TEMPLATE_VARS에서 정의 (start(1)은 '강사명', start(2)/(3)은 '강사님', start(3)만 '시청자수' 추가)
   const [shoongForm, setShoongForm] = useState({
     sendType: 'at',
     phone: '',
@@ -165,12 +166,41 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     'variables.유튜브링크': '',
     'variables.강좌명': '',
     'variables.강사님': '',
-    'variables.링크명': ''
+    'variables.강사명': '',
+    'variables.시청자수': ''
   })
+  const [shoongSendMode, setShoongSendMode] = useState('immediate') // 'immediate' | 'reserved'
+  const [shoongReservedAt, setShoongReservedAt] = useState('') // datetime-local 값 (YYYY-MM-DDTHH:mm)
+
+  // 슝 페이로드 빌더: 템플릿별 변수만 추리고 예약발송 시 reservedTime 추가
+  // 슝 템플릿별 변수 슬롯 (실제 카카오 검수에 등록된 변수 기준)
+  // 모든 템플릿이 버튼 라벨로 #{링크명}을 사용함 — 본문엔 안 보이지만 누락 시 "미치환 변수" 에러
+  const SHOONG_TEMPLATE_VARS = {
+    'start(1)': ['고객명', '유튜브링크', '강좌명', '강사명', '링크명'],
+    'start(2)': ['고객명', '유튜브링크', '강좌명', '강사님', '링크명'],
+    'start(3)': ['고객명', '시청자수', '유튜브링크', '강좌명', '강사님', '링크명']
+  }
+  const buildShoongPayload = () => {
+    const tplCode = shoongForm['channelConfig.templatecode'] || 'start(2)'
+    const tplVars = SHOONG_TEMPLATE_VARS[tplCode] || []
+    const payload = {
+      sendType: shoongForm.sendType,
+      phone: shoongForm.phone,
+      'channelConfig.senderkey': shoongForm['channelConfig.senderkey'],
+      'channelConfig.templatecode': tplCode
+    }
+    for (const v of tplVars) payload[`variables.${v}`] = shoongForm[`variables.${v}`] || ''
+    if (shoongSendMode === 'reserved' && shoongReservedAt) {
+      // datetime-local → ISO 8601 (브라우저 로컬 → UTC)
+      payload.reservedTime = new Date(shoongReservedAt).toISOString()
+    }
+    return payload
+  }
   const [shoongApiKey, setShoongApiKey] = useState('') // 브라우저 직접 모드용 (개발자 도구 발급)
   const [shoongSending, setShoongSending] = useState(false)
   const [shoongResult, setShoongResult] = useState(null)
   const [shoongCurlCopied, setShoongCurlCopied] = useState(false)
+  const [shoongDefaultsLoaded, setShoongDefaultsLoaded] = useState(false)
 
   // 주문 동기화(nlab DB / CSV → 결제자 시트 append) 상태
   const [orderSyncMode, setOrderSyncMode] = useState('supabase') // 'supabase' | 'csv'
@@ -758,6 +788,29 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       setCurrentTool('crm')
     }
   }, [permissions.canUseInflow])
+
+  // 슝 툴 진입 시 서버 .env 기본값(SHOONG_API_KEY, SHOONG_SENDER_KEY) 로드해서 폼/curl 자동 채움
+  useEffect(() => {
+    if (currentTool !== 'shoong' || shoongDefaultsLoaded) return
+    const token = localStorage.getItem('authToken')
+    if (!token) return
+    fetch('/api/tools/shoong-send/defaults', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return
+        if (data.apiKey) setShoongApiKey(prev => prev || data.apiKey)
+        if (data.senderKey) {
+          setShoongForm(prev => ({
+            ...prev,
+            'channelConfig.senderkey': prev['channelConfig.senderkey'] || data.senderKey
+          }))
+        }
+        setShoongDefaultsLoaded(true)
+      })
+      .catch(() => {})
+  }, [currentTool, shoongDefaultsLoaded])
 
   // 유튜브 채팅 수집 중 페이지 이탈 방지
   useEffect(() => {
@@ -4902,19 +4955,31 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     📝 <b>API 키</b>: Vercel 서버 모드는 <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: '3px' }}>SHOONG_API_KEY</code> env에서 읽고, 브라우저 직접 모드는 아래 입력란 키를 사용합니다.
                   </div>
 
-                  {/* 입력 폼: 9개 필드 */}
+                  {/* 입력 폼: 공통 4개 + 선택된 템플릿의 변수만 동적 렌더 */}
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
-                    {[
-                      { key: 'sendType', label: '발송 타입 (sendType)', placeholder: 'at', help: '알림톡=at' },
-                      { key: 'phone', label: '수신자 전화번호 (phone)', placeholder: '01012345678', help: '하이픈 없이' },
-                      { key: 'channelConfig.senderkey', label: '발신프로필 키 (senderkey)', placeholder: '047b27bbbae51190fadfe9932fe5ce424e86ec83', help: '슝 발신프로필 키' },
-                      { key: 'channelConfig.templatecode', label: '템플릿 코드 (templatecode)', placeholder: 'start(2)', help: 'start(1)/(2)/(3) 등', preset: ['start(1)', 'start(2)', 'start(3)'] },
-                      { key: 'variables.고객명', label: '변수: 고객명', placeholder: '홍길동' },
-                      { key: 'variables.유튜브링크', label: '변수: 유튜브링크', placeholder: 'https://youtu.be/...' },
-                      { key: 'variables.강좌명', label: '변수: 강좌명', placeholder: '예: AI 활용 컨텐츠 부업' },
-                      { key: 'variables.강사님', label: '변수: 강사님', placeholder: '예: 씨오' },
-                      { key: 'variables.링크명', label: '변수: 링크명', placeholder: '클릭' }
-                    ].map(field => (
+                    {(() => {
+                      // 템플릿별 변수 슬롯 정의 (실제 카카오 검수 통과한 변수명과 정확히 일치해야 함)
+                      const TEMPLATE_VARS = {
+                        'start(1)': ['고객명', '유튜브링크', '강좌명', '강사명', '링크명'],
+                        'start(2)': ['고객명', '유튜브링크', '강좌명', '강사님', '링크명'],
+                        'start(3)': ['고객명', '시청자수', '유튜브링크', '강좌명', '강사님', '링크명']
+                      }
+                      const tplCode = shoongForm['channelConfig.templatecode'] || 'start(2)'
+                      const tplVars = TEMPLATE_VARS[tplCode] || []
+                      const fields = [
+                        { key: 'sendType', label: '발송 타입 (sendType)', placeholder: 'at', help: '알림톡=at' },
+                        { key: 'phone', label: '수신자 전화번호 (phone)', placeholder: '01012345678', help: '하이픈 없이' },
+                        { key: 'channelConfig.senderkey', label: '발신프로필 키 (senderkey)', placeholder: '비우면 서버 .env의 SHOONG_SENDER_KEY 사용', help: '비워두면 서버 기본값 자동 적용' },
+                        { key: 'channelConfig.templatecode', label: '템플릿 코드 (templatecode)', placeholder: 'start(2)', help: '템플릿마다 변수 다름', preset: ['start(1)', 'start(2)', 'start(3)'] },
+                        ...tplVars.map(v => ({
+                          key: `variables.${v}`,
+                          label: `변수: ${v}`,
+                          placeholder: v === '유튜브링크' ? 'https://youtu.be/...' : v === '강좌명' ? '예: AI활용 컨텐츠 부업' : v === '시청자수' ? '예: 320' : v === '강사명' || v === '강사님' ? '예: 씨오' : v === '링크명' ? '버튼 라벨 (예: 입장하기)' : '홍길동',
+                          help: tplCode === 'start(1)' && v === '강사명' ? '⚠️ start(1)은 \'강사명\'(님 X)' : ''
+                        }))
+                      ]
+                      return fields
+                    })().map(field => (
                       <div key={field.key}>
                         <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
                           {field.label}
@@ -4966,6 +5031,21 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
                       🔑 슝 API 키 (브라우저 / curl 모드용)
                       <span style={{ color: '#64748b', marginLeft: '6px', fontSize: '11px' }}>· Bearer 뒤에 붙는 ak_xxxx 키</span>
+                      {shoongDefaultsLoaded && (
+                        <span style={{
+                          marginLeft: '8px',
+                          fontSize: '11px',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          background: shoongApiKey ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                          color: shoongApiKey ? '#34d399' : '#f87171',
+                          border: `1px solid ${shoongApiKey ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`
+                        }}>
+                          {shoongApiKey
+                            ? `✅ env 자동로드 (${shoongApiKey.length}자, ${shoongApiKey.slice(0, 3)}...${shoongApiKey.slice(-4)})`
+                            : '⚠️ SHOONG_API_KEY env 비어있음'}
+                        </span>
+                      )}
                     </label>
                     <input
                       type="password"
@@ -4989,6 +5069,59 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     </p>
                   </div>
 
+                  {/* 즉시발송 / 예약발송 토글 */}
+                  <div style={{ marginBottom: '20px', padding: '14px 16px', background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: '10px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: '500' }}>
+                      📅 발송 시점
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: shoongSendMode === 'reserved' ? '10px' : 0 }}>
+                      {[
+                        { v: 'immediate', label: '⚡ 즉시발송' },
+                        { v: 'reserved', label: '⏰ 예약발송' }
+                      ].map(opt => (
+                        <button
+                          key={opt.v}
+                          type="button"
+                          onClick={() => setShoongSendMode(opt.v)}
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            background: shoongSendMode === opt.v ? 'linear-gradient(135deg, #a855f7, #6366f1)' : 'rgba(255,255,255,0.04)',
+                            border: '1px solid ' + (shoongSendMode === opt.v ? 'transparent' : 'rgba(255,255,255,0.12)'),
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px',
+                            fontWeight: shoongSendMode === opt.v ? '600' : '500',
+                            cursor: 'pointer'
+                          }}
+                        >{opt.label}</button>
+                      ))}
+                    </div>
+                    {shoongSendMode === 'reserved' && (
+                      <div>
+                        <input
+                          type="datetime-local"
+                          value={shoongReservedAt}
+                          onChange={(e) => setShoongReservedAt(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '9px 12px',
+                            background: 'rgba(0,0,0,0.35)',
+                            border: '1px solid rgba(168,85,247,0.3)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px',
+                            boxSizing: 'border-box',
+                            colorScheme: 'dark'
+                          }}
+                        />
+                        <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
+                          현재 시각보다 미래여야 함. 슝 서버에 ISO 시각으로 전송됨 (<code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: '3px' }}>reservedTime</code>).
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
                   {/* 발송 버튼 3개 */}
                   <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
                     {/* Vercel 서버 발송 */}
@@ -4999,8 +5132,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         try {
                           const res = await fetch('/api/tools/shoong-send', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(shoongForm)
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+                            },
+                            body: JSON.stringify(buildShoongPayload())
                           })
                           const data = await res.json()
                           setShoongResult({ mode: '🖥️ Vercel 서버', httpStatus: res.status, ...data })
@@ -5024,7 +5160,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       }}
                     >
                       🖥️ Vercel 서버에서 발송
-                      <div style={{ fontSize: '10px', opacity: 0.85, marginTop: '2px', fontWeight: '400' }}>예상: 403 (Vercel IP 미등록 시)</div>
+                      <div style={{ fontSize: '10px', opacity: 0.85, marginTop: '2px', fontWeight: '400' }}>권장 · 어디서 눌러도 동일 동작</div>
                     </button>
 
                     {/* 브라우저 직접 발송 */}
@@ -5043,7 +5179,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               'Content-Type': 'application/json',
                               'Authorization': `Bearer ${shoongApiKey}`
                             },
-                            body: JSON.stringify(shoongForm)
+                            body: JSON.stringify(buildShoongPayload())
                           })
                           const text = await res.text()
                           let parsed; try { parsed = JSON.parse(text) } catch { parsed = { raw: text } }
@@ -5085,11 +5221,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     <button
                       onClick={() => {
                         const apiKeyForCurl = shoongApiKey || 'ak_YOUR_KEY'
-                        const payload = JSON.stringify(shoongForm)
-                        const curl = `curl -X POST 'https://api.shoong.kr/send' \\
-  -H 'Content-Type: application/json' \\
-  -H 'Authorization: Bearer ${apiKeyForCurl}' \\
-  -d '${payload.replace(/'/g, "'\\''")}'`
+                        // Windows cmd 호환: 한 줄 + JSON 내부 큰따옴표를 \" 로 이스케이프, 전체는 큰따옴표로 감쌈
+                        const payloadEscaped = JSON.stringify(buildShoongPayload()).replace(/"/g, '\\"')
+                        const curl = `curl -X POST https://api.shoong.kr/send -H "Content-Type: application/json" -H "Authorization: Bearer ${apiKeyForCurl}" -d "${payloadEscaped}"`
                         navigator.clipboard.writeText(curl)
                         setShoongCurlCopied(true)
                         setTimeout(() => setShoongCurlCopied(false), 2000)
