@@ -80,20 +80,20 @@ export default function Home() {
         stopTitleBlink()
         setShowExpiryModal(false)
         setCountdown(60)
-        // 새로운 29분 타이머 시작
+        // 새로운 119분 타이머 시작 (총 세션 2시간 - 마지막 1분 카운트다운)
         sessionStartRef.current = Date.now()
         startExpiryTimer()
       }
     }
   }, [stopTitleBlink])
 
-  // 29분 후 모달 표시 타이머 시작
+  // 119분 후 모달 표시 타이머 시작 (총 세션 2시간 - 마지막 1분 카운트다운)
   const startExpiryTimer = useCallback(() => {
     // 기존 타이머 클리어
     if (expiryTimerRef.current) clearTimeout(expiryTimerRef.current)
     if (countdownRef.current) clearInterval(countdownRef.current)
 
-    // 29분 후 모달 표시
+    // 119분 후 모달 표시
     expiryTimerRef.current = setTimeout(() => {
       // 탭 제목 깜빡이기 시작 (다른 탭에서도 보임)
       startTitleBlink()
@@ -117,7 +117,7 @@ export default function Home() {
           return prev - 1
         })
       }, 1000)
-    }, 29 * 60 * 1000) // 29분
+    }, 119 * 60 * 1000) // 119분
   }, [sendBrowserNotification, startTitleBlink, stopTitleBlink])
 
   useEffect(() => {
@@ -340,7 +340,7 @@ export default function Home() {
                   transition: 'all 0.2s'
                 }}
               >
-                30분 연장
+                2시간 연장
               </button>
             </div>
           </div>
