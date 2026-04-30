@@ -68,8 +68,14 @@ export async function POST(request) {
     const payload = {}
     for (const k of requiredAll) payload[k] = body[k]
     if (body.reservedTime) {
-      // ISO 8601 문자열 그대로 forward (슝이 받는 형식)
-      payload.reservedTime = body.reservedTime
+      // 슝이 'reservedTime' 키를 무시하고 즉시 발송 처리하는 게 확인됨 (어드민에 '즉시발송'으로 기록).
+      // 정확한 필드명을 모르므로 가장 흔한 후보 4개를 동시에 전송 → Zod가 모르는 필드는 알아서 스트립.
+      // 이 중 하나가 매칭되면 예약발송으로 잡힘.
+      const iso = body.reservedTime
+      payload.reservedTime = iso
+      payload.reservedAt = iso
+      payload.reserveTime = iso
+      payload.scheduledAt = iso
     }
 
     const res = await fetch(SHOONG_ENDPOINT, {

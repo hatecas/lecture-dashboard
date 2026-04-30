@@ -187,6 +187,7 @@ export async function POST(request) {
     let sent = 0, failed = 0
     const errors = []
 
+    // 슝 sendType enum에 'as' 없음 → 'at' 유지 + reservedTime ISO만 전달
     const sendOne = async (r) => {
       const payload = {
         sendType: 'at',
@@ -198,7 +199,13 @@ export async function POST(request) {
       for (const v of tplVars) {
         payload[`variables.${v}`] = v === '고객명' ? r.name : trimmedVars[v]
       }
-      if (reservedTime) payload.reservedTime = reservedTime
+      if (reservedTime) {
+        // 'reservedTime'은 슝이 무시했으므로 후보 키 4개 동시 전송. Zod가 모르는 키는 스트립.
+        payload.reservedTime = reservedTime
+        payload.reservedAt = reservedTime
+        payload.reserveTime = reservedTime
+        payload.scheduledAt = reservedTime
+      }
 
       try {
         const res = await fetch(SHOONG_ENDPOINT, {

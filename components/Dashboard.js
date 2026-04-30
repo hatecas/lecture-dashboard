@@ -5437,24 +5437,47 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       const allSelected = shoongBulkCourses.length > 0 && shoongBulkSelectedIds.length === shoongBulkCourses.length
                       return (
                         <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.25)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', fontSize: '12px', color: '#cbd5e1' }}>
-                            <span>
-                              검색 결과: <b style={{ color: '#fff' }}>{shoongBulkCourses.length}개 강의</b> ·
-                              선택 <b style={{ color: '#a78bfa' }}>{selectedCount}개</b> ·
-                              예상 수신자 <b style={{ color: '#34d399' }}>{totalApplicants.toLocaleString()}명</b>
-                              <span style={{ color: '#64748b', marginLeft: '6px' }}>(중복 번호는 발송 시 1회만)</span>
-                            </span>
+                          {/* 전체 선택/해제 버튼 (큼직하게, 상단 별도 줄) */}
+                          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
                             <button
                               type="button"
-                              onClick={() => setShoongBulkSelectedIds(allSelected ? [] : shoongBulkCourses.map(c => c.id))}
+                              onClick={() => setShoongBulkSelectedIds(shoongBulkCourses.map(c => c.id))}
+                              disabled={allSelected}
                               style={{
-                                padding: '4px 10px', background: 'rgba(139,92,246,0.2)',
-                                border: '1px solid rgba(139,92,246,0.4)', borderRadius: '6px',
-                                color: '#c4b5fd', fontSize: '11px', cursor: 'pointer'
+                                flex: 1, padding: '8px 12px',
+                                background: allSelected ? 'rgba(139,92,246,0.1)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                border: '1px solid rgba(139,92,246,0.4)', borderRadius: '8px',
+                                color: allSelected ? '#64748b' : '#fff',
+                                fontSize: '12px', fontWeight: '600',
+                                cursor: allSelected ? 'not-allowed' : 'pointer',
+                                opacity: allSelected ? 0.5 : 1
                               }}
                             >
-                              {allSelected ? '전체 해제' : '전체 선택'}
+                              ✅ 전체 선택 ({shoongBulkCourses.length}개)
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setShoongBulkSelectedIds([])}
+                              disabled={selectedCount === 0}
+                              style={{
+                                flex: 1, padding: '8px 12px',
+                                background: selectedCount === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(239,68,68,0.15)',
+                                border: `1px solid ${selectedCount === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(239,68,68,0.4)'}`,
+                                borderRadius: '8px',
+                                color: selectedCount === 0 ? '#64748b' : '#fca5a5',
+                                fontSize: '12px', fontWeight: '600',
+                                cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+                                opacity: selectedCount === 0 ? 0.5 : 1
+                              }}
+                            >
+                              ❌ 전체 해제
+                            </button>
+                          </div>
+                          <div style={{ marginBottom: '10px', fontSize: '12px', color: '#cbd5e1' }}>
+                            검색 결과: <b style={{ color: '#fff' }}>{shoongBulkCourses.length}개 강의</b> ·
+                            선택 <b style={{ color: '#a78bfa' }}>{selectedCount}개</b> ·
+                            예상 수신자 <b style={{ color: '#34d399' }}>{totalApplicants.toLocaleString()}명</b>
+                            <span style={{ color: '#64748b', marginLeft: '6px' }}>(중복 번호는 발송 시 1회만)</span>
                           </div>
                           <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {shoongBulkCourses.map(c => {
@@ -5561,41 +5584,122 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           </div>
 
                           {/* 즉시/예약 토글 */}
-                          <div style={{ marginBottom: '14px' }}>
-                            <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
-                              ⏰ 발송 시간
-                            </label>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                              {['immediate', 'reserved'].map(m => (
-                                <button
-                                  key={m}
-                                  type="button"
-                                  onClick={() => setShoongBulkSendMode(m)}
-                                  style={{
-                                    padding: '6px 12px',
-                                    background: shoongBulkSendMode === m ? 'rgba(139,92,246,0.3)' : 'rgba(255,255,255,0.05)',
-                                    border: `1px solid ${shoongBulkSendMode === m ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.1)'}`,
-                                    borderRadius: '7px',
-                                    color: shoongBulkSendMode === m ? '#fff' : '#94a3b8',
-                                    fontSize: '12px', cursor: 'pointer'
-                                  }}
-                                >{m === 'immediate' ? '즉시' : '예약'}</button>
-                              ))}
-                              {shoongBulkSendMode === 'reserved' && (
-                                <input
-                                  type="datetime-local"
-                                  value={shoongBulkReservedAt}
-                                  onChange={(e) => setShoongBulkReservedAt(e.target.value)}
-                                  style={{
-                                    padding: '6px 10px',
-                                    background: 'rgba(0,0,0,0.35)',
-                                    border: '1px solid rgba(99,102,241,0.3)',
-                                    borderRadius: '7px', color: '#fff', fontSize: '12px', marginLeft: '8px'
-                                  }}
-                                />
-                              )}
-                            </div>
-                          </div>
+                          {(() => {
+                            // datetime-local 입력은 로컬 타임존 기준 "YYYY-MM-DDTHH:mm"을 받음.
+                            const toLocalInputValue = (date) => {
+                              const pad = (n) => String(n).padStart(2, '0')
+                              return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+                            }
+                            const now = new Date()
+                            const minLead = new Date(now.getTime() + 5 * 60 * 1000) // 기본 +5분으로 채움
+                            const reservedDate = shoongBulkReservedAt ? new Date(shoongBulkReservedAt) : null
+                            const leadMinutes = reservedDate ? Math.round((reservedDate.getTime() - now.getTime()) / 60000) : null
+                            // 알림톡은 1분 후 예약도 보통 잘 잡힘. 0분 이하만 경고.
+                            const tooSoon = reservedDate && leadMinutes < 1 && leadMinutes >= 0
+                            const inPast = reservedDate && leadMinutes < 0
+
+                            const presets = [
+                              { label: '+10분', mins: 10 },
+                              { label: '+30분', mins: 30 },
+                              { label: '+1시간', mins: 60 },
+                              { label: '내일 오전 9시', custom: () => { const d = new Date(); d.setDate(d.getDate()+1); d.setHours(9,0,0,0); return d } },
+                              { label: '내일 오후 6시', custom: () => { const d = new Date(); d.setDate(d.getDate()+1); d.setHours(18,0,0,0); return d } }
+                            ]
+
+                            return (
+                              <div style={{ marginBottom: '14px' }}>
+                                <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
+                                  ⏰ 발송 시간
+                                </label>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                  {['immediate', 'reserved'].map(m => (
+                                    <button
+                                      key={m}
+                                      type="button"
+                                      onClick={() => {
+                                        setShoongBulkSendMode(m)
+                                        // 예약 모드 진입 시 비어있으면 +10분으로 자동 세팅
+                                        if (m === 'reserved' && !shoongBulkReservedAt) {
+                                          setShoongBulkReservedAt(toLocalInputValue(minLead))
+                                        }
+                                      }}
+                                      style={{
+                                        padding: '6px 12px',
+                                        background: shoongBulkSendMode === m ? 'rgba(139,92,246,0.3)' : 'rgba(255,255,255,0.05)',
+                                        border: `1px solid ${shoongBulkSendMode === m ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                                        borderRadius: '7px',
+                                        color: shoongBulkSendMode === m ? '#fff' : '#94a3b8',
+                                        fontSize: '12px', cursor: 'pointer'
+                                      }}
+                                    >{m === 'immediate' ? '즉시' : '예약'}</button>
+                                  ))}
+                                  {shoongBulkSendMode === 'reserved' && (
+                                    <input
+                                      type="datetime-local"
+                                      value={shoongBulkReservedAt}
+                                      onChange={(e) => setShoongBulkReservedAt(e.target.value)}
+                                      min={toLocalInputValue(now)}
+                                      style={{
+                                        padding: '8px 12px',
+                                        background: 'rgba(0,0,0,0.4)',
+                                        border: `1px solid ${tooSoon ? 'rgba(239,68,68,0.5)' : 'rgba(99,102,241,0.4)'}`,
+                                        borderRadius: '8px', color: '#fff', fontSize: '13px', marginLeft: '8px',
+                                        colorScheme: 'dark',
+                                        fontFamily: 'monospace',
+                                        minWidth: '200px'
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                                {shoongBulkSendMode === 'reserved' && (
+                                  <>
+                                    {/* 빠른 프리셋 */}
+                                    <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+                                      {presets.map(p => (
+                                        <button
+                                          key={p.label}
+                                          type="button"
+                                          onClick={() => {
+                                            const d = p.custom ? p.custom() : new Date(Date.now() + p.mins * 60 * 1000)
+                                            setShoongBulkReservedAt(toLocalInputValue(d))
+                                          }}
+                                          style={{
+                                            padding: '5px 10px',
+                                            background: 'rgba(99,102,241,0.12)',
+                                            border: '1px solid rgba(99,102,241,0.3)',
+                                            borderRadius: '6px',
+                                            color: '#c7d2fe',
+                                            fontSize: '11px',
+                                            cursor: 'pointer'
+                                          }}
+                                        >{p.label}</button>
+                                      ))}
+                                    </div>
+                                    {/* 검증 안내 */}
+                                    {reservedDate && (
+                                      <div style={{
+                                        marginTop: '8px',
+                                        padding: '8px 12px',
+                                        background: inPast ? 'rgba(239,68,68,0.10)' : tooSoon ? 'rgba(251,191,36,0.10)' : 'rgba(16,185,129,0.10)',
+                                        border: `1px solid ${inPast ? 'rgba(239,68,68,0.3)' : tooSoon ? 'rgba(251,191,36,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                                        borderRadius: '7px',
+                                        fontSize: '11px',
+                                        color: inPast ? '#f87171' : tooSoon ? '#fbbf24' : '#34d399',
+                                        lineHeight: 1.5
+                                      }}>
+                                        {inPast
+                                          ? `⚠️ 과거 시각입니다 (${Math.abs(leadMinutes)}분 전). 즉시 발송 처리됩니다.`
+                                          : tooSoon
+                                            ? `⚠️ 1분 미만 임박 — 즉시 발송 처리될 수 있습니다.`
+                                            : `✅ 현재 시각 기준 ${leadMinutes >= 60 ? `${Math.floor(leadMinutes/60)}시간 ${leadMinutes%60}분` : `${leadMinutes}분`} 후 예약 발송`
+                                        }
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )
+                          })()}
 
                           {/* 🧪 테스트 모드 박스 (대참사 방지) */}
                           <div style={{
