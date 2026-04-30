@@ -2,9 +2,108 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import {
+  LayoutDashboard,
+  ChevronLeft,
+  X,
+  Menu,
+  LogOut,
+  LineChart as LineChartIcon,
+  FileText,
+  Trophy,
+  Scale,
+  Wrench,
+  FolderOpen,
+  Bot,
+  GraduationCap,
+  Settings,
+  CreditCard,
+  TrendingUp,
+  ShieldCheck,
+} from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
 import * as XLSX from 'xlsx'
+
+function SidebarItem({
+  icon: Icon,
+  label,
+  shortLabel,
+  active = false,
+  loading = false,
+  collapsed = false,
+  onClick,
+  href,
+  external = false,
+}) {
+  const className = `sidebar-item${active ? ' is-active' : ''}${collapsed ? ' is-collapsed' : ''}`
+  const displayLabel = collapsed && shortLabel ? shortLabel : label
+
+  const inner = (
+    <>
+      <span className="sidebar-item-icon" style={{ position: 'relative' }}>
+        {Icon && <Icon size={collapsed ? 20 : 17} strokeWidth={1.85} />}
+        {loading && collapsed && (
+          <span
+            style={{
+              position: 'absolute',
+              top: '-4px',
+              right: '-4px',
+              width: '7px',
+              height: '7px',
+              borderRadius: '50%',
+              background: '#818cf8',
+              animation: 'laPulse 1.5s ease-in-out infinite',
+            }}
+          />
+        )}
+      </span>
+      <span
+        style={{
+          flex: collapsed ? 'unset' : 1,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {displayLabel}
+      </span>
+      {loading && !collapsed && (
+        <span
+          className="sidebar-item-badge"
+          style={{
+            width: '7px',
+            height: '7px',
+            borderRadius: '50%',
+            background: '#818cf8',
+            animation: 'laPulse 1.5s ease-in-out infinite',
+          }}
+        />
+      )}
+    </>
+  )
+
+  if (href) {
+    return (
+      <a
+        href={href}
+        target={external ? '_blank' : undefined}
+        rel={external ? 'noopener noreferrer' : undefined}
+        className={className}
+        title={label}
+        onClick={onClick}
+        style={{ textDecoration: 'none' }}
+      >
+        {inner}
+      </a>
+    )
+  }
+  return (
+    <button type="button" className={className} title={label} onClick={onClick}>
+      {inner}
+    </button>
+  )
+}
 
 export default function Dashboard({ onLogout, userName, loginId, permissions = {} }) {
   const [sessions, setSessions] = useState([])
@@ -1728,14 +1827,27 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
   if (loading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <p>데이터 로딩 중...</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+        <div style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: '10px',
+          background: 'var(--accent-grad)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)',
+          animation: 'laPulse 1.5s ease-in-out infinite',
+        }}>
+          <LayoutDashboard size={18} color="#fff" strokeWidth={2.2} />
+        </div>
+        <p style={{ color: 'var(--text-muted)', fontSize: '13px', letterSpacing: '0.02em' }}>데이터 불러오는 중…</p>
       </div>
     )
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', background: 'transparent', position: 'relative', zIndex: 1 }}>
       {/* 모바일 오버레이 */}
       {isMobile && mobileMenuOpen && (
         <div
@@ -1752,395 +1864,241 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         />
       )}
 
-      {/* 사이드바 - 글래스모피즘 */}
-      <div style={{
-        width: isMobile ? '240px' : (sidebarCollapsed ? '100px' : '240px'),
-        background: 'rgba(255,255,255,0.03)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        borderRight: '1px solid rgba(255,255,255,0.08)',
-        padding: '20px 0',
+      {/* Sidebar */}
+      <aside style={{
+        width: isMobile ? '244px' : (sidebarCollapsed ? '76px' : '236px'),
+        background: 'rgba(13, 14, 20, 0.72)',
+        backdropFilter: 'blur(24px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+        borderRight: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',
-        transition: 'all 0.3s ease',
+        flexShrink: 0,
+        transition: 'width 0.22s ease, left 0.22s ease',
         ...(isMobile ? {
           position: 'fixed',
           top: 0,
-          left: mobileMenuOpen ? 0 : '-250px',
+          left: mobileMenuOpen ? 0 : '-280px',
           height: '100vh',
-          zIndex: 999
-        } : {})
+          zIndex: 999,
+          boxShadow: mobileMenuOpen ? 'var(--shadow-lg)' : 'none',
+        } : {
+          position: 'sticky',
+          top: 0,
+          height: '100vh',
+        }),
       }}>
-        <div style={{ padding: sidebarCollapsed && !isMobile ? '0 10px' : '0 20px', marginBottom: '32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* Logo + collapse */}
+        <div style={{
+          padding: sidebarCollapsed && !isMobile ? '18px 12px 14px' : '18px 16px 14px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: sidebarCollapsed && !isMobile ? 'center' : 'space-between',
+          gap: '8px',
+          minHeight: '68px',
+        }}>
           {sidebarCollapsed && !isMobile ? (
-            <span style={{ fontSize: '24px' }}>📊</span>
+            <div style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '10px',
+              background: 'var(--accent-grad)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)',
+            }}>
+              <LayoutDashboard size={18} color="#fff" strokeWidth={2.2} />
+            </div>
           ) : (
-            <h1 style={{ fontSize: '18px', fontWeight: '700', background: 'linear-gradient(135deg, #60a5fa, #a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>📊 강의 통합 관리</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+              <div style={{
+                width: '34px', height: '34px',
+                borderRadius: '9px',
+                background: 'var(--accent-grad)',
+                flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 6px 16px rgba(99,102,241,0.28), inset 0 1px 0 rgba(255,255,255,0.20)',
+              }}>
+                <LayoutDashboard size={17} color="#fff" strokeWidth={2.2} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.2, letterSpacing: '-0.01em' }}>강의 통합 관리</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: '2px' }}>N잡연구소</div>
+              </div>
+            </div>
           )}
-          {/* 사이드바 토글 버튼 */}
-          {!isMobile && (
+          {!isMobile && !sidebarCollapsed && (
             <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onClick={() => setSidebarCollapsed(true)}
+              title="사이드바 닫기"
               style={{
-                padding: '6px',
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '6px',
-                color: 'rgba(255,255,255,0.5)',
-                fontSize: '12px',
+                flexShrink: 0,
+                width: '28px', height: '28px',
+                padding: 0,
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                color: 'var(--text-muted)',
                 cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.3s ease',
-                transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)'
+                display: 'inline-flex',
+                alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s ease, color 0.15s ease',
               }}
-              title={sidebarCollapsed ? '사이드바 열기' : '사이드바 닫기'}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.color = 'var(--text)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
             >
-              ◀
+              <ChevronLeft size={14} />
             </button>
           )}
           {isMobile && (
             <button
               onClick={() => setMobileMenuOpen(false)}
+              title="닫기"
               style={{
-                padding: '6px',
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '6px',
-                color: 'rgba(255,255,255,0.5)',
-                fontSize: '14px',
-                cursor: 'pointer'
+                flexShrink: 0,
+                width: '32px', height: '32px',
+                padding: 0,
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center', justifyContent: 'center',
               }}
             >
-              ✕
+              <X size={16} />
             </button>
           )}
         </div>
-        <div style={{ flex: 1 }}>
-          {hasFeature('basic-dashboard') && <>
-          <button onClick={() => { setCurrentTab('dashboard'); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'dashboard' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'dashboard' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'dashboard' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'dashboard' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="대시보드">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📈</span>
-            대시보드
+
+        {/* Collapsed expand button */}
+        {!isMobile && sidebarCollapsed && (
+          <button
+            onClick={() => setSidebarCollapsed(false)}
+            title="사이드바 열기"
+            style={{
+              margin: '8px auto 4px',
+              width: '32px', height: '28px',
+              padding: 0,
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <ChevronLeft size={14} style={{ transform: 'rotate(180deg)' }} />
           </button>
-          <button onClick={() => { setCurrentTab('detail'); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'detail' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'detail' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'detail' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'detail' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="상세 정보">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📝</span>
-            상세 정보
-          </button>
-          <button onClick={() => { setCurrentTab('ranking'); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'ranking' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'ranking' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'ranking' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'ranking' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="랭킹">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🏆</span>
-            랭킹
-          </button>
-          <button onClick={() => { setCurrentTab('compare'); resetToolState(); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'compare' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'compare' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'compare' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'compare' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="대조">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚖️</span>
-            대조
-          </button>
-          </>}
+        )}
 
-          {/* 구분선 */}
-          <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '12px 16px' }} />
-
-          {/* 툴 메뉴 */}
-          {hasFeature('tools') && <button onClick={() => { setCurrentTab('tools'); resetToolState(); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'tools' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'tools' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'tools' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'tools' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="툴">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🛠️</span>
-            툴
-          </button>}
-
-          {/* 시트 통합 메뉴 */}
-          {hasFeature('resources') && <button onClick={() => { setCurrentTab('resources'); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'resources' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'resources' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'resources' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'resources' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="시트 통합">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>📁</span>
-            시트 통합
-          </button>}
-
-          {/* CS AI 메뉴 */}
-          {hasFeature('cs-ai') && <button onClick={() => { setCurrentTab('cs-ai'); if(isMobile) setMobileMenuOpen(false) }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'cs-ai' ? 'rgba(99,102,241,0.2)' : 'transparent',
-            backdropFilter: currentTab === 'cs-ai' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'cs-ai' ? '3px solid #818cf8' : '3px solid transparent',
-            color: currentTab === 'cs-ai' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease'
-          }} title="CS AI">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🤖</span>
-            CS AI
-          </button>}
-
-          {/* 무료강의 분석기 메뉴 */}
-          {hasFeature('lecture-analyzer') && <button onClick={async () => {
-            setCurrentTab('lecture-analyzer');
-            if(isMobile) setMobileMenuOpen(false);
-            try {
-              const res = await fetch('/api/lecture-history', {
-                method: 'POST',
-                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'list' })
-              })
-              const data = await res.json()
-              if (data.success) setLaHistory(data.items)
-            } catch {}
-          }} style={{
-            width: '100%',
-            padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-            background: currentTab === 'lecture-analyzer' ? 'rgba(99,102,241,0.2)' : laProcessing ? 'rgba(99,102,241,0.08)' : 'transparent',
-            backdropFilter: currentTab === 'lecture-analyzer' ? 'blur(10px)' : 'none',
-            border: 'none',
-            borderLeft: currentTab === 'lecture-analyzer' ? '3px solid #818cf8' : laProcessing ? '3px solid #6366f1' : '3px solid transparent',
-            color: currentTab === 'lecture-analyzer' ? '#a5b4fc' : laProcessing ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-            fontSize: sidebarCollapsed ? '11px' : '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: sidebarCollapsed ? 'column' : 'row',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: sidebarCollapsed ? '4px' : '10px',
-            transition: 'all 0.3s ease',
-            position: 'relative'
-          }} title="무료강의 분석기">
-            <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🎓</span>
-            {sidebarCollapsed ? '강의분석' : '무료강의 분석기'}
-            {laProcessing && (
-              <span style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                background: '#818cf8',
-                animation: 'laPulse 1.5s ease-in-out infinite',
-                marginLeft: sidebarCollapsed ? '0' : 'auto',
-                position: sidebarCollapsed ? 'absolute' : 'static',
-                top: sidebarCollapsed ? '6px' : 'auto',
-                right: sidebarCollapsed ? '6px' : 'auto'
-              }} />
-            )}
-          </button>}
-
-          {/* 권한 기반: 시트 설정 */}
-          {hasFeature('sheet-settings') && (
-              <button onClick={() => { setCurrentTab('sheet-settings'); if(isMobile) setMobileMenuOpen(false) }} style={{
-                width: '100%',
-                padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-                background: currentTab === 'sheet-settings' ? 'rgba(99,102,241,0.2)' : 'transparent',
-                backdropFilter: currentTab === 'sheet-settings' ? 'blur(10px)' : 'none',
-                border: 'none',
-                borderLeft: currentTab === 'sheet-settings' ? '3px solid #818cf8' : '3px solid transparent',
-                color: currentTab === 'sheet-settings' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-                fontSize: sidebarCollapsed ? '11px' : '14px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                textAlign: 'center',
-                display: 'flex',
-                flexDirection: sidebarCollapsed ? 'column' : 'row',
-                alignItems: 'center',
-                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                gap: sidebarCollapsed ? '4px' : '10px',
-                transition: 'all 0.3s ease'
-              }} title="시트 설정">
-                <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⚙</span>
-                {sidebarCollapsed ? '시트설정' : '시트 설정'}
-              </button>
-          )}
-
-          {/* 권한 기반: 결제자 데이터 */}
-          {hasFeature('payer-data') && (
-              <button onClick={() => { setCurrentTab('payer-data'); if(isMobile) setMobileMenuOpen(false) }} style={{
-                width: '100%',
-                padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-                background: currentTab === 'payer-data' ? 'rgba(99,102,241,0.2)' : 'transparent',
-                backdropFilter: currentTab === 'payer-data' ? 'blur(10px)' : 'none',
-                border: 'none',
-                borderLeft: currentTab === 'payer-data' ? '3px solid #818cf8' : '3px solid transparent',
-                color: currentTab === 'payer-data' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-                fontSize: sidebarCollapsed ? '11px' : '14px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                textAlign: 'center',
-                display: 'flex',
-                flexDirection: sidebarCollapsed ? 'column' : 'row',
-                alignItems: 'center',
-                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                gap: sidebarCollapsed ? '4px' : '10px',
-                transition: 'all 0.3s ease'
-              }} title="결제자 데이터">
-                <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>💳</span>
-                {sidebarCollapsed ? '결제자' : '결제자 데이터'}
-              </button>
-          )}
-
-          {/* jinwoo 전용: 구매 추이 시트 + 권한 설정 */}
-          {loginId === 'jinwoo' && (
+        {/* Nav */}
+        <nav style={{
+          flex: 1,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          padding: '6px 0 16px',
+        }}>
+          {hasFeature('basic-dashboard') && (
             <>
-              <a href="https://docs.google.com/spreadsheets/d/1NciqOt6PaUggmroaov60UycBbkdIY6eVXSXfwLyvCRo/edit?gid=1217448453#gid=1217448453" target="_blank" rel="noopener noreferrer" style={{
-                width: '100%',
-                padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-                background: 'transparent',
-                border: 'none',
-                borderLeft: '3px solid transparent',
-                color: 'rgba(255,255,255,0.6)',
-                fontSize: sidebarCollapsed ? '11px' : '14px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                textAlign: 'center',
-                display: 'flex',
-                flexDirection: sidebarCollapsed ? 'column' : 'row',
-                alignItems: 'center',
-                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                gap: sidebarCollapsed ? '4px' : '10px',
-                transition: 'all 0.3s ease',
-                textDecoration: 'none'
-              }} title="시간별 구매 추이 시트">
-                <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>⏰</span>
-                {sidebarCollapsed ? '구매추이' : '구매 추이 시트'}
-              </a>
-
-              {/* 구분선 */}
-              <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', margin: '12px 16px' }} />
-
-              <button onClick={() => { setCurrentTab('admin-permissions'); if(isMobile) setMobileMenuOpen(false) }} style={{
-                width: '100%',
-                padding: sidebarCollapsed ? '10px 8px' : '14px 20px',
-                background: currentTab === 'admin-permissions' ? 'rgba(99,102,241,0.2)' : 'transparent',
-                backdropFilter: currentTab === 'admin-permissions' ? 'blur(10px)' : 'none',
-                border: 'none',
-                borderLeft: currentTab === 'admin-permissions' ? '3px solid #818cf8' : '3px solid transparent',
-                color: currentTab === 'admin-permissions' ? '#a5b4fc' : 'rgba(255,255,255,0.6)',
-                fontSize: sidebarCollapsed ? '11px' : '14px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                textAlign: 'center',
-                display: 'flex',
-                flexDirection: sidebarCollapsed ? 'column' : 'row',
-                alignItems: 'center',
-                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                gap: sidebarCollapsed ? '4px' : '10px',
-                transition: 'all 0.3s ease'
-              }} title="권한 설정">
-                <span style={{ fontSize: sidebarCollapsed ? '18px' : '14px' }}>🔐</span>
-                {sidebarCollapsed ? '권한' : '권한 설정'}
-              </button>
+              {!(sidebarCollapsed && !isMobile) && <div className="sidebar-section-label">메인</div>}
+              <SidebarItem icon={LineChartIcon} label="대시보드"
+                active={currentTab === 'dashboard'}
+                collapsed={sidebarCollapsed && !isMobile}
+                onClick={() => { setCurrentTab('dashboard'); if(isMobile) setMobileMenuOpen(false) }} />
+              <SidebarItem icon={FileText} label="상세 정보" shortLabel="상세"
+                active={currentTab === 'detail'}
+                collapsed={sidebarCollapsed && !isMobile}
+                onClick={() => { setCurrentTab('detail'); if(isMobile) setMobileMenuOpen(false) }} />
+              <SidebarItem icon={Trophy} label="랭킹"
+                active={currentTab === 'ranking'}
+                collapsed={sidebarCollapsed && !isMobile}
+                onClick={() => { setCurrentTab('ranking'); if(isMobile) setMobileMenuOpen(false) }} />
+              <SidebarItem icon={Scale} label="대조"
+                active={currentTab === 'compare'}
+                collapsed={sidebarCollapsed && !isMobile}
+                onClick={() => { setCurrentTab('compare'); resetToolState(); if(isMobile) setMobileMenuOpen(false) }} />
             </>
           )}
-        </div>
-      </div>
+
+          {(hasFeature('tools') || hasFeature('resources') || hasFeature('cs-ai') || hasFeature('lecture-analyzer')) && (
+            <>
+              {!(sidebarCollapsed && !isMobile) && <div className="sidebar-section-label">업무 도구</div>}
+              {hasFeature('tools') && (
+                <SidebarItem icon={Wrench} label="툴"
+                  active={currentTab === 'tools'}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={() => { setCurrentTab('tools'); resetToolState(); if(isMobile) setMobileMenuOpen(false) }} />
+              )}
+              {hasFeature('resources') && (
+                <SidebarItem icon={FolderOpen} label="시트 통합" shortLabel="시트"
+                  active={currentTab === 'resources'}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={() => { setCurrentTab('resources'); if(isMobile) setMobileMenuOpen(false) }} />
+              )}
+              {hasFeature('cs-ai') && (
+                <SidebarItem icon={Bot} label="CS AI"
+                  active={currentTab === 'cs-ai'}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={() => { setCurrentTab('cs-ai'); if(isMobile) setMobileMenuOpen(false) }} />
+              )}
+              {hasFeature('lecture-analyzer') && (
+                <SidebarItem icon={GraduationCap} label="무료강의 분석기" shortLabel="강의분석"
+                  active={currentTab === 'lecture-analyzer'}
+                  loading={laProcessing}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={async () => {
+                    setCurrentTab('lecture-analyzer');
+                    if(isMobile) setMobileMenuOpen(false);
+                    try {
+                      const res = await fetch('/api/lecture-history', {
+                        method: 'POST',
+                        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'list' })
+                      })
+                      const data = await res.json()
+                      if (data.success) setLaHistory(data.items)
+                    } catch {}
+                  }} />
+              )}
+            </>
+          )}
+
+          {(hasFeature('sheet-settings') || hasFeature('payer-data') || loginId === 'jinwoo') && (
+            <>
+              {!(sidebarCollapsed && !isMobile) && <div className="sidebar-section-label">관리자</div>}
+              {hasFeature('sheet-settings') && (
+                <SidebarItem icon={Settings} label="시트 설정" shortLabel="시트설정"
+                  active={currentTab === 'sheet-settings'}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={() => { setCurrentTab('sheet-settings'); if(isMobile) setMobileMenuOpen(false) }} />
+              )}
+              {hasFeature('payer-data') && (
+                <SidebarItem icon={CreditCard} label="결제자 데이터" shortLabel="결제자"
+                  active={currentTab === 'payer-data'}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={() => { setCurrentTab('payer-data'); if(isMobile) setMobileMenuOpen(false) }} />
+              )}
+              {loginId === 'jinwoo' && (
+                <>
+                  <SidebarItem icon={TrendingUp} label="구매 추이 시트" shortLabel="구매추이"
+                    href="https://docs.google.com/spreadsheets/d/1NciqOt6PaUggmroaov60UycBbkdIY6eVXSXfwLyvCRo/edit?gid=1217448453#gid=1217448453"
+                    external
+                    collapsed={sidebarCollapsed && !isMobile} />
+                  <SidebarItem icon={ShieldCheck} label="권한 설정" shortLabel="권한"
+                    active={currentTab === 'admin-permissions'}
+                    collapsed={sidebarCollapsed && !isMobile}
+                    onClick={() => { setCurrentTab('admin-permissions'); if(isMobile) setMobileMenuOpen(false) }} />
+                </>
+              )}
+            </>
+          )}
+        </nav>
+      </aside>
 
       {/* 메인 컨텐츠 */}
       <div style={{ flex: 1, overflow: 'auto', width: '100%', position: 'relative' }}>
@@ -2193,47 +2151,143 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           <div style={{
             position: 'sticky',
             top: 0,
-            background: 'rgba(15,15,26,0.95)',
-            backdropFilter: 'blur(10px)',
-            padding: '12px 16px',
+            background: 'rgba(11, 12, 16, 0.85)',
+            backdropFilter: 'blur(16px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(16px) saturate(140%)',
+            padding: '10px 14px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
-            zIndex: 100
+            borderBottom: '1px solid var(--border)',
+            zIndex: 100,
+            gap: '10px',
           }}>
             <button
               onClick={() => setMobileMenuOpen(true)}
+              title="메뉴"
               style={{
-                padding: '8px 12px',
-                background: 'rgba(255,255,255,0.08)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '8px',
-                color: '#fff',
-                fontSize: '18px',
-                cursor: 'pointer'
+                width: '36px',
+                height: '36px',
+                padding: 0,
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: '10px',
+                color: 'var(--text)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              ☰
+              <Menu size={18} />
             </button>
-            <span style={{ fontSize: '14px', fontWeight: '600', color: '#a5b4fc' }}>📊 강의 관리</span>
-            <button onClick={handleLogoutWithConfirm} style={{ padding: '8px 12px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', color: '#f87171', cursor: 'pointer', fontSize: '12px' }}>
-              로그아웃
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{
+                width: '24px', height: '24px',
+                borderRadius: '7px',
+                background: 'var(--accent-grad)',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 4px 10px rgba(99,102,241,0.30)',
+              }}>
+                <LayoutDashboard size={13} color="#fff" strokeWidth={2.4} />
+              </div>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>강의 관리</span>
+            </div>
+            <button onClick={handleLogoutWithConfirm} title="로그아웃" style={{
+              width: '36px', height: '36px',
+              padding: 0,
+              background: 'var(--danger-soft)',
+              border: '1px solid rgba(239,68,68,0.25)',
+              borderRadius: '10px',
+              color: '#f87171',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <LogOut size={16} />
             </button>
           </div>
         )}
 
-        {/* 우측 상단 환영 메시지 + 로그아웃 - 글래스모피즘 */}
-        {!isMobile && <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 32px 0', maxWidth: '1200px', margin: '0 auto' }}>
-          {userName && (
-            <div style={{ padding: '10px 18px', background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.15)' }}>
-              <span style={{ color: '#a5b4fc', fontSize: '14px' }}><strong>{userName}</strong>님 반갑습니다 👋</span>
-            </div>
-          )}
-          <button onClick={handleLogoutWithConfirm} style={{ padding: '10px 18px', background: 'rgba(239,68,68,0.15)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', color: '#f87171', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'all 0.3s ease' }}>
-            로그아웃
-          </button>
-        </div>}
+        {/* Top bar — desktop */}
+        {!isMobile && (
+          <div style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 50,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '14px 28px',
+            background: 'rgba(11, 12, 16, 0.55)',
+            backdropFilter: 'blur(12px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            {userName && (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '7px 12px 7px 7px',
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: '999px',
+              }}>
+                <div style={{
+                  width: '26px', height: '26px',
+                  borderRadius: '50%',
+                  background: 'var(--accent-grad)',
+                  color: '#fff',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.20)',
+                }}>
+                  {String(userName).trim().charAt(0).toUpperCase() || 'U'}
+                </div>
+                <span style={{ color: 'var(--text)', fontSize: '13px', fontWeight: 500 }}>
+                  {userName}
+                </span>
+              </div>
+            )}
+            <button
+              onClick={handleLogoutWithConfirm}
+              title="로그아웃"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                borderRadius: '999px',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 500,
+                transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--danger-soft)'
+                e.currentTarget.style.borderColor = 'rgba(239,68,68,0.35)'
+                e.currentTarget.style.color = '#fca5a5'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.borderColor = 'var(--border)'
+                e.currentTarget.style.color = 'var(--text-muted)'
+              }}
+            >
+              <LogOut size={14} />
+              로그아웃
+            </button>
+          </div>
+        )}
         <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
           {/* 드롭다운 - 대시보드/상세 탭에서만 표시 */}
           {(currentTab === 'dashboard' || currentTab === 'detail') && <div style={{ marginBottom: '24px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>

@@ -209,13 +209,25 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div style={{ 
-        minHeight: '100vh', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center' 
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
       }}>
-        <p>로딩 중...</p>
+        <div style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: '10px',
+          background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)',
+          animation: 'laPulse 1.5s ease-in-out infinite',
+        }} />
+        <p style={{ color: '#9aa3b2', fontSize: '13px', letterSpacing: '0.02em' }}>불러오는 중…</p>
       </div>
     )
   }
