@@ -16,6 +16,7 @@ const ALL_FEATURES = [
   { key: 'resources', label: '시트 통합', desc: 'Google Sheets 통합 뷰' },
   { key: 'cs-ai', label: 'CS AI', desc: 'CS 정책 AI 챗봇' },
   { key: 'lecture-analyzer', label: '무료강의 분석기', desc: '유튜브 무료강의 분석' },
+  { key: 'project-planner', label: '프로젝트 기획', desc: '강사·주제 기반 멀티 봇 기획안 자동 생성' },
   { key: 'sheet-settings', label: '시트 설정', desc: '구글시트 컬럼 매핑 설정' },
   { key: 'payer-data', label: '결제자 데이터', desc: '결제자 시트 데이터 및 매칭' },
 ]

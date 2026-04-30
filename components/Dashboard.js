@@ -20,6 +20,7 @@ import {
   Settings,
   CreditCard,
   ShieldCheck,
+  Wand2,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
@@ -335,6 +336,19 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [shoongManualParseError, setShoongManualParseError] = useState('')
   const [shoongManualSending, setShoongManualSending] = useState(false)
   const [shoongManualResult, setShoongManualResult] = useState(null)
+
+  // 🪄 프로젝트 기획 (멀티 봇 오케스트레이터) 상태
+  const [pp_instructor, setPpInstructor] = useState('')
+  const [pp_sessionName, setPpSessionName] = useState('')
+  const [pp_topic, setPpTopic] = useState('')
+  const [pp_additionalContext, setPpAdditionalContext] = useState('')
+  const [pp_enabledTasks, setPpEnabledTasks] = useState(['ebook']) // 기본 ebook만 ON
+  const [pp_loading, setPpLoading] = useState(false)
+  const [pp_results, setPpResults] = useState(null)
+  const [pp_error, setPpError] = useState('')
+  const [pp_taskRetrying, setPpTaskRetrying] = useState(null) // 개별 재생성 중인 task key
+  // 평면화: 어떤 섹션이 펼쳐져 있는지
+  const [pp_expanded, setPpExpanded] = useState({})
 
   // 주문 동기화(nlab DB / CSV → 결제자 시트 append) 상태
   const [orderSyncMode, setOrderSyncMode] = useState('supabase') // 'supabase' | 'csv'
@@ -2083,6 +2097,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       if (data.success) setLaHistory(data.items)
                     } catch {}
                   }} />
+              )}
+              {hasFeature('project-planner') && (
+                <SidebarItem icon={Wand2} label="프로젝트 기획" shortLabel="기획"
+                  active={currentTab === 'project-planner'}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={() => { setCurrentTab('project-planner'); if(isMobile) setMobileMenuOpen(false) }} />
               )}
             </>
           )}
@@ -7996,6 +8016,289 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               </div>
             </div>
           )}
+
+          {/* 🪄 프로젝트 기획 탭 (멀티 봇 오케스트레이터) */}
+          {currentTab === 'project-planner' && (() => {
+            const PLANNER_META = {
+              ebook:             { label: '무료 전자책 기획안',     icon: '📚', desc: '썸네일 카피 + 제목 + 도입 후크 + 본문 4섹션 + CTA', enabled: true },
+              boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', desc: '단톡방/라이브 시작 직전 분위기 띄우는 멘트 3종',     enabled: false },
+              alimtalk:          { label: '알림톡 / 채널톡 멘트',    icon: '💬', desc: '슝 알림톡 변수에 그대로 꽂을 수 있는 멘트',          enabled: false },
+              viralQ:            { label: '바이럴 질문',            icon: '❓', desc: '단톡방 참여 유도 질문 10개',                       enabled: false },
+              ppt:               { label: '강의 PPT outline',       icon: '📋', desc: '슬라이드별 outline + 발표 멘트 초안',             enabled: false },
+              salesPage:         { label: '무료 상페 카피',          icon: '📄', desc: '무료강의 상세페이지 섹션별 카피',                  enabled: false },
+              groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', desc: 'D-1 / D-day / D+1 시점별 공지',                  enabled: false },
+            }
+
+            const toggleTask = (key) => {
+              if (!PLANNER_META[key]?.enabled) return
+              setPpEnabledTasks(prev =>
+                prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+              )
+            }
+
+            const runPlanner = async (overrideTasks = null) => {
+              const tasks = overrideTasks || pp_enabledTasks
+              if (!pp_instructor.trim() || !pp_topic.trim() || tasks.length === 0) {
+                setPpError('강사명, 주제, 그리고 최소 1개의 항목이 필요합니다.')
+                return null
+              }
+              setPpError('')
+              if (overrideTasks) setPpTaskRetrying(overrideTasks[0])
+              else setPpLoading(true)
+
+              try {
+                const res = await fetch('/api/tools/project-planner', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify({
+                    instructor: pp_instructor,
+                    sessionName: pp_sessionName,
+                    topic: pp_topic,
+                    additionalContext: pp_additionalContext,
+                    enabledTasks: tasks,
+                  })
+                })
+                const data = await res.json()
+                if (!res.ok) {
+                  setPpError(data.error || `요청 실패 (HTTP ${res.status})`)
+                  return null
+                }
+                return data
+              } catch (e) {
+                setPpError('네트워크 오류: ' + e.message)
+                return null
+              } finally {
+                setPpLoading(false)
+                setPpTaskRetrying(null)
+              }
+            }
+
+            const handleGenerate = async () => {
+              const data = await runPlanner()
+              if (data) {
+                setPpResults(data.results)
+                // 성공한 첫 항목 자동 펼침
+                const firstSuccess = Object.entries(data.results).find(([_, v]) => v.ok)?.[0]
+                if (firstSuccess) setPpExpanded({ [firstSuccess]: true })
+              }
+            }
+
+            const handleRegenerate = async (taskKey) => {
+              const data = await runPlanner([taskKey])
+              if (data?.results?.[taskKey]) {
+                setPpResults(prev => ({ ...prev, [taskKey]: data.results[taskKey] }))
+              }
+            }
+
+            const renderPlanContent = (taskKey, plan) => {
+              if (taskKey === 'ebook') {
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ padding: '12px 14px', background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '10px' }}>
+                      <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600, marginBottom: '4px' }}>썸네일 카피 (세로형)</div>
+                      <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{plan.thumbnailCopy}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 600, marginBottom: '4px' }}>전자책 제목</div>
+                      <div style={{ fontSize: '17px', fontWeight: 700, color: '#fff' }}>{plan.title}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 600, marginBottom: '4px' }}>도입 후크</div>
+                      <div style={{ fontSize: '15px', fontStyle: 'italic', color: '#cbd5e1' }}>{plan.introHook}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 600, marginBottom: '4px' }}>문제 도입 단락</div>
+                      <div style={{ fontSize: '14px', color: '#cbd5e1', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{plan.problemFraming}</div>
+                    </div>
+                    {Array.isArray(plan.sections) && plan.sections.map((s, i) => (
+                      <div key={i} style={{ padding: '12px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '10px' }}>
+                        <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600, marginBottom: '6px' }}>섹션 {i + 1}</div>
+                        <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>{s.heading}</div>
+                        <div style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>{s.body}</div>
+                      </div>
+                    ))}
+                    <div style={{ padding: '12px 14px', background: 'rgba(168,85,247,0.10)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: '10px' }}>
+                      <div style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: 600, marginBottom: '4px' }}>CTA</div>
+                      <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{plan.cta}</div>
+                    </div>
+                  </div>
+                )
+              }
+              // 다른 task 추가 시 여기에 분기 추가
+              return (
+                <pre style={{ fontSize: '12px', color: '#cbd5e1', background: 'rgba(0,0,0,0.30)', padding: '12px', borderRadius: '8px', overflow: 'auto', maxHeight: '400px', margin: 0 }}>
+                  {JSON.stringify(plan, null, 2)}
+                </pre>
+              )
+            }
+
+            const copyToClipboard = (taskKey, plan) => {
+              const text = JSON.stringify(plan, null, 2)
+              navigator.clipboard.writeText(text).catch(() => {})
+            }
+
+            return (
+              <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '100%', margin: '0 auto' }}>
+                <div style={{ marginBottom: '20px' }}>
+                  <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--accent-grad)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
+                      <Wand2 size={18} color="#fff" strokeWidth={2.2} />
+                    </span>
+                    프로젝트 기획
+                  </h2>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.55 }}>
+                    강사 정보 + 주제를 입력하면 여러 기획 항목을 한 번에 생성합니다. 현재 활성 항목은 무료 전자책 1개, 나머지는 준비 중.
+                  </p>
+                </div>
+
+                {/* 입력 폼 */}
+                <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '14px', padding: '20px', border: '1px solid var(--border)', marginBottom: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>강사명 *</label>
+                      <input type="text" value={pp_instructor} onChange={(e) => setPpInstructor(e.target.value)} placeholder="예: 청담언니 루시"
+                        style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>강의/기수 (선택)</label>
+                      <input type="text" value={pp_sessionName} onChange={(e) => setPpSessionName(e.target.value)} placeholder="예: 유튜브 수익화 1기"
+                        style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>주제 *</label>
+                    <input type="text" value={pp_topic} onChange={(e) => setPpTopic(e.target.value)} placeholder="예: AI 활용 유튜브 수익화"
+                      style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
+                      추가 컨텍스트 (선택) <span style={{ color: '#64748b', fontSize: '11px', marginLeft: '6px' }}>· 미팅 메모, 강사 톤 샘플, 차별화 포인트 등 자유 기재</span>
+                    </label>
+                    <textarea value={pp_additionalContext} onChange={(e) => setPpAdditionalContext(e.target.value)} rows={4}
+                      placeholder="예: 강사 본인이 월 2,500만원 수익화 경험. LUCY AI Studio 보유. 캐치프레이즈는 '설계가 답이다'."
+                      style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }} />
+                  </div>
+
+                  {/* 항목 체크박스 */}
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: 500 }}>생성할 항목</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '8px' }}>
+                      {Object.entries(PLANNER_META).map(([key, meta]) => {
+                        const checked = pp_enabledTasks.includes(key)
+                        const dis = !meta.enabled
+                        return (
+                          <label key={key} style={{
+                            display: 'flex', alignItems: 'flex-start', gap: '10px',
+                            padding: '10px 12px',
+                            background: checked ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.02)',
+                            border: `1px solid ${checked ? 'rgba(99,102,241,0.35)' : 'var(--border)'}`,
+                            borderRadius: '9px',
+                            cursor: dis ? 'not-allowed' : 'pointer',
+                            opacity: dis ? 0.45 : 1,
+                          }}>
+                            <input type="checkbox" checked={checked} disabled={dis} onChange={() => toggleTask(key)}
+                              style={{ marginTop: '2px', width: '16px', height: '16px', accentColor: '#8b5cf6', cursor: dis ? 'not-allowed' : 'pointer' }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span>{meta.icon}</span>
+                                <span>{meta.label}</span>
+                                {dis && <span style={{ fontSize: '10px', padding: '1px 7px', background: 'rgba(255,255,255,0.06)', color: '#94a3b8', borderRadius: '999px', marginLeft: '4px' }}>준비 중</span>}
+                              </div>
+                              <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px', lineHeight: 1.45 }}>{meta.desc}</div>
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <button onClick={handleGenerate} disabled={pp_loading}
+                    style={{
+                      width: '100%', padding: '14px',
+                      background: pp_loading ? 'rgba(99,102,241,0.20)' : 'var(--accent-grad)',
+                      border: 'none', borderRadius: '10px',
+                      color: '#fff', fontSize: '15px', fontWeight: 700,
+                      cursor: pp_loading ? 'wait' : 'pointer',
+                      boxShadow: pp_loading ? 'none' : '0 8px 18px rgba(99,102,241,0.30)',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                    }}>
+                    <Wand2 size={16} />
+                    {pp_loading ? '생성 중…' : `🪄 기획 생성 (${pp_enabledTasks.length}개 항목)`}
+                  </button>
+
+                  {pp_error && (
+                    <div style={{ marginTop: '12px', padding: '10px 12px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.30)', borderRadius: '8px', color: '#fca5a5', fontSize: '12.5px' }}>⚠️ {pp_error}</div>
+                  )}
+                </div>
+
+                {/* 결과 */}
+                {pp_results && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {Object.entries(pp_results).map(([taskKey, r]) => {
+                      const meta = PLANNER_META[taskKey] || { label: taskKey, icon: '🧩' }
+                      const isOpen = pp_expanded[taskKey]
+                      const retrying = pp_taskRetrying === taskKey
+                      return (
+                        <div key={taskKey} style={{
+                          background: 'rgba(255,255,255,0.03)', borderRadius: '14px',
+                          border: '1px solid ' + (r.ok ? 'var(--border)' : 'rgba(239,68,68,0.30)'),
+                          overflow: 'hidden',
+                        }}>
+                          <button type="button" onClick={() => setPpExpanded(prev => ({ ...prev, [taskKey]: !prev[taskKey] }))}
+                            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 16px', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', textAlign: 'left' }}>
+                            <span style={{ fontSize: '18px' }}>{meta.icon}</span>
+                            <span style={{ flex: 1, fontSize: '15px', fontWeight: 600 }}>{meta.label}</span>
+                            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: r.ok ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: r.ok ? '#34d399' : '#fca5a5', fontWeight: 600 }}>
+                              {r.ok ? '✅ 성공' : '❌ 실패'}
+                            </span>
+                            {r.durationMs != null && (
+                              <span style={{ fontSize: '11px', color: '#94a3b8' }}>{(r.durationMs / 1000).toFixed(1)}s</span>
+                            )}
+                            <ChevronDown size={16} style={{ color: 'var(--text-muted)', transform: isOpen ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform 0.2s' }} />
+                          </button>
+                          {isOpen && (
+                            <div style={{ padding: '0 16px 16px' }}>
+                              {r.ok ? (
+                                <>
+                                  {renderPlanContent(taskKey, r.plan)}
+                                  <div style={{ display: 'flex', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
+                                    <button onClick={() => handleRegenerate(taskKey)} disabled={retrying}
+                                      style={{ padding: '8px 14px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '8px', color: '#c7d2fe', fontSize: '12px', fontWeight: 600, cursor: retrying ? 'wait' : 'pointer' }}>
+                                      {retrying ? '재생성 중…' : '🔄 이 섹션만 다시'}
+                                    </button>
+                                    <button onClick={() => copyToClipboard(taskKey, r.plan)}
+                                      style={{ padding: '8px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                                      📋 JSON 복사
+                                    </button>
+                                  </div>
+                                  {r.usage && (
+                                    <details style={{ marginTop: '10px', fontSize: '11px', color: '#64748b' }}>
+                                      <summary style={{ cursor: 'pointer' }}>토큰 사용량</summary>
+                                      <pre style={{ marginTop: '6px', padding: '8px', background: 'rgba(0,0,0,0.30)', borderRadius: '6px', overflow: 'auto', margin: 0 }}>{JSON.stringify(r.usage, null, 2)}</pre>
+                                    </details>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <div style={{ padding: '12px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.30)', borderRadius: '8px', color: '#fca5a5', fontSize: '12.5px', whiteSpace: 'pre-wrap' }}>
+                                    {r.error}
+                                  </div>
+                                  <button onClick={() => handleRegenerate(taskKey)} disabled={retrying}
+                                    style={{ marginTop: '10px', padding: '8px 14px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '8px', color: '#c7d2fe', fontSize: '12px', fontWeight: 600, cursor: retrying ? 'wait' : 'pointer' }}>
+                                    {retrying ? '재시도 중…' : '🔄 다시 시도'}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* 시트 설정 탭 */}
           {currentTab === 'sheet-settings' && (
