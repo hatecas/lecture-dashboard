@@ -50,14 +50,16 @@ async function runWithConcurrency(items, limit, worker) {
 }
 
 // POST /api/tools/shoong-bulk/send
-// body: {
-//   courseIds: number[],
-//   templatecode: 'start(1)'|'start(2)'|'start(3)',
-//   senderkey?: string (옵션, 비우면 env),
-//   variables: { 유튜브링크, 강좌명, 강사명?|강사님?, 링크명, 시청자수? },
-//   reservedTime?: ISO8601,
+// 두 가지 모드:
+//   A) DB 모드: { courseIds: number[], ... } — nlab ApplyCourse → User 조인
+//   B) 수동 업로드 모드: { recipients: [{ name, phone }, ...], ... } — CSV 등에서 추출한 명단 직접 전달
+// 공통:
+//   templatecode: 'start(1)'|'start(2)'|'start(3)'
+//   senderkey?: string (옵션, 비우면 env)
+//   variables: { 유튜브링크, 강좌명, 강사명?|강사님?, 링크명, 시청자수? }
+//   reservedTime?: ISO8601
 //   dryRun?: boolean (true면 수신자 목록만 반환, 발송 안 함)
-// }
+//   testPhone?, testLimit?: 테스트 모드
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
@@ -67,7 +69,8 @@ export async function POST(request) {
   try {
     const body = await request.json()
     const {
-      courseIds = [],
+      courseIds,
+      recipients: manualRecipients,
       templatecode,
       senderkey,
       variables = {},
@@ -79,8 +82,13 @@ export async function POST(request) {
       testLimit
     } = body
 
-    if (!Array.isArray(courseIds) || courseIds.length === 0) {
-      return NextResponse.json({ error: 'courseIds 배열이 비어있습니다.' }, { status: 400 })
+    const hasCourseIds = Array.isArray(courseIds) && courseIds.length > 0
+    const hasManualRecipients = Array.isArray(manualRecipients) && manualRecipients.length > 0
+    if (!hasCourseIds && !hasManualRecipients) {
+      return NextResponse.json({ error: 'courseIds 또는 recipients 중 하나는 필수입니다.' }, { status: 400 })
+    }
+    if (hasCourseIds && hasManualRecipients) {
+      return NextResponse.json({ error: 'courseIds와 recipients는 동시에 사용할 수 없습니다.' }, { status: 400 })
     }
 
     const tplVars = TEMPLATE_VARS[templatecode]
@@ -91,7 +99,7 @@ export async function POST(request) {
       }, { status: 400 })
     }
 
-    // 고객명/phone은 DB에서 채우므로 그 외 변수만 검증
+    // 고객명/phone은 DB(또는 명단)에서 채우므로 그 외 변수만 검증
     const requiredManualVars = tplVars.filter(v => v !== '고객명')
     const trimmedVars = {}
     for (const v of tplVars) {
@@ -120,49 +128,65 @@ export async function POST(request) {
       }, { status: 400 })
     }
 
-    const supabase = getNlabSupabase()
-
-    // ApplyCourse → User 조인으로 신청자 가져오기 (페이지네이션)
-    const applies = await fetchAllPaginated(() =>
-      supabase
-        .from('ApplyCourse')
-        .select('id, freeCourseId, userId, User:userId(username, nickname, phone)')
-        .in('freeCourseId', courseIds)
-    )
-
-    // 전화번호 정규화 + 유효성 + 중복 제거 (같은 번호면 한 번만)
+    // 수신자 명단 구성 — DB 조회 또는 명단 파싱
     const seenPhones = new Set()
     const recipients = []
     const skipped = { noUser: 0, invalidPhone: 0, duplicate: 0 }
+    let totalSourceRows = 0
 
-    for (const a of applies) {
-      const u = a.User
-      if (!u) { skipped.noUser++; continue }
-      const phone = normalizePhone(u.phone)
-      if (!phone) { skipped.invalidPhone++; continue }
-      if (seenPhones.has(phone)) { skipped.duplicate++; continue }
-      seenPhones.add(phone)
-      recipients.push({
-        phone,
-        name: u.username || u.nickname || '고객',
-        applyId: a.id
-      })
+    if (hasCourseIds) {
+      const supabase = getNlabSupabase()
+      const applies = await fetchAllPaginated(() =>
+        supabase
+          .from('ApplyCourse')
+          .select('id, freeCourseId, userId, User:userId(username, nickname, phone)')
+          .in('freeCourseId', courseIds)
+      )
+      totalSourceRows = applies.length
+      for (const a of applies) {
+        const u = a.User
+        if (!u) { skipped.noUser++; continue }
+        const phone = normalizePhone(u.phone)
+        if (!phone) { skipped.invalidPhone++; continue }
+        if (seenPhones.has(phone)) { skipped.duplicate++; continue }
+        seenPhones.add(phone)
+        recipients.push({
+          phone,
+          name: u.username || u.nickname || '고객',
+          applyId: a.id
+        })
+      }
+    } else {
+      // 수동 업로드 모드: { name, phone }만 받음. 이름 없으면 '고객'.
+      totalSourceRows = manualRecipients.length
+      for (const item of manualRecipients) {
+        if (!item || typeof item !== 'object') { skipped.noUser++; continue }
+        const phone = normalizePhone(item.phone)
+        if (!phone) { skipped.invalidPhone++; continue }
+        if (seenPhones.has(phone)) { skipped.duplicate++; continue }
+        seenPhones.add(phone)
+        recipients.push({
+          phone,
+          name: (typeof item.name === 'string' && item.name.trim()) || '고객'
+        })
+      }
     }
 
     if (dryRun) {
       return NextResponse.json({
         dryRun: true,
-        totalApplies: applies.length,
+        totalApplies: totalSourceRows,
         recipientCount: recipients.length,
         skipped,
-        sample: recipients.slice(0, 10)
+        sample: recipients.slice(0, 10),
+        mode: hasCourseIds ? 'db' : 'manual'
       })
     }
 
     if (recipients.length === 0) {
       return NextResponse.json({
         error: '발송 대상 수신자가 없습니다.',
-        totalApplies: applies.length,
+        totalApplies: totalSourceRows,
         skipped
       }, { status: 400 })
     }
@@ -243,7 +267,8 @@ export async function POST(request) {
 
     return NextResponse.json({
       via: 'vercel-server-bulk',
-      totalApplies: applies.length,
+      mode: hasCourseIds ? 'db' : 'manual',
+      totalApplies: totalSourceRows,
       recipientCount: recipients.length,
       sent,
       failed,
