@@ -3868,74 +3868,65 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>강사 선택</p>
                         <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>조회 기간 내 결제가 있는 강사만 (최대 31일)</p>
 
-                        {/* 날짜 범위 + 조회 버튼 */}
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+                        {/* 날짜 입력 행 */}
+                        <div style={{
+                          display: 'flex',
+                          gap: '8px',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          marginBottom: '10px',
+                          flexWrap: 'wrap'
+                        }}>
                           <input
                             type="date"
                             value={orderSyncDateFrom}
                             onChange={(e) => setOrderSyncDateFrom(e.target.value)}
                             style={{
-                              padding: '8px 10px',
-                              background: 'rgba(0,0,0,0.3)',
+                              padding: '9px 12px',
+                              background: 'rgba(0,0,0,0.35)',
                               border: '1px solid rgba(99,102,241,0.4)',
                               borderRadius: '8px',
                               color: '#fff',
-                              fontSize: '12px',
-                              colorScheme: 'dark'
+                              fontSize: '13px',
+                              colorScheme: 'dark',
+                              minWidth: '140px'
                             }}
                           />
-                          <span style={{ color: '#64748b', fontSize: '12px' }}>~</span>
+                          <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '500' }}>~</span>
                           <input
                             type="date"
                             value={orderSyncDateTo}
                             onChange={(e) => setOrderSyncDateTo(e.target.value)}
                             style={{
-                              padding: '8px 10px',
-                              background: 'rgba(0,0,0,0.3)',
+                              padding: '9px 12px',
+                              background: 'rgba(0,0,0,0.35)',
                               border: '1px solid rgba(99,102,241,0.4)',
                               borderRadius: '8px',
                               color: '#fff',
-                              fontSize: '12px',
-                              colorScheme: 'dark'
+                              fontSize: '13px',
+                              colorScheme: 'dark',
+                              minWidth: '140px'
                             }}
                           />
-                          <button
-                            onClick={() => {
-                              setOrderSyncSelectedInstructor('')
-                              setOrderSyncPreview(null)
-                              setOrderSyncCommitResult(null)
-                              loadOrderSyncInstructors()
-                            }}
-                            disabled={orderSyncInstructorsLoading}
-                            style={{
-                              padding: '8px 14px',
-                              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                              border: 'none',
-                              borderRadius: '8px',
-                              color: '#fff',
-                              fontSize: '12px',
-                              fontWeight: '600',
-                              cursor: orderSyncInstructorsLoading ? 'wait' : 'pointer'
-                            }}
-                          >
-                            {orderSyncInstructorsLoading ? '조회 중...' : '🔍 조회'}
-                          </button>
                         </div>
-                        {orderSyncRangeError && (
-                          <div style={{ fontSize: '12px', color: '#f87171', marginBottom: '8px' }}>
-                            ⚠️ {orderSyncRangeError}
-                          </div>
-                        )}
 
-                        {/* 빠른 기간 프리셋 */}
-                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+                        {/* 빠른 기간 프리셋 + 조회 */}
+                        <div style={{
+                          display: 'flex',
+                          gap: '6px',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginBottom: '10px',
+                          flexWrap: 'wrap'
+                        }}>
                           {[
-                            { label: '최근 7일', days: 7 },
-                            { label: '최근 14일', days: 14 },
-                            { label: '최근 30일', days: 30 }
+                            { label: '📅 오늘', days: 30, primary: true },
+                            { label: '7일', days: 7 },
+                            { label: '14일', days: 14 },
+                            { label: '30일', days: 30 }
                           ].map(p => (
                             <button
-                              key={p.days}
+                              key={p.label}
                               onClick={() => {
                                 const to = new Date()
                                 const from = new Date()
@@ -3951,19 +3942,51 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               }}
                               disabled={orderSyncInstructorsLoading}
                               style={{
-                                padding: '4px 10px',
-                                background: 'rgba(99,102,241,0.15)',
-                                border: '1px solid rgba(99,102,241,0.3)',
-                                borderRadius: '6px',
-                                color: '#c7d2fe',
-                                fontSize: '11px',
+                                padding: p.primary ? '7px 14px' : '6px 10px',
+                                background: p.primary
+                                  ? 'linear-gradient(135deg, rgba(99,102,241,0.4), rgba(139,92,246,0.4))'
+                                  : 'rgba(99,102,241,0.15)',
+                                border: p.primary
+                                  ? '1px solid rgba(139,92,246,0.6)'
+                                  : '1px solid rgba(99,102,241,0.3)',
+                                borderRadius: '8px',
+                                color: p.primary ? '#fff' : '#c7d2fe',
+                                fontSize: '12px',
+                                fontWeight: p.primary ? '600' : '500',
                                 cursor: orderSyncInstructorsLoading ? 'wait' : 'pointer'
                               }}
                             >
                               {p.label}
                             </button>
                           ))}
+                          <button
+                            onClick={() => {
+                              setOrderSyncSelectedInstructor('')
+                              setOrderSyncPreview(null)
+                              setOrderSyncCommitResult(null)
+                              loadOrderSyncInstructors()
+                            }}
+                            disabled={orderSyncInstructorsLoading}
+                            style={{
+                              padding: '7px 16px',
+                              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                              border: 'none',
+                              borderRadius: '8px',
+                              color: '#fff',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              cursor: orderSyncInstructorsLoading ? 'wait' : 'pointer',
+                              marginLeft: '4px'
+                            }}
+                          >
+                            {orderSyncInstructorsLoading ? '조회 중...' : '🔍 조회'}
+                          </button>
                         </div>
+                        {orderSyncRangeError && (
+                          <div style={{ fontSize: '12px', color: '#f87171', marginBottom: '8px' }}>
+                            ⚠️ {orderSyncRangeError}
+                          </div>
+                        )}
 
                         <select
                           value={orderSyncSelectedInstructor}
