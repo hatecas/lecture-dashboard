@@ -11,7 +11,7 @@ const DEFAULT_CONFIG = {
   column_mappings: [
     { fieldKey: 'name', displayName: '강사명', columnIndex: 0, type: '이름' },
     { fieldKey: 'freeClassDate', displayName: '무료강의날짜', columnIndex: 1, type: '날짜' },
-    { fieldKey: 'revenue', displayName: '최종매출액', columnIndex: 8, type: '숫자' },
+    { fieldKey: 'revenue', displayName: '최종매출액', columnIndex: 10, type: '숫자' },
     { fieldKey: 'operatingProfit', displayName: '영업이익', columnIndex: 12, type: '숫자' },
     { fieldKey: 'profitMargin', displayName: '영업이익률', columnIndex: 13, type: '퍼센트' },
     { fieldKey: 'adSpend', displayName: '광고비', columnIndex: 19, type: '숫자' },
