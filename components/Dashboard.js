@@ -5288,6 +5288,24 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           margin: 0
                         }}>{JSON.stringify(shoongResult.response, null, 2)}</pre>
                       )}
+                      {shoongResult.sentPayload && (
+                        <details style={{ marginTop: '10px' }}>
+                          <summary style={{ cursor: 'pointer', fontSize: '12px', color: '#a3a3a3', fontWeight: '500' }}>
+                            🔍 실제 슝에 전송된 페이로드 (디버그)
+                          </summary>
+                          <pre style={{
+                            fontSize: '11px',
+                            color: '#fbbf24',
+                            background: 'rgba(0,0,0,0.4)',
+                            padding: '10px',
+                            borderRadius: '6px',
+                            overflow: 'auto',
+                            maxHeight: '300px',
+                            margin: '8px 0 0 0',
+                            border: '1px solid rgba(251,191,36,0.2)'
+                          }}>{JSON.stringify(shoongResult.sentPayload, null, 2)}</pre>
+                        </details>
+                      )}
                     </div>
                   )}
 
