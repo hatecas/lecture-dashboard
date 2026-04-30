@@ -155,6 +155,23 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [kakaoCommitting, setKakaoCommitting] = useState(false)
   const [kakaoCommitResult, setKakaoCommitResult] = useState(null)
 
+  // 슝(Shoong) 알림톡 발송 테스트 상태
+  const [shoongForm, setShoongForm] = useState({
+    sendType: 'at',
+    phone: '',
+    'channelConfig.senderkey': '',
+    'channelConfig.templatecode': 'start(2)',
+    'variables.고객명': '',
+    'variables.유튜브링크': '',
+    'variables.강좌명': '',
+    'variables.강사님': '',
+    'variables.링크명': ''
+  })
+  const [shoongApiKey, setShoongApiKey] = useState('') // 브라우저 직접 모드용 (개발자 도구 발급)
+  const [shoongSending, setShoongSending] = useState(false)
+  const [shoongResult, setShoongResult] = useState(null)
+  const [shoongCurlCopied, setShoongCurlCopied] = useState(false)
+
   // 주문 동기화(nlab DB / CSV → 결제자 시트 append) 상태
   const [orderSyncMode, setOrderSyncMode] = useState('supabase') // 'supabase' | 'csv'
   const [orderSyncYear, setOrderSyncYear] = useState('26')
@@ -2904,7 +2921,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   { id: 'order-sync', icon: '📦', label: '주문 동기화' },
                   { id: 'crm', icon: '📋', label: 'CRM 정리' },
                   { id: 'kakao', icon: '💬', label: '카톡 매칭' },
-                  { id: 'youtube', icon: '📡', label: '유튜브 채팅 로그 수집' }
+                  { id: 'youtube', icon: '📡', label: '유튜브 채팅 로그 수집' },
+                  { id: 'shoong', icon: '💌', label: '슝 알림톡 발송 (테스트)' }
                 ].filter(tool => !tool.requiresPermission || permissions[tool.requiresPermission]).map(tool => (
                   <button
                     key={tool.id}
@@ -4862,6 +4880,299 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* 슝(Shoong) 알림톡 발송 테스트 툴 */}
+              {currentTool === 'shoong' && (
+                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      💌 슝(Shoong) 알림톡 발송 테스트
+                    </h3>
+                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>
+                      슝 API(<code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 6px', borderRadius: '4px', fontSize: '12px' }}>POST https://api.shoong.kr/send</code>)에 직접 발송합니다.
+                      슝은 IP 화이트리스트 정책이라 발송 경로별로 결과가 다를 수 있습니다.
+                    </p>
+                  </div>
+
+                  {/* 안내 박스 */}
+                  <div style={{ marginBottom: '20px', padding: '14px 16px', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: '10px', fontSize: '12px', color: '#fbbf24', lineHeight: 1.6 }}>
+                    ⚠️ <b>테스트 목적</b>: 슝 API가 우리 환경에서 호출 가능한지 확인하는 것. 실제 알림톡이 수신자 폰으로 전송되니, <b>본인 번호</b>로 먼저 테스트하세요.<br/>
+                    📝 <b>API 키</b>: Vercel 서버 모드는 <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: '3px' }}>SHOONG_API_KEY</code> env에서 읽고, 브라우저 직접 모드는 아래 입력란 키를 사용합니다.
+                  </div>
+
+                  {/* 입력 폼: 9개 필드 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+                    {[
+                      { key: 'sendType', label: '발송 타입 (sendType)', placeholder: 'at', help: '알림톡=at' },
+                      { key: 'phone', label: '수신자 전화번호 (phone)', placeholder: '01012345678', help: '하이픈 없이' },
+                      { key: 'channelConfig.senderkey', label: '발신프로필 키 (senderkey)', placeholder: '047b27bbbae51190fadfe9932fe5ce424e86ec83', help: '슝 발신프로필 키' },
+                      { key: 'channelConfig.templatecode', label: '템플릿 코드 (templatecode)', placeholder: 'start(2)', help: 'start(1)/(2)/(3) 등', preset: ['start(1)', 'start(2)', 'start(3)'] },
+                      { key: 'variables.고객명', label: '변수: 고객명', placeholder: '홍길동' },
+                      { key: 'variables.유튜브링크', label: '변수: 유튜브링크', placeholder: 'https://youtu.be/...' },
+                      { key: 'variables.강좌명', label: '변수: 강좌명', placeholder: '예: AI 활용 컨텐츠 부업' },
+                      { key: 'variables.강사님', label: '변수: 강사님', placeholder: '예: 씨오' },
+                      { key: 'variables.링크명', label: '변수: 링크명', placeholder: '클릭' }
+                    ].map(field => (
+                      <div key={field.key}>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
+                          {field.label}
+                          {field.help && <span style={{ color: '#64748b', marginLeft: '6px', fontSize: '11px' }}>· {field.help}</span>}
+                        </label>
+                        <input
+                          type="text"
+                          value={shoongForm[field.key] || ''}
+                          onChange={(e) => setShoongForm(f => ({ ...f, [field.key]: e.target.value }))}
+                          placeholder={field.placeholder}
+                          style={{
+                            width: '100%',
+                            padding: '9px 12px',
+                            background: 'rgba(0,0,0,0.35)',
+                            border: '1px solid rgba(99,102,241,0.3)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '13px',
+                            fontFamily: field.key.includes('senderkey') ? 'monospace' : 'inherit',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                        {field.preset && (
+                          <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                            {field.preset.map(p => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => setShoongForm(f => ({ ...f, [field.key]: p }))}
+                                style={{
+                                  padding: '3px 8px',
+                                  background: shoongForm[field.key] === p ? 'rgba(99,102,241,0.4)' : 'rgba(99,102,241,0.12)',
+                                  border: '1px solid rgba(99,102,241,0.3)',
+                                  borderRadius: '5px',
+                                  color: '#c7d2fe',
+                                  fontSize: '11px',
+                                  cursor: 'pointer'
+                                }}
+                              >{p}</button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 브라우저 직접 발송 모드용 API 키 입력 */}
+                  <div style={{ marginBottom: '20px', padding: '14px 16px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '10px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
+                      🔑 슝 API 키 (브라우저 / curl 모드용)
+                      <span style={{ color: '#64748b', marginLeft: '6px', fontSize: '11px' }}>· Bearer 뒤에 붙는 ak_xxxx 키</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={shoongApiKey}
+                      onChange={(e) => setShoongApiKey(e.target.value)}
+                      placeholder="ak_xxxxxxxxxxxxxxxx"
+                      style={{
+                        width: '100%',
+                        padding: '9px 12px',
+                        background: 'rgba(0,0,0,0.35)',
+                        border: '1px solid rgba(99,102,241,0.3)',
+                        borderRadius: '8px',
+                        color: '#fff',
+                        fontSize: '13px',
+                        fontFamily: 'monospace',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                    <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
+                      🔐 이 키는 브라우저 메모리에만 있고 어디로도 전송되지 않습니다 (Vercel 서버 모드는 별도로 .env의 키를 사용).
+                    </p>
+                  </div>
+
+                  {/* 발송 버튼 3개 */}
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                    {/* Vercel 서버 발송 */}
+                    <button
+                      onClick={async () => {
+                        setShoongSending(true)
+                        setShoongResult(null)
+                        try {
+                          const res = await fetch('/api/tools/shoong-send', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(shoongForm)
+                          })
+                          const data = await res.json()
+                          setShoongResult({ mode: '🖥️ Vercel 서버', httpStatus: res.status, ...data })
+                        } catch (e) {
+                          setShoongResult({ mode: '🖥️ Vercel 서버', error: e.message })
+                        } finally {
+                          setShoongSending(false)
+                        }
+                      }}
+                      disabled={shoongSending}
+                      style={{
+                        flex: '1 1 200px',
+                        padding: '12px 18px',
+                        background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        border: 'none',
+                        borderRadius: '10px',
+                        color: '#fff',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: shoongSending ? 'wait' : 'pointer'
+                      }}
+                    >
+                      🖥️ Vercel 서버에서 발송
+                      <div style={{ fontSize: '10px', opacity: 0.85, marginTop: '2px', fontWeight: '400' }}>예상: 403 (Vercel IP 미등록 시)</div>
+                    </button>
+
+                    {/* 브라우저 직접 발송 */}
+                    <button
+                      onClick={async () => {
+                        if (!shoongApiKey) {
+                          setShoongResult({ mode: '🌐 브라우저 직접', error: 'API 키를 먼저 입력하세요.' })
+                          return
+                        }
+                        setShoongSending(true)
+                        setShoongResult(null)
+                        try {
+                          const res = await fetch('https://api.shoong.kr/send', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${shoongApiKey}`
+                            },
+                            body: JSON.stringify(shoongForm)
+                          })
+                          const text = await res.text()
+                          let parsed; try { parsed = JSON.parse(text) } catch { parsed = { raw: text } }
+                          setShoongResult({
+                            mode: '🌐 브라우저 직접',
+                            httpStatus: res.status,
+                            ok: res.ok,
+                            response: parsed
+                          })
+                        } catch (e) {
+                          // CORS 차단 가능성 — 그래도 요청은 슝에 도달했을 수 있음
+                          setShoongResult({
+                            mode: '🌐 브라우저 직접',
+                            error: e.message,
+                            note: 'CORS 차단일 수 있습니다 (요청은 슝에 도달했을 수 있음, 응답을 못 읽는 상태). 정확한 결과는 curl로 확인 권장.'
+                          })
+                        } finally {
+                          setShoongSending(false)
+                        }
+                      }}
+                      disabled={shoongSending}
+                      style={{
+                        flex: '1 1 200px',
+                        padding: '12px 18px',
+                        background: 'linear-gradient(135deg, #10b981, #059669)',
+                        border: 'none',
+                        borderRadius: '10px',
+                        color: '#fff',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: shoongSending ? 'wait' : 'pointer'
+                      }}
+                    >
+                      🌐 브라우저(내 PC)에서 직접 발송
+                      <div style={{ fontSize: '10px', opacity: 0.85, marginTop: '2px', fontWeight: '400' }}>회사 고정 IP 등록 시 200 기대</div>
+                    </button>
+
+                    {/* curl 복사 */}
+                    <button
+                      onClick={() => {
+                        const apiKeyForCurl = shoongApiKey || 'ak_YOUR_KEY'
+                        const payload = JSON.stringify(shoongForm)
+                        const curl = `curl -X POST 'https://api.shoong.kr/send' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Authorization: Bearer ${apiKeyForCurl}' \\
+  -d '${payload.replace(/'/g, "'\\''")}'`
+                        navigator.clipboard.writeText(curl)
+                        setShoongCurlCopied(true)
+                        setTimeout(() => setShoongCurlCopied(false), 2000)
+                      }}
+                      style={{
+                        flex: '1 1 200px',
+                        padding: '12px 18px',
+                        background: 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        borderRadius: '10px',
+                        color: '#fff',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📋 {shoongCurlCopied ? 'curl 복사됨!' : 'curl 명령 복사'}
+                      <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '2px', fontWeight: '400' }}>터미널에서 실행 → 내 PC IP로 발송</div>
+                    </button>
+                  </div>
+
+                  {/* 결과 출력 */}
+                  {shoongResult && (
+                    <div style={{
+                      padding: '16px 18px',
+                      background: shoongResult.ok ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                      border: `1px solid ${shoongResult.ok ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                      borderRadius: '12px',
+                      marginBottom: '12px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '700', color: shoongResult.ok ? '#10b981' : '#ef4444' }}>
+                          {shoongResult.ok ? '✅ 성공' : '❌ 실패'}
+                        </span>
+                        <span style={{ fontSize: '12px', color: '#cbd5e1' }}>{shoongResult.mode}</span>
+                        {shoongResult.httpStatus && (
+                          <span style={{ fontSize: '11px', padding: '2px 8px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', color: '#fff', fontFamily: 'monospace' }}>
+                            HTTP {shoongResult.httpStatus}
+                          </span>
+                        )}
+                      </div>
+                      {shoongResult.error && (
+                        <div style={{ fontSize: '12px', color: '#fca5a5', marginBottom: '8px' }}>
+                          에러: {shoongResult.error}
+                        </div>
+                      )}
+                      {shoongResult.note && (
+                        <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '8px' }}>
+                          💡 {shoongResult.note}
+                        </div>
+                      )}
+                      {shoongResult.response && (
+                        <pre style={{
+                          fontSize: '11px',
+                          color: '#cbd5e1',
+                          background: 'rgba(0,0,0,0.4)',
+                          padding: '10px',
+                          borderRadius: '6px',
+                          overflow: 'auto',
+                          maxHeight: '300px',
+                          margin: 0
+                        }}>{JSON.stringify(shoongResult.response, null, 2)}</pre>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 도움말 */}
+                  <details style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    <summary style={{ cursor: 'pointer', padding: '6px 0' }}>📖 결과 해석 가이드</summary>
+                    <div style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', lineHeight: 1.7 }}>
+                      <div><b>HTTP 200 / success:true</b> → 발송 성공. 수신자에게 알림톡 도착.</div>
+                      <div><b>HTTP 400</b> → 파라미터 오류 (필드 값 확인).</div>
+                      <div><b>HTTP 401</b> → API 키 잘못됨 또는 누락.</div>
+                      <div><b>HTTP 403</b> → <b>IP 차단</b>. 호출한 IP가 슝에 등록 안 됨. 회사 IP를 슝 개발자도구에서 등록하거나 다른 호출 경로 검토.</div>
+                      <div><b>HTTP 404</b> → 템플릿 코드(<code>templatecode</code>)가 슝에 없음.</div>
+                      <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                        <b>모드별 발송 IP</b>:<br/>
+                        🖥️ Vercel 서버 → Vercel 서버 IP (가변, 보통 미등록)<br/>
+                        🌐 브라우저 직접 → 이 PC가 인터넷으로 나갈 때의 공인 IP (회사 고정 IP)<br/>
+                        📋 curl → 터미널 실행한 PC의 공인 IP
+                      </div>
+                    </div>
+                  </details>
                 </div>
               )}
             </div>
