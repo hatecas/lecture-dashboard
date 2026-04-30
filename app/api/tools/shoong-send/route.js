@@ -24,9 +24,14 @@ export async function POST(request) {
   try {
     const body = await request.json()
 
-    // 발신프로필키는 비어있으면 서버 env 값으로 fallback
+    // 모든 문자열 값 trim — 끝에 개행/공백 섞이면 슝이 senderkey 불일치로 거절
+    for (const k of Object.keys(body)) {
+      if (typeof body[k] === 'string') body[k] = body[k].trim()
+    }
+
+    // 발신프로필키는 비어있으면 서버 env 값으로 fallback (env 값도 trim)
     if (!body['channelConfig.senderkey']) {
-      const envSenderKey = process.env.SHOONG_SENDER_KEY
+      const envSenderKey = (process.env.SHOONG_SENDER_KEY || '').trim()
       if (envSenderKey) body['channelConfig.senderkey'] = envSenderKey
     }
 
@@ -52,7 +57,7 @@ export async function POST(request) {
       }, { status: 400 })
     }
 
-    const apiKey = process.env.SHOONG_API_KEY
+    const apiKey = (process.env.SHOONG_API_KEY || '').trim()
     if (!apiKey) {
       return NextResponse.json({
         error: 'SHOONG_API_KEY 환경변수가 설정되지 않았습니다. .env.local에 추가해주세요.'

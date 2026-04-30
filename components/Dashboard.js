@@ -181,17 +181,18 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     'start(3)': ['고객명', '시청자수', '유튜브링크', '강좌명', '강사님', '링크명']
   }
   const buildShoongPayload = () => {
-    const tplCode = shoongForm['channelConfig.templatecode'] || 'start(2)'
+    const tplCode = (shoongForm['channelConfig.templatecode'] || 'start(2)').trim()
     const tplVars = SHOONG_TEMPLATE_VARS[tplCode] || []
+    // 모든 값 trim — 특히 senderkey/api키 끝 개행/공백이 슝 인증 실패 원인
+    const trim = (v) => (typeof v === 'string' ? v.trim() : v)
     const payload = {
-      sendType: shoongForm.sendType,
-      phone: shoongForm.phone,
-      'channelConfig.senderkey': shoongForm['channelConfig.senderkey'],
+      sendType: trim(shoongForm.sendType),
+      phone: trim(shoongForm.phone),
+      'channelConfig.senderkey': trim(shoongForm['channelConfig.senderkey']),
       'channelConfig.templatecode': tplCode
     }
-    for (const v of tplVars) payload[`variables.${v}`] = shoongForm[`variables.${v}`] || ''
+    for (const v of tplVars) payload[`variables.${v}`] = trim(shoongForm[`variables.${v}`] || '')
     if (shoongSendMode === 'reserved' && shoongReservedAt) {
-      // datetime-local → ISO 8601 (브라우저 로컬 → UTC)
       payload.reservedTime = new Date(shoongReservedAt).toISOString()
     }
     return payload
