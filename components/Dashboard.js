@@ -7609,21 +7609,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
                     setLaProgress({ step: '서버 전송 중...', percent: 10, detail: timeEstimate ? `YouTube URL을 서버에 전달합니다... (${timeEstimate})` : 'YouTube URL을 서버에 전달합니다...' })
 
-                    const directBackendUrl = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL
-                    let response
-                    if (directBackendUrl) {
-                      response = await fetch(`${directBackendUrl}/api/analyze`, {
-                        method: 'POST',
-                        body: formData
-                      })
-                    } else {
-                      const token = localStorage.getItem('authToken')
-                      response = await fetch('/api/lecture-analyze-gemini', {
-                        method: 'POST',
-                        headers: { 'Authorization': token ? `Bearer ${token}` : '' },
-                        body: formData
-                      })
-                    }
+                    const token = localStorage.getItem('authToken')
+                    const response = await fetch('/api/lecture-analyze-gemini', {
+                      method: 'POST',
+                      headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+                      body: formData
+                    })
 
                     if (!response.ok) {
                       const errData = await response.json()

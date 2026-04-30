@@ -1,110 +1,167 @@
+import { GoogleGenAI, createUserContent, createPartFromUri } from '@google/genai'
 import { verifyApiAuth } from '@/lib/apiAuth'
-import { Agent } from 'undici'
 
-// Vercel Hobby 플랜 최대 300초 (로컬에선 제한 없음)
+// Vercel Hobby 최대 300초. Pro 플랜이면 더 길게 설정 가능.
 export const maxDuration = 300
+export const runtime = 'nodejs'
 
-// undici body timeout을 30분으로 설정 (기본 5분이라 긴 분석 시 끊김)
-const longTimeoutDispatcher = new Agent({
-  bodyTimeout: 30 * 60 * 1000,
-  headersTimeout: 30 * 60 * 1000,
-})
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
 
-/**
- * HuggingFace Space 절전모드 대응:
- * 무료 HF Space는 비활성 시 절전 진입 → 요청하면 "Application not found" 반환
- * /health로 먼저 깨우고 200 응답 대기 후 실제 요청 전송
- */
-async function ensureBackendAwake(baseUrl) {
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    try {
-      const res = await fetch(`${baseUrl}/health`, {
-        signal: AbortSignal.timeout(10000),
-      })
-      if (res.ok) {
-        console.log(`[backend] 백엔드 활성 확인 (시도 ${attempt})`)
-        return true
-      }
-      const text = await res.text()
-      console.log(`[backend] 응답 ${res.status}: ${text.slice(0, 200)} (시도 ${attempt})`)
-      // HuggingFace "Application not found" = 절전 중 → 대기 후 재시도
-      if (text.includes('Application not found') || res.status === 404) {
-        console.log(`[backend] HuggingFace 절전 중, 깨우기 대기...`)
-        await new Promise(r => setTimeout(r, attempt * 5000))
-        continue
-      }
-      // 다른 에러 (백엔드는 실행 중이지만 다른 문제)
-      return true
-    } catch (e) {
-      console.log(`[backend] 연결 실패: ${e.message} (시도 ${attempt})`)
-      if (attempt < 5) {
-        await new Promise(r => setTimeout(r, attempt * 3000))
-      }
-    }
+// SSE 헬퍼
+const sseEvent = (data) =>
+  `data: ${JSON.stringify(data)}\n\n`
+
+function extractVideoId(url) {
+  if (!url) return null
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/live\/)([a-zA-Z0-9_-]{11})/,
+    /^([a-zA-Z0-9_-]{11})$/,
+  ]
+  for (const re of patterns) {
+    const m = url.match(re)
+    if (m) return m[1]
   }
-  return false
+  return null
+}
+
+async function analyzeYoutubeUrl(client, youtubeUrl, prompt, onProgress) {
+  // Gemini는 공개 YouTube URL을 video/mp4 mime으로 from_uri 형태로 직접 받을 수 있음
+  onProgress({ step: 'Gemini 요청 전송', percent: 25, detail: 'YouTube 영상을 Gemini에 전달합니다…' })
+  const response = await client.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: createUserContent([
+      createPartFromUri(youtubeUrl, 'video/mp4'),
+      prompt,
+    ]),
+  })
+  const text = response?.text
+  if (!text) throw new Error('Gemini 응답이 비어있습니다.')
+  return text
+}
+
+async function analyzeUploadedFile(client, file, prompt, onProgress) {
+  onProgress({ step: 'Gemini 업로드 중', percent: 20, detail: `${file.name || 'file'} 업로드…` })
+  // SDK는 Blob/File 또는 path를 받음. 브라우저에서 받은 File은 Blob이라 그대로 전달.
+  let uploaded = await client.files.upload({
+    file,
+    config: { mimeType: file.type || 'video/mp4' },
+  })
+  onProgress({ step: '파일 처리 대기', percent: 40, detail: `업로드 완료 (state=${uploaded.state})` })
+
+  // 처리 완료까지 폴링 (PROCESSING → ACTIVE/FAILED)
+  let waitTicks = 0
+  while (uploaded.state === 'PROCESSING') {
+    await new Promise((r) => setTimeout(r, 3000))
+    waitTicks += 1
+    uploaded = await client.files.get({ name: uploaded.name })
+    onProgress({
+      step: '파일 처리 대기',
+      percent: Math.min(40 + waitTicks * 2, 60),
+      detail: `Gemini가 파일을 처리 중… (${waitTicks * 3}초)`,
+    })
+  }
+  if (uploaded.state === 'FAILED') {
+    throw new Error('Gemini 파일 처리 실패')
+  }
+
+  onProgress({ step: 'Gemini 분석 중', percent: 65, detail: '영상 분석 중…' })
+  const response = await client.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: createUserContent([
+      createPartFromUri(uploaded.uri, uploaded.mimeType || file.type || 'video/mp4'),
+      prompt,
+    ]),
+  })
+
+  // 업로드 파일 정리(실패해도 무시)
+  try {
+    await client.files.delete({ name: uploaded.name })
+  } catch (_) {}
+
+  const text = response?.text
+  if (!text) throw new Error('Gemini 응답이 비어있습니다.')
+  return text
 }
 
 export async function POST(request) {
-  // Python 백엔드 URL (런타임에 환경변수 읽기)
-  const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000'
-  console.log('[lecture-analyze-gemini] PYTHON_BACKEND_URL:', PYTHON_BACKEND_URL)
-
-  // API 인증 검증
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
-    return new Response(JSON.stringify({ error: auth.error }), {
+    return new Response(JSON.stringify({ error: auth.error || '인증이 필요합니다.' }), {
       status: 401,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     })
   }
 
-  try {
-    // HuggingFace Space 절전모드 대응: 먼저 백엔드가 깨어있는지 확인
-    const isAwake = await ensureBackendAwake(PYTHON_BACKEND_URL)
-    if (!isAwake) {
-      return new Response(JSON.stringify({
-        error: 'Python 백엔드가 응답하지 않습니다. HuggingFace Space가 절전 중일 수 있습니다.\n\n해결 방법: https://huggingface.co/spaces 에서 Space를 직접 열어 깨운 후 다시 시도해주세요.'
-      }), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' }
-      })
-    }
-
-    // FormData를 그대로 Python 백엔드로 전달
-    const formData = await request.formData()
-
-    // Python 백엔드로 프록시 (bodyTimeout 30분)
-    const backendResponse = await fetch(`${PYTHON_BACKEND_URL}/api/analyze`, {
-      method: 'POST',
-      body: formData,
-      dispatcher: longTimeoutDispatcher,
+  if (!process.env.GEMINI_API_KEY) {
+    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY 환경변수가 설정되지 않았습니다.' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
     })
+  }
 
-    if (!backendResponse.ok && !backendResponse.headers.get('content-type')?.includes('text/event-stream')) {
-      const errText = await backendResponse.text()
-      return new Response(JSON.stringify({ error: `Python 백엔드 오류: ${errText}` }), {
-        status: backendResponse.status,
-        headers: { 'Content-Type': 'application/json' }
-      })
-    }
+  const formData = await request.formData()
+  const prompt = String(formData.get('prompt') || '').trim()
+  const inputMode = String(formData.get('inputMode') || 'youtube')
+  const youtubeUrl = String(formData.get('youtubeUrl') || '').trim()
+  const videoFile = formData.get('videoFile')
 
-    // SSE 스트림을 그대로 클라이언트에 전달
-    return new Response(backendResponse.body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
+  if (!prompt) {
+    return new Response(JSON.stringify({ error: 'prompt가 필요합니다.' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const enc = new TextEncoder()
+      const send = (event) => controller.enqueue(enc.encode(sseEvent(event)))
+      const onProgress = (event) => send({ type: 'progress', ...event })
+
+      try {
+        let analysis = null
+
+        if (inputMode === 'youtube') {
+          const videoId = extractVideoId(youtubeUrl)
+          if (!videoId) {
+            send({ type: 'error', message: '유효하지 않은 YouTube URL입니다.' })
+            controller.close()
+            return
+          }
+          const normalizedUrl = `https://www.youtube.com/watch?v=${videoId}`
+          send({ type: 'progress', step: '준비', percent: 10, detail: 'YouTube URL 파싱 완료' })
+          analysis = await analyzeYoutubeUrl(client, normalizedUrl, prompt, onProgress)
+        } else {
+          if (!videoFile || typeof videoFile.arrayBuffer !== 'function') {
+            send({ type: 'error', message: '파일이 필요합니다.' })
+            controller.close()
+            return
+          }
+          analysis = await analyzeUploadedFile(client, videoFile, prompt, onProgress)
+        }
+
+        if (analysis) {
+          send({ type: 'progress', step: '분석 완료', percent: 95, detail: '결과 정리 중…' })
+          send({ type: 'result', analysis })
+        } else {
+          send({ type: 'error', message: '분석 결과가 비어있습니다.' })
+        }
+      } catch (err) {
+        send({ type: 'error', message: `${err.name || 'Error'}: ${err.message || String(err)}` })
+      } finally {
+        try { controller.close() } catch (_) {}
       }
-    })
+    },
+  })
 
-  } catch (error) {
-    console.error('[lecture-analyze-gemini] 프록시 에러:', error)
-    return new Response(JSON.stringify({
-      error: `Python 백엔드 연결 실패: ${error.message}\n\nPython 백엔드가 실행 중인지 확인하세요.`
-    }), {
-      status: 502,
-      headers: { 'Content-Type': 'application/json' }
-    })
-  }
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  })
 }
