@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { verifyApiAuth } from '@/lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -21,14 +22,20 @@ const ALL_FEATURES = [
 
 export async function GET(request) {
   try {
+    // 인증 — 토큰에서 신원을 가져오고 쿼리스트링은 신뢰하지 않는다
+    const auth = await verifyApiAuth(request)
+    if (!auth.authenticated) {
+      return Response.json({ success: false, error: auth.error || '인증이 필요합니다.' }, { status: 401 })
+    }
+    const callerUsername = auth.user?.username
+    const isSuperAdmin = callerUsername === 'jinwoo'
+
     const { searchParams } = new URL(request.url)
     const action = searchParams.get('action')
-    const loginId = searchParams.get('loginId')
 
-    // 특정 유저의 권한 조회 (로그인 시 사용)
-    if (action === 'my-permissions' && loginId) {
-      // jinwoo는 모든 권한
-      if (loginId === 'jinwoo') {
+    // 본인 권한 조회 — 토큰 주체 기준 (쿼리의 loginId는 무시)
+    if (action === 'my-permissions') {
+      if (isSuperAdmin) {
         return Response.json({
           success: true,
           features: ALL_FEATURES.map(f => f.key),
@@ -36,24 +43,21 @@ export async function GET(request) {
         })
       }
 
-      // 해당 유저의 admin id 조회
       const { data: admin } = await supabase
         .from('admins')
         .select('id')
-        .eq('username', loginId)
+        .eq('username', callerUsername)
         .single()
 
       if (!admin) {
         return Response.json({ success: true, features: DEFAULT_FEATURES, allFeatures: ALL_FEATURES })
       }
 
-      // 권한 조회
       const { data: perms } = await supabase
         .from('user_permissions')
         .select('feature_key, enabled')
         .eq('user_id', admin.id)
 
-      // 권한 레코드가 없으면 디폴트
       if (!perms || perms.length === 0) {
         return Response.json({ success: true, features: DEFAULT_FEATURES, allFeatures: ALL_FEATURES })
       }
@@ -62,14 +66,12 @@ export async function GET(request) {
       return Response.json({ success: true, features: enabledFeatures, allFeatures: ALL_FEATURES })
     }
 
-    // 관리자: 모든 유저 + 권한 목록 조회
+    // 관리자: 모든 유저 + 권한 목록 조회 — 슈퍼어드민만
     if (action === 'all-users') {
-      const requestLoginId = searchParams.get('requestLoginId')
-      if (requestLoginId !== 'jinwoo') {
+      if (!isSuperAdmin) {
         return Response.json({ success: false, error: '권한이 없습니다.' }, { status: 403 })
       }
 
-      // 모든 관리자 계정 조회
       const { data: admins, error: adminError } = await supabase
         .from('admins')
         .select('id, username, name')
@@ -79,12 +81,10 @@ export async function GET(request) {
         return Response.json({ success: false, error: adminError.message }, { status: 500 })
       }
 
-      // 모든 권한 조회
       const { data: allPerms } = await supabase
         .from('user_permissions')
         .select('user_id, feature_key, enabled')
 
-      // 유저별 권한 매핑
       const usersWithPermissions = admins.map(admin => {
         const userPerms = (allPerms || []).filter(p => p.user_id === admin.id)
         let features
@@ -118,16 +118,19 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const body = await request.json()
-    const { action, requestLoginId, userId, features } = body
-
-    // jinwoo만 권한 수정 가능
-    if (requestLoginId !== 'jinwoo') {
+    // 인증 — 권한 변경은 슈퍼어드민(jinwoo) 전용
+    const auth = await verifyApiAuth(request)
+    if (!auth.authenticated) {
+      return Response.json({ success: false, error: auth.error || '인증이 필요합니다.' }, { status: 401 })
+    }
+    if (auth.user?.username !== 'jinwoo') {
       return Response.json({ success: false, error: '권한이 없습니다.' }, { status: 403 })
     }
 
+    const body = await request.json()
+    const { action, userId, features } = body
+
     if (action === 'save-permissions') {
-      // jinwoo 자신의 권한은 수정 불가
       const { data: targetAdmin } = await supabase
         .from('admins')
         .select('username')
@@ -138,7 +141,6 @@ export async function POST(request) {
         return Response.json({ success: false, error: '최고 관리자의 권한은 변경할 수 없습니다.' }, { status: 400 })
       }
 
-      // 기존 권한 삭제 후 새로 삽입
       await supabase
         .from('user_permissions')
         .delete()

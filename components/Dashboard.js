@@ -973,7 +973,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }
     if (currentTab === 'admin-permissions' && loginId === 'jinwoo' && permUsers.length === 0) {
       setPermLoading(true)
-      fetch(`/api/user-permissions?action=all-users&requestLoginId=${loginId}`)
+      fetch(`/api/user-permissions?action=all-users`, { headers: getAuthHeaders() })
         .then(r => r.json())
         .then(data => {
           if (data.success) {
@@ -8971,10 +8971,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     try {
                                       const res = await fetch('/api/user-permissions', {
                                         method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
+                                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                                         body: JSON.stringify({
                                           action: 'save-permissions',
-                                          requestLoginId: loginId,
                                           userId: user.id,
                                           features: editFeatures
                                         })

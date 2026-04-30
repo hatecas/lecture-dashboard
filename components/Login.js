@@ -51,15 +51,19 @@ export default function Login({ onLogin }) {
           Notification.requestPermission()
         }
 
+        // 토큰이 발급된 직후이므로 인증 헤더로 호출 (서버는 토큰의 user를 신뢰, 클라이언트 name 무시)
+        const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {}
         await fetch('/api/login-log', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: data.name || data.username })
+          headers: { 'Content-Type': 'application/json', ...authHeader },
+          body: JSON.stringify({})
         })
 
         let userFeatures = ['basic-dashboard', 'tools', 'resources', 'lecture-analyzer']
         try {
-          const permRes = await fetch(`/api/user-permissions?action=my-permissions&loginId=${data.username}`)
+          const permRes = await fetch(`/api/user-permissions?action=my-permissions`, {
+            headers: authHeader
+          })
           const permData = await permRes.json()
           if (permData.success) {
             userFeatures = permData.features
