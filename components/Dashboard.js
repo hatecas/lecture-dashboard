@@ -1181,61 +1181,36 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   }
 
   const loadPurchaseTimeline = async () => {
-    const { data } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
-
-    // 기존 데이터가 구버전인지 확인 - 두번째 항목이 5가 아니면 구버전
-    const isOldFormat = data && data.length > 1 && data[1]?.hour !== 5
-
-    // 새 형식 데이터가 있으면 그대로 사용
-    if (data && data.length > 0 && !isOldFormat) {
-      setPurchaseTimeline(data)
-      return
-    }
-
-    // 데이터 없으면 빈 배열로 초기화
-    if (!data || data.length === 0) {
+    // nlab Supabase의 TossCustomer를 직접 조회 (시트/purchase_timeline 캐시 우회).
+    const session = sessions.find(s => s.id === selectedSessionId)
+    if (!session || !session.free_class_date || !session.instructors?.name) {
       setPurchaseTimeline([])
-    }
-
-    // 구버전 데이터는 무시하고 항상 새로 분석 (autoAnalyzedRef는 데이터 없는 경우에만 체크)
-    const needsAnalysis = isOldFormat || !data || data.length === 0
-    if (!needsAnalysis) return
-
-    // 데이터 없는 경우에만 중복 분석 방지
-    if (!isOldFormat && autoAnalyzedRef.current.has(selectedSessionId)) {
       return
     }
+
+    // 같은 세션을 빠르게 다시 누를 때 중복 호출 방지
+    if (autoAnalyzedRef.current.has(selectedSessionId)) return
     autoAnalyzedRef.current.add(selectedSessionId)
 
-    const session = sessions.find(s => s.id === selectedSessionId)
-    if (!session || !session.free_class_date) {
-      // 무료강의 날짜 없으면 구버전 데이터라도 표시
-      if (data && data.length > 0) setPurchaseTimeline(data)
-      return
-    }
-
-    const tabName = `${session.instructors?.name} ${session.session_name}`
     try {
       const response = await fetch('/api/sales-analysis', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          tabName,
+          instructor: session.instructors.name,
           freeClassDate: session.free_class_date,
-          sessionId: selectedSessionId
         })
       })
       const result = await response.json()
-      if (result.success) {
-        const { data: newData } = await supabase.from('purchase_timeline').select('*').eq('session_id', selectedSessionId).order('hour', { ascending: true })
-        if (newData) setPurchaseTimeline(newData)
-      } else if (data && data.length > 0) {
-        // 분석 실패시 기존 데이터 표시
-        setPurchaseTimeline(data)
+      if (result.success && Array.isArray(result.intervals)) {
+        // 구버전 캐시 스키마와 호환: { hour, purchases }만 차트가 사용함
+        setPurchaseTimeline(result.intervals.map(r => ({ hour: r.hour, purchases: r.purchases })))
+      } else {
+        setPurchaseTimeline([])
       }
     } catch (e) {
-      // 탭이 없거나 데이터 없으면 기존 데이터라도 표시
-      if (data && data.length > 0) setPurchaseTimeline(data)
+      // 실패 시 빈 차트로 표시 (시트 폴백 제거: nlab DB가 단일 출처)
+      setPurchaseTimeline([])
     }
   }
 
