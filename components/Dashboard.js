@@ -203,6 +203,29 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [shoongCurlCopied, setShoongCurlCopied] = useState(false)
   const [shoongDefaultsLoaded, setShoongDefaultsLoaded] = useState(false)
 
+  // 슝 대량 발송 상태 (FreeCourse 검색 → 신청자 자동 추출 → 일괄 발송)
+  const [shoongBulkKeyword, setShoongBulkKeyword] = useState('')
+  const [shoongBulkSearching, setShoongBulkSearching] = useState(false)
+  const [shoongBulkCourses, setShoongBulkCourses] = useState([]) // [{id, title, applicantCount}]
+  const [shoongBulkSelectedIds, setShoongBulkSelectedIds] = useState([])
+  const [shoongBulkVars, setShoongBulkVars] = useState({
+    유튜브링크: '',
+    강좌명: '',
+    강사명: '', // start(1)
+    강사님: '', // start(2), start(3)
+    링크명: '',
+    시청자수: '' // start(3)
+  })
+  const [shoongBulkTplCode, setShoongBulkTplCode] = useState('start(2)')
+  const [shoongBulkSendMode, setShoongBulkSendMode] = useState('immediate')
+  const [shoongBulkReservedAt, setShoongBulkReservedAt] = useState('')
+  const [shoongBulkSending, setShoongBulkSending] = useState(false)
+  const [shoongBulkResult, setShoongBulkResult] = useState(null)
+  // 테스트 모드: ON이면 모든 발송이 testPhone으로만 감 (수만명 신청자한테 가는 사고 방지)
+  const [shoongBulkTestMode, setShoongBulkTestMode] = useState(true) // 기본 ON
+  const [shoongBulkTestPhone, setShoongBulkTestPhone] = useState('')
+  const [shoongBulkTestLimit, setShoongBulkTestLimit] = useState(1)
+
   // 주문 동기화(nlab DB / CSV → 결제자 시트 append) 상태
   const [orderSyncMode, setOrderSyncMode] = useState('supabase') // 'supabase' | 'csv'
   const [orderSyncYear, setOrderSyncYear] = useState('26')
@@ -4975,8 +4998,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         ...tplVars.map(v => ({
                           key: `variables.${v}`,
                           label: `변수: ${v}`,
-                          placeholder: v === '유튜브링크' ? 'https://youtu.be/...' : v === '강좌명' ? '예: AI활용 컨텐츠 부업' : v === '시청자수' ? '예: 320' : v === '강사명' || v === '강사님' ? '예: 씨오' : v === '링크명' ? '버튼 라벨 (예: 입장하기)' : '홍길동',
-                          help: tplCode === 'start(1)' && v === '강사명' ? '⚠️ start(1)은 \'강사명\'(님 X)' : ''
+                          placeholder: v === '유튜브링크' ? 'https://youtu.be/...' : v === '강좌명' ? '예: AI활용 컨텐츠 부업' : v === '시청자수' ? '예: 320' : v === '강사명' || v === '강사님' ? '예: 씨오' : v === '링크명' ? 'https://... (버튼 클릭 시 이동할 URL)' : '홍길동',
+                          help: tplCode === 'start(1)' && v === '강사명' ? '⚠️ start(1)은 \'강사명\'(님 X)' : v === '링크명' ? '⚠️ URL 양식 (https://...)' : ''
                         }))
                       ]
                       return fields
@@ -5309,8 +5332,498 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     </div>
                   )}
 
+                  {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+                  {/* 대량 발송 (FreeCourse 검색 → 신청자 일괄 발송) */}
+                  {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+                  <div style={{
+                    marginTop: '32px',
+                    padding: '24px',
+                    background: 'linear-gradient(135deg, rgba(99,102,241,0.10), rgba(139,92,246,0.06))',
+                    border: '1px solid rgba(139,92,246,0.3)',
+                    borderRadius: '14px'
+                  }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px', color: '#c4b5fd' }}>
+                      📢 대량 발송 (실전)
+                    </h3>
+                    <p style={{ color: '#a3a3a3', fontSize: '12px', marginBottom: '18px', lineHeight: 1.6 }}>
+                      FreeCourse를 검색해서 선택 → 해당 강의 신청자들의 <b>이름·전화번호</b>는 nlab DB에서 자동으로 채워 일괄 발송합니다. 변수 4개(유튜브링크/강좌명/강사명/링크명)만 직접 입력하세요.
+                    </p>
+
+                    {/* 1. 검색창 */}
+                    <div style={{ marginBottom: '14px' }}>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
+                        🔍 강의 검색 (FreeCourse.title)
+                      </label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          type="text"
+                          value={shoongBulkKeyword}
+                          onChange={(e) => setShoongBulkKeyword(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key !== 'Enter') return
+                            if (!shoongBulkKeyword.trim()) return
+                            setShoongBulkSearching(true)
+                            try {
+                              const token = localStorage.getItem('authToken') || ''
+                              const res = await fetch(`/api/tools/shoong-bulk/courses?keyword=${encodeURIComponent(shoongBulkKeyword.trim())}`, {
+                                headers: { 'Authorization': `Bearer ${token}` }
+                              })
+                              const data = await res.json()
+                              if (!res.ok) {
+                                alert(data.error || '검색 실패')
+                                setShoongBulkCourses([])
+                              } else {
+                                setShoongBulkCourses(data.courses || [])
+                                setShoongBulkSelectedIds([])
+                              }
+                            } catch (err) {
+                              alert(err.message)
+                            } finally {
+                              setShoongBulkSearching(false)
+                            }
+                          }}
+                          placeholder='예: 씨오 (Enter로 검색)'
+                          style={{
+                            flex: 1, padding: '10px 12px',
+                            background: 'rgba(0,0,0,0.35)',
+                            border: '1px solid rgba(139,92,246,0.4)',
+                            borderRadius: '8px', color: '#fff', fontSize: '13px'
+                          }}
+                        />
+                        <button
+                          type="button"
+                          disabled={shoongBulkSearching || !shoongBulkKeyword.trim()}
+                          onClick={async () => {
+                            setShoongBulkSearching(true)
+                            try {
+                              const token = localStorage.getItem('authToken') || ''
+                              const res = await fetch(`/api/tools/shoong-bulk/courses?keyword=${encodeURIComponent(shoongBulkKeyword.trim())}`, {
+                                headers: { 'Authorization': `Bearer ${token}` }
+                              })
+                              const data = await res.json()
+                              if (!res.ok) {
+                                alert(data.error || '검색 실패')
+                                setShoongBulkCourses([])
+                              } else {
+                                setShoongBulkCourses(data.courses || [])
+                                setShoongBulkSelectedIds([])
+                              }
+                            } catch (err) {
+                              alert(err.message)
+                            } finally {
+                              setShoongBulkSearching(false)
+                            }
+                          }}
+                          style={{
+                            padding: '10px 18px',
+                            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                            border: 'none', borderRadius: '8px',
+                            color: '#fff', fontSize: '13px', fontWeight: '600',
+                            cursor: shoongBulkSearching ? 'not-allowed' : 'pointer',
+                            opacity: shoongBulkSearching ? 0.6 : 1
+                          }}
+                        >
+                          {shoongBulkSearching ? '검색 중...' : '검색'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 2. 검색 결과 리스트 */}
+                    {shoongBulkCourses.length > 0 && (() => {
+                      const selectedCount = shoongBulkSelectedIds.length
+                      const totalApplicants = shoongBulkCourses
+                        .filter(c => shoongBulkSelectedIds.includes(c.id))
+                        .reduce((sum, c) => sum + (c.applicantCount || 0), 0)
+                      const allSelected = shoongBulkCourses.length > 0 && shoongBulkSelectedIds.length === shoongBulkCourses.length
+                      return (
+                        <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.25)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', fontSize: '12px', color: '#cbd5e1' }}>
+                            <span>
+                              검색 결과: <b style={{ color: '#fff' }}>{shoongBulkCourses.length}개 강의</b> ·
+                              선택 <b style={{ color: '#a78bfa' }}>{selectedCount}개</b> ·
+                              예상 수신자 <b style={{ color: '#34d399' }}>{totalApplicants.toLocaleString()}명</b>
+                              <span style={{ color: '#64748b', marginLeft: '6px' }}>(중복 번호는 발송 시 1회만)</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShoongBulkSelectedIds(allSelected ? [] : shoongBulkCourses.map(c => c.id))}
+                              style={{
+                                padding: '4px 10px', background: 'rgba(139,92,246,0.2)',
+                                border: '1px solid rgba(139,92,246,0.4)', borderRadius: '6px',
+                                color: '#c4b5fd', fontSize: '11px', cursor: 'pointer'
+                              }}
+                            >
+                              {allSelected ? '전체 해제' : '전체 선택'}
+                            </button>
+                          </div>
+                          <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {shoongBulkCourses.map(c => {
+                              const checked = shoongBulkSelectedIds.includes(c.id)
+                              return (
+                                <label
+                                  key={c.id}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', gap: '10px',
+                                    padding: '8px 10px',
+                                    background: checked ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.03)',
+                                    border: `1px solid ${checked ? 'rgba(139,92,246,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                                    borderRadius: '7px', cursor: 'pointer', fontSize: '12px'
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      setShoongBulkSelectedIds(prev =>
+                                        prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id]
+                                      )
+                                    }}
+                                    style={{ width: '16px', height: '16px', accentColor: '#8b5cf6', cursor: 'pointer' }}
+                                  />
+                                  <span style={{ flex: 1, color: '#e2e8f0', wordBreak: 'break-all' }}>{c.title}</span>
+                                  <span style={{ color: '#34d399', fontWeight: '600', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                    {(c.applicantCount || 0).toLocaleString()}명
+                                  </span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {shoongBulkCourses.length === 0 && shoongBulkKeyword && !shoongBulkSearching && (
+                      <div style={{ marginBottom: '16px', padding: '20px', textAlign: 'center', color: '#64748b', fontSize: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                        검색 결과가 없습니다. (Enter 또는 검색 버튼으로 조회)
+                      </div>
+                    )}
+
+                    {/* 3. 변수 입력 (선택된 강의가 있을 때만) */}
+                    {shoongBulkSelectedIds.length > 0 && (() => {
+                      const TPL = {
+                        'start(1)': ['유튜브링크', '강좌명', '강사명', '링크명'],
+                        'start(2)': ['유튜브링크', '강좌명', '강사님', '링크명'],
+                        'start(3)': ['시청자수', '유튜브링크', '강좌명', '강사님', '링크명']
+                      }
+                      const tplVars = TPL[shoongBulkTplCode] || []
+                      return (
+                        <>
+                          <div style={{ marginBottom: '12px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
+                              📋 템플릿 코드
+                            </label>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              {Object.keys(TPL).map(t => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  onClick={() => setShoongBulkTplCode(t)}
+                                  style={{
+                                    padding: '6px 14px',
+                                    background: shoongBulkTplCode === t ? 'rgba(139,92,246,0.3)' : 'rgba(255,255,255,0.05)',
+                                    border: `1px solid ${shoongBulkTplCode === t ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                                    borderRadius: '7px',
+                                    color: shoongBulkTplCode === t ? '#fff' : '#94a3b8',
+                                    fontSize: '12px', fontWeight: '600', cursor: 'pointer'
+                                  }}
+                                >{t}</button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+                            {tplVars.map(v => (
+                              <div key={v}>
+                                <label style={{ display: 'block', fontSize: '11px', color: '#cbd5e1', marginBottom: '4px', fontWeight: '500' }}>
+                                  변수: {v}
+                                  {v === '링크명' && <span style={{ color: '#fbbf24', marginLeft: '6px', fontSize: '10px' }}>· ⚠️ URL 양식 (https://...)</span>}
+                                </label>
+                                <input
+                                  type="text"
+                                  value={shoongBulkVars[v] || ''}
+                                  onChange={(e) => setShoongBulkVars(s => ({ ...s, [v]: e.target.value }))}
+                                  placeholder={
+                                    v === '유튜브링크' ? 'https://youtu.be/...'
+                                    : v === '링크명' ? 'https://... (버튼 클릭 시 이동할 URL)'
+                                    : v === '강좌명' ? '예: AI활용 컨텐츠 부업'
+                                    : v === '시청자수' ? '예: 320'
+                                    : '예: 씨오'
+                                  }
+                                  style={{
+                                    width: '100%', padding: '8px 11px',
+                                    background: 'rgba(0,0,0,0.35)',
+                                    border: '1px solid rgba(99,102,241,0.3)',
+                                    borderRadius: '7px', color: '#fff', fontSize: '12px', boxSizing: 'border-box'
+                                  }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* 즉시/예약 토글 */}
+                          <div style={{ marginBottom: '14px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: '500' }}>
+                              ⏰ 발송 시간
+                            </label>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              {['immediate', 'reserved'].map(m => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => setShoongBulkSendMode(m)}
+                                  style={{
+                                    padding: '6px 12px',
+                                    background: shoongBulkSendMode === m ? 'rgba(139,92,246,0.3)' : 'rgba(255,255,255,0.05)',
+                                    border: `1px solid ${shoongBulkSendMode === m ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                                    borderRadius: '7px',
+                                    color: shoongBulkSendMode === m ? '#fff' : '#94a3b8',
+                                    fontSize: '12px', cursor: 'pointer'
+                                  }}
+                                >{m === 'immediate' ? '즉시' : '예약'}</button>
+                              ))}
+                              {shoongBulkSendMode === 'reserved' && (
+                                <input
+                                  type="datetime-local"
+                                  value={shoongBulkReservedAt}
+                                  onChange={(e) => setShoongBulkReservedAt(e.target.value)}
+                                  style={{
+                                    padding: '6px 10px',
+                                    background: 'rgba(0,0,0,0.35)',
+                                    border: '1px solid rgba(99,102,241,0.3)',
+                                    borderRadius: '7px', color: '#fff', fontSize: '12px', marginLeft: '8px'
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+
+                          {/* 🧪 테스트 모드 박스 (대참사 방지) */}
+                          <div style={{
+                            marginBottom: '14px', padding: '14px',
+                            background: shoongBulkTestMode ? 'rgba(251,191,36,0.10)' : 'rgba(239,68,68,0.10)',
+                            border: `2px solid ${shoongBulkTestMode ? 'rgba(251,191,36,0.45)' : 'rgba(239,68,68,0.45)'}`,
+                            borderRadius: '10px'
+                          }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', marginBottom: shoongBulkTestMode ? '10px' : 0 }}>
+                              <input
+                                type="checkbox"
+                                checked={shoongBulkTestMode}
+                                onChange={(e) => setShoongBulkTestMode(e.target.checked)}
+                                style={{ width: '18px', height: '18px', accentColor: '#fbbf24', cursor: 'pointer' }}
+                              />
+                              <span style={{ fontSize: '13px', fontWeight: '700', color: shoongBulkTestMode ? '#fbbf24' : '#f87171' }}>
+                                {shoongBulkTestMode
+                                  ? '🧪 테스트 모드 ON — 내 번호로만 발송 (실제 신청자 X)'
+                                  : '⚠️ 테스트 모드 OFF — 실제 신청자 전원에게 발송됩니다!'}
+                              </span>
+                            </label>
+                            {shoongBulkTestMode && (
+                              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: '8px', paddingLeft: '28px' }}>
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '11px', color: '#fcd34d', marginBottom: '4px' }}>
+                                    내 번호 (모든 발송이 여기로 감)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={shoongBulkTestPhone}
+                                    onChange={(e) => setShoongBulkTestPhone(e.target.value)}
+                                    placeholder='01012345678 (하이픈 없이)'
+                                    style={{
+                                      width: '100%', padding: '8px 11px',
+                                      background: 'rgba(0,0,0,0.4)',
+                                      border: '1px solid rgba(251,191,36,0.4)',
+                                      borderRadius: '7px', color: '#fff', fontSize: '12px',
+                                      fontFamily: 'monospace', boxSizing: 'border-box'
+                                    }}
+                                  />
+                                </div>
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '11px', color: '#fcd34d', marginBottom: '4px' }}>
+                                    발송 횟수 (1~5)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={5}
+                                    value={shoongBulkTestLimit}
+                                    onChange={(e) => setShoongBulkTestLimit(parseInt(e.target.value, 10) || 1)}
+                                    style={{
+                                      width: '100%', padding: '8px 11px',
+                                      background: 'rgba(0,0,0,0.4)',
+                                      border: '1px solid rgba(251,191,36,0.4)',
+                                      borderRadius: '7px', color: '#fff', fontSize: '12px', boxSizing: 'border-box'
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 발송 버튼들 */}
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              disabled={shoongBulkSending}
+                              onClick={async () => {
+                                setShoongBulkSending(true)
+                                setShoongBulkResult(null)
+                                try {
+                                  const token = localStorage.getItem('authToken') || ''
+                                  const tplVarsForSend = TPL[shoongBulkTplCode] || []
+                                  const variables = {}
+                                  for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
+                                  const res = await fetch('/api/tools/shoong-bulk/send', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                    body: JSON.stringify({
+                                      courseIds: shoongBulkSelectedIds,
+                                      templatecode: shoongBulkTplCode,
+                                      variables,
+                                      dryRun: true
+                                    })
+                                  })
+                                  const data = await res.json()
+                                  setShoongBulkResult({ ...data, _httpStatus: res.status, _dryRun: true })
+                                } catch (err) {
+                                  setShoongBulkResult({ error: err.message })
+                                } finally {
+                                  setShoongBulkSending(false)
+                                }
+                              }}
+                              style={{
+                                padding: '10px 18px',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: '1px solid rgba(255,255,255,0.15)',
+                                borderRadius: '8px',
+                                color: '#cbd5e1', fontSize: '13px', fontWeight: '600',
+                                cursor: shoongBulkSending ? 'not-allowed' : 'pointer'
+                              }}
+                            >
+                              👀 미리보기 (발송 X, 수신자 수만 확인)
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                shoongBulkSending ||
+                                (shoongBulkSendMode === 'reserved' && !shoongBulkReservedAt) ||
+                                (shoongBulkTestMode && !shoongBulkTestPhone.trim())
+                              }
+                              onClick={async () => {
+                                const totalEst = shoongBulkCourses
+                                  .filter(c => shoongBulkSelectedIds.includes(c.id))
+                                  .reduce((sum, c) => sum + (c.applicantCount || 0), 0)
+
+                                if (shoongBulkTestMode) {
+                                  if (!confirm(`🧪 테스트 발송\n\n내 번호: ${shoongBulkTestPhone}\n발송 횟수: ${shoongBulkTestLimit}건\n\n진행할까요?`)) return
+                                } else {
+                                  // 실전 모드 — 2단계 컨펌
+                                  const c1 = confirm(`⚠️ 실전 발송 — 테스트 모드 OFF\n\n선택된 강의: ${shoongBulkSelectedIds.length}개\n예상 수신자: 최대 ${totalEst.toLocaleString()}명\n\n실제 신청자 전원에게 알림톡이 발송됩니다.\n\n계속할까요?`)
+                                  if (!c1) return
+                                  const typed = prompt(`정말로 ${totalEst.toLocaleString()}명에게 발송하려면 아래에 정확히 "발송"이라고 입력하세요.`)
+                                  if (typed !== '발송') {
+                                    alert('취소되었습니다.')
+                                    return
+                                  }
+                                }
+
+                                setShoongBulkSending(true)
+                                setShoongBulkResult(null)
+                                try {
+                                  const token = localStorage.getItem('authToken') || ''
+                                  const tplVarsForSend = TPL[shoongBulkTplCode] || []
+                                  const variables = {}
+                                  for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
+                                  const body = {
+                                    courseIds: shoongBulkSelectedIds,
+                                    templatecode: shoongBulkTplCode,
+                                    variables
+                                  }
+                                  if (shoongBulkSendMode === 'reserved' && shoongBulkReservedAt) {
+                                    body.reservedTime = new Date(shoongBulkReservedAt).toISOString()
+                                  }
+                                  if (shoongBulkTestMode) {
+                                    body.testPhone = shoongBulkTestPhone.trim()
+                                    body.testLimit = shoongBulkTestLimit
+                                  }
+                                  const res = await fetch('/api/tools/shoong-bulk/send', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                    body: JSON.stringify(body)
+                                  })
+                                  const data = await res.json()
+                                  setShoongBulkResult({ ...data, _httpStatus: res.status })
+                                } catch (err) {
+                                  setShoongBulkResult({ error: err.message })
+                                } finally {
+                                  setShoongBulkSending(false)
+                                }
+                              }}
+                              style={{
+                                padding: '10px 18px',
+                                background: shoongBulkTestMode
+                                  ? 'linear-gradient(135deg, #f59e0b, #fbbf24)'
+                                  : 'linear-gradient(135deg, #ef4444, #ec4899)',
+                                border: 'none', borderRadius: '8px',
+                                color: '#fff', fontSize: '13px', fontWeight: '700',
+                                cursor: shoongBulkSending ? 'not-allowed' : 'pointer',
+                                opacity: shoongBulkSending ? 0.6 : 1
+                              }}
+                            >
+                              {shoongBulkSending
+                                ? '발송 중...'
+                                : shoongBulkTestMode
+                                  ? `🧪 테스트 발송 (내 번호 ${shoongBulkTestLimit}건)`
+                                  : `🚀 ${shoongBulkSendMode === 'reserved' ? '예약' : '즉시'} 실전 발송`}
+                            </button>
+                          </div>
+                        </>
+                      )
+                    })()}
+
+                    {/* 결과 패널 */}
+                    {shoongBulkResult && (
+                      <div style={{
+                        marginTop: '16px', padding: '14px',
+                        background: shoongBulkResult.error ? 'rgba(239,68,68,0.10)' : 'rgba(16,185,129,0.10)',
+                        border: `1px solid ${shoongBulkResult.error ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                        borderRadius: '10px'
+                      }}>
+                        {shoongBulkResult.error ? (
+                          <div style={{ color: '#f87171', fontSize: '13px' }}>❌ {shoongBulkResult.error}</div>
+                        ) : shoongBulkResult._dryRun ? (
+                          <div style={{ fontSize: '13px', color: '#34d399', lineHeight: 1.7 }}>
+                            👀 <b>미리보기</b><br/>
+                            • 신청 행 총: <b>{shoongBulkResult.totalApplies?.toLocaleString()}건</b><br/>
+                            • 발송 대상(중복/무효 제거 후): <b style={{ color: '#fff' }}>{shoongBulkResult.recipientCount?.toLocaleString()}명</b><br/>
+                            • 제외: 사용자 없음 {shoongBulkResult.skipped?.noUser || 0}, 무효 번호 {shoongBulkResult.skipped?.invalidPhone || 0}, 중복 {shoongBulkResult.skipped?.duplicate || 0}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '13px', color: '#34d399', lineHeight: 1.7 }}>
+                            ✅ <b>발송 완료</b>
+                            {shoongBulkResult.testMode && (
+                              <span style={{ marginLeft: '6px', padding: '2px 8px', background: 'rgba(251,191,36,0.2)', color: '#fbbf24', borderRadius: '4px', fontSize: '11px', fontWeight: '700' }}>🧪 테스트 모드</span>
+                            )}<br/>
+                            {shoongBulkResult.testMode && (
+                              <>• 테스트 번호 <b style={{ color: '#fbbf24' }}>{shoongBulkResult.testMode.testPhone}</b>로 {shoongBulkResult.testMode.limit}건 발송 (실제 신청자 {shoongBulkResult.testMode.realRecipientCount?.toLocaleString()}명은 발송 안 됨)<br/></>
+                            )}
+                            • 대상: <b style={{ color: '#fff' }}>{shoongBulkResult.recipientCount?.toLocaleString()}명</b> ·
+                            성공 <b style={{ color: '#34d399' }}>{shoongBulkResult.sent}</b> ·
+                            실패 <b style={{ color: '#f87171' }}>{shoongBulkResult.failed}</b>
+                            {shoongBulkResult.reservedTime && <><br/>• 예약 시간: <b>{shoongBulkResult.reservedTime}</b></>}
+                            {shoongBulkResult.errors?.length > 0 && (
+                              <details style={{ marginTop: '8px' }}>
+                                <summary style={{ cursor: 'pointer', color: '#fbbf24' }}>실패 샘플 ({shoongBulkResult.errors.length}건)</summary>
+                                <pre style={{ fontSize: '11px', color: '#fca5a5', background: 'rgba(0,0,0,0.4)', padding: '8px', borderRadius: '6px', overflow: 'auto', maxHeight: '200px', margin: '6px 0 0 0' }}>{JSON.stringify(shoongBulkResult.errors, null, 2)}</pre>
+                              </details>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   {/* 도움말 */}
-                  <details style={{ fontSize: '12px', color: '#94a3b8' }}>
+                  <details style={{ fontSize: '12px', color: '#94a3b8', marginTop: '24px' }}>
                     <summary style={{ cursor: 'pointer', padding: '6px 0' }}>📖 결과 해석 가이드</summary>
                     <div style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', lineHeight: 1.7 }}>
                       <div><b>HTTP 200 / success:true</b> → 발송 성공. 수신자에게 알림톡 도착.</div>
