@@ -18,7 +18,6 @@ import {
   GraduationCap,
   Settings,
   CreditCard,
-  TrendingUp,
   ShieldCheck,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -1887,20 +1886,41 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           minHeight: '68px',
         }}>
           {sidebarCollapsed && !isMobile ? (
-            <div style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              background: 'var(--accent-grad)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)',
-            }}>
+            <button
+              onClick={() => { setCurrentTab('dashboard'); if(isMobile) setMobileMenuOpen(false) }}
+              title="대시보드로 이동"
+              style={{
+                width: '36px',
+                height: '36px',
+                padding: 0,
+                border: 'none',
+                borderRadius: '10px',
+                background: 'var(--accent-grad)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)',
+              }}
+            >
               <LayoutDashboard size={18} color="#fff" strokeWidth={2.2} />
-            </div>
+            </button>
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <button
+              onClick={() => { setCurrentTab('dashboard'); if(isMobile) setMobileMenuOpen(false) }}
+              title="대시보드로 이동"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                minWidth: 0,
+                padding: 0,
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
               <div style={{
                 width: '34px', height: '34px',
                 borderRadius: '9px',
@@ -1915,7 +1935,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.2, letterSpacing: '-0.01em' }}>강의 통합 관리</div>
                 <div style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: '2px' }}>N잡연구소</div>
               </div>
-            </div>
+            </button>
           )}
           {!isMobile && !sidebarCollapsed && (
             <button
@@ -2072,16 +2092,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   onClick={() => { setCurrentTab('payer-data'); if(isMobile) setMobileMenuOpen(false) }} />
               )}
               {loginId === 'jinwoo' && (
-                <>
-                  <SidebarItem icon={TrendingUp} label="구매 추이 시트" shortLabel="구매추이"
-                    href="https://docs.google.com/spreadsheets/d/1NciqOt6PaUggmroaov60UycBbkdIY6eVXSXfwLyvCRo/edit?gid=1217448453#gid=1217448453"
-                    external
-                    collapsed={sidebarCollapsed && !isMobile} />
-                  <SidebarItem icon={ShieldCheck} label="권한 설정" shortLabel="권한"
-                    active={currentTab === 'admin-permissions'}
-                    collapsed={sidebarCollapsed && !isMobile}
-                    onClick={() => { setCurrentTab('admin-permissions'); if(isMobile) setMobileMenuOpen(false) }} />
-                </>
+                <SidebarItem icon={ShieldCheck} label="권한 설정" shortLabel="권한"
+                  active={currentTab === 'admin-permissions'}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={() => { setCurrentTab('admin-permissions'); if(isMobile) setMobileMenuOpen(false) }} />
               )}
             </>
           )}
