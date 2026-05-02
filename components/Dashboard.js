@@ -7921,7 +7921,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             const sessionsForInstructor = sessions
               .filter(s => s.instructors?.name === selectedInstructor)
               .sort((a, b) => getSessionNumber(a.session_name) - getSessionNumber(b.session_name))
-            const instructorNames = [...new Set(sessions.map(s => s.instructors?.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))
+            // 신규 강사도 포함되도록 instructors 테이블에서 직접 가져옴 (sessions 기반이면 기수 있는 강사만 노출됨)
+            const instructorNames = [...new Set(instructors.map(i => i.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))
             const ready = !!selectedInstructor && !!selectedSessionId
             const instructorObj = instructors.find(i => i.name === selectedInstructor)
 
@@ -8134,6 +8135,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     <div style={{ marginTop: '10px', fontSize: '12px', color: '#94a3b8' }}>
                       현재 선택: <b style={{ color: '#a5b4fc' }}>{selectedInstructor}</b> · <b style={{ color: '#a5b4fc' }}>{currentSession?.session_name}</b>
                       {' · '}매칭된 자료 <b style={{ color: '#fff' }}>{attachments.length}개</b>
+                    </div>
+                  )}
+                  {selectedInstructor && sessionsForInstructor.length === 0 && (
+                    <div style={{ marginTop: '10px', padding: '10px 14px', background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.30)', borderRadius: '8px', fontSize: '12px', color: '#fbbf24', lineHeight: 1.55 }}>
+                      <b>{selectedInstructor}</b> 강사의 기수가 아직 없습니다. 우측 <b>+</b> 버튼으로 첫 기수를 추가하세요. (예: "1기")
                     </div>
                   )}
                 </div>
