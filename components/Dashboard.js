@@ -1284,12 +1284,40 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
   const addInstructor = async () => {
     if (!newInstructor.trim()) return
-    const { error } = await supabase.from('instructors').insert({ name: newInstructor })
-    if (!error) {
-      setNewInstructor('')
-      setShowAddModal(false)
-      loadInstructors()
+    const name = newInstructor.trim()
+
+    const { data: created, error } = await supabase
+      .from('instructors')
+      .insert({ name })
+      .select()
+      .single()
+    if (error) {
+      alert('강사 추가 실패: ' + error.message)
+      return
     }
+
+    // 신규 강사가 즉시 기획 단계 진입 가능하도록 "준비중" 자리표시 기수 자동 생성.
+    // session_name='준비중'이라 시트 매칭 안 되니 (준비중) 배지 자동 부착.
+    // 강의가 실제로 진행되면 + 버튼으로 "1기" 같은 정식 기수 추가하고 이건 삭제하면 됨.
+    const { data: placeholder } = await supabase
+      .from('sessions')
+      .insert({
+        instructor_id: created.id,
+        session_name: '준비중',
+        topic: '',
+        free_class_date: null,
+      })
+      .select()
+      .single()
+
+    setNewInstructor('')
+    setShowAddModal(false)
+    await loadInstructors()
+    await loadSessions()
+
+    // 새로 추가한 강사·기수 자동 선택 → 드롭다운에 즉시 노출 + 자료 영역 활성화
+    setSelectedInstructor(name)
+    if (placeholder?.id) setSelectedSessionId(placeholder.id)
   }
 
   // 결제자 탭 매핑 서버 함수들
@@ -1643,26 +1671,38 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const addSession = async () => {
     if (!newSession.instructor_id || !newSession.session_name) return
 
-    // 시트에서 데이터 확인
+    // 시트에 데이터가 있으면 free_class_date 자동 채움. 없어도 진행 (준비중 상태로 DB에 저장).
+    // 기획 단계엔 시트 데이터가 아직 없으니 강제 검증 X.
     const instructor = instructors.find(i => i.id === newSession.instructor_id)
-    const sheetCheck = await loadSheetData(instructor?.name, newSession.session_name)
-    
-    if (!sheetCheck) {
-      alert('데이터베이스 시트에 "' + instructor?.name + ' ' + newSession.session_name + '" 데이터가 없습니다.\n시트에 먼저 등록해주세요.')
+    let freeClassDate = null
+    try {
+      const sheetCheck = await loadSheetData(instructor?.name, newSession.session_name)
+      if (sheetCheck) freeClassDate = sheetCheck.freeClassDate || null
+    } catch (_) {
+      // 시트 조회 실패해도 무시 — DB에 우선 등록
+    }
+
+    const { data: created, error } = await supabase
+      .from('sessions')
+      .insert({
+        instructor_id: newSession.instructor_id,
+        session_name: newSession.session_name.trim(),
+        topic: newSession.topic,
+        free_class_date: freeClassDate,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      alert('기수 추가 실패: ' + error.message)
       return
     }
 
-    const { error } = await supabase.from('sessions').insert({
-      instructor_id: newSession.instructor_id,
-      session_name: newSession.session_name,
-      topic: newSession.topic,
-      free_class_date: sheetCheck.freeClassDate || null
-    })
-    if (!error) {
-      setNewSession({ instructor_id: '', session_name: '', topic: '' })
-      setShowAddModal(false)
-      loadSessions()
-    }
+    setNewSession({ instructor_id: '', session_name: '', topic: '' })
+    setShowAddModal(false)
+    await loadSessions()
+    // 방금 추가한 기수 자동 선택
+    if (created?.id) setSelectedSessionId(created.id)
   }
 
   const deleteInstructor = async (id) => {
