@@ -7926,6 +7926,24 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             const ready = !!selectedInstructor && !!selectedSessionId
             const instructorObj = instructors.find(i => i.name === selectedInstructor)
 
+            // ▼ "준비중" 판단: 매출표 시트(allSheetData)의 이름에 강사가 등장하는지로 판단.
+            // 시트 row.name 형식 예: "김탄생 1기", "청담언니 루시 1기".
+            // → 정규식 (.+?)\s+\d+\s*기 로 강사명 부분만 추출.
+            const sheetInstructorSet = new Set()
+            const sheetFullNameSet = new Set()
+            ;(allSheetData || []).forEach(d => {
+              const raw = (d?.name || '').trim()
+              if (!raw) return
+              sheetFullNameSet.add(raw)
+              const m = raw.match(/^(.+?)\s+\d+\s*기/)
+              sheetInstructorSet.add(m ? m[1].trim() : raw)
+            })
+            const isInstructorPreparing = (name) => !!name && !sheetInstructorSet.has(name)
+            const isSessionPreparing = (instName, sessName) => {
+              if (!instName || !sessName) return true
+              return !sheetFullNameSet.has(`${instName} ${sessName}`)
+            }
+
             const toggleTask = (key) => {
               if (!PLANNER_META[key]?.enabled) return
               setPpEnabledTasks(prev =>
@@ -8088,9 +8106,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           style={{ flex: 1, padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px' }}
                         >
                           <option value="" style={{ background: '#1e1e2e', color: '#fff' }}>강사 선택…</option>
-                          {instructorNames.map(name => (
-                            <option key={name} value={name} style={{ background: '#1e1e2e', color: '#fff' }}>{name}</option>
-                          ))}
+                          {instructorNames.map(name => {
+                            const preparing = isInstructorPreparing(name)
+                            return (
+                              <option key={name} value={name} style={{ background: '#1e1e2e', color: '#fff' }}>
+                                {name}{preparing ? ' (준비중)' : ''}
+                              </option>
+                            )
+                          })}
                         </select>
                         <button
                           type="button"
@@ -8111,9 +8134,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           style={{ flex: 1, padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', opacity: selectedInstructor ? 1 : 0.5 }}
                         >
                           <option value="" style={{ background: '#1e1e2e', color: '#fff' }}>기수 선택…</option>
-                          {sessionsForInstructor.map(s => (
-                            <option key={s.id} value={s.id} style={{ background: '#1e1e2e', color: '#fff' }}>{s.session_name}</option>
-                          ))}
+                          {sessionsForInstructor.map(s => {
+                            const preparing = isSessionPreparing(selectedInstructor, s.session_name)
+                            return (
+                              <option key={s.id} value={s.id} style={{ background: '#1e1e2e', color: '#fff' }}>
+                                {s.session_name}{preparing ? ' (준비중)' : ''}
+                              </option>
+                            )
+                          })}
                         </select>
                         <button
                           type="button"
@@ -8131,12 +8159,20 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       </div>
                     </div>
                   </div>
-                  {ready && (
-                    <div style={{ marginTop: '10px', fontSize: '12px', color: '#94a3b8' }}>
-                      현재 선택: <b style={{ color: '#a5b4fc' }}>{selectedInstructor}</b> · <b style={{ color: '#a5b4fc' }}>{currentSession?.session_name}</b>
-                      {' · '}매칭된 자료 <b style={{ color: '#fff' }}>{attachments.length}개</b>
-                    </div>
-                  )}
+                  {ready && (() => {
+                    const instPrep = isInstructorPreparing(selectedInstructor)
+                    const sessPrep = isSessionPreparing(selectedInstructor, currentSession?.session_name)
+                    const PrepBadge = () => (
+                      <span style={{ marginLeft: '4px', padding: '1px 6px', background: 'rgba(251,191,36,0.18)', color: '#fbbf24', borderRadius: '999px', fontSize: '10px', fontWeight: 700 }}>준비중</span>
+                    )
+                    return (
+                      <div style={{ marginTop: '10px', fontSize: '12px', color: '#94a3b8' }}>
+                        현재 선택: <b style={{ color: '#a5b4fc' }}>{selectedInstructor}</b>{instPrep && <PrepBadge />}
+                        {' · '}<b style={{ color: '#a5b4fc' }}>{currentSession?.session_name}</b>{sessPrep && !instPrep && <PrepBadge />}
+                        {' · '}매칭된 자료 <b style={{ color: '#fff' }}>{attachments.length}개</b>
+                      </div>
+                    )
+                  })()}
                   {selectedInstructor && sessionsForInstructor.length === 0 && (
                     <div style={{ marginTop: '10px', padding: '10px 14px', background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.30)', borderRadius: '8px', fontSize: '12px', color: '#fbbf24', lineHeight: 1.55 }}>
                       <b>{selectedInstructor}</b> 강사의 기수가 아직 없습니다. 우측 <b>+</b> 버튼으로 첫 기수를 추가하세요. (예: "1기")
