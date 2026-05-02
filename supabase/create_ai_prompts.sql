@@ -51,3 +51,8 @@ DROP TRIGGER IF EXISTS ai_references_updated_at ON ai_references;
 CREATE TRIGGER ai_references_updated_at
   BEFORE UPDATE ON ai_references
   FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+-- RLS 비활성: 두 테이블은 어드민 API(jinwoo)만 접근하고 기획 봇 설정용
+-- 텍스트만 담아 사용자 비밀이 없음. 앱 레벨 인증으로 충분.
+ALTER TABLE ai_prompts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_references DISABLE ROW LEVEL SECURITY;
