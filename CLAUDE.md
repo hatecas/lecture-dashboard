@@ -1,7 +1,7 @@
 # lecture-dashboard — 프로젝트 마스터 문서
 
 > 이 파일은 새 Claude 세션이 이 저장소를 처음 봤을 때 **전체 맥락을 빠르게 잡기 위한 단일 진입점**입니다.
-> 갱신: 2026-05-01 / 작업 브랜치: `claude/distracted-saha-9a699e`
+> 갱신: 2026-05-05 / 작업 브랜치: `claude/distracted-saha-9a699e`
 >
 > **세부 핸드오프 문서는 `docs/` 폴더 참조**:
 > - [order-sync-automation.md](docs/order-sync-automation.md) — 주문 동기화(nlab DB → 결제자 시트)
@@ -25,6 +25,7 @@
 5. 채널톡 CS AI 자동/추천 답변
 6. 무료강의 영상 AI 분석 (Gemini)
 7. CRM/유튜브 채팅/유입경로 매칭 등 부가 툴
+8. **프로젝트 기획 자동화** — 강사·기수 + 자료 → 멀티 봇 병렬 호출 (Phase 1: 무료 전자책 1개 활성, 어드민이 봇별 지침/레퍼런스 DB로 관리)
 
 **스택**: Next.js 16 (Turbopack), React 19, Tailwind 4, Supabase (자체 DB + nlab 운영 DB), Google Sheets API, Anthropic Claude, Google Gemini 2.0 Flash, 채널톡 OpenAPI, 슝 API.
 
@@ -36,15 +37,16 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Browser (components/Dashboard.js — 9516줄 단일 모놀리식)        │
+│ Browser (components/Dashboard.js — 모놀리식, 1만 줄+)          │
 └─────────────────────────────────────────────────────────────┘
               │ Authorization: Bearer {token}
               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Vercel Next.js (App Router)                                  │
 │ • app/page.js — 세션/인증 셸                                  │
-│ • app/api/** — 백엔드 라우트 21개                             │
+│ • app/api/** — 백엔드 라우트 23개                             │
 │ • lib/apiAuth.js — 토큰 검증                                  │
+│ • lib/planners/ — 프로젝트 기획 봇별 모듈 (오케스트레이터 패턴) │
 └─────────────────────────────────────────────────────────────┘
        │              │             │           │            │
        ▼              ▼             ▼           ▼            ▼
@@ -70,14 +72,16 @@
 ```
 lecture-dashboard/
 ├── app/
-│   ├── api/                          ★ 백엔드 라우트 21개
+│   ├── api/                          ★ 백엔드 라우트 23개
+│   │   ├── admin/
+│   │   │   └── planner-config/       ★ 어드민: 봇별 지침/레퍼런스 CRUD (jinwoo 전용)
 │   │   ├── analyze/                  AI 종합 분석 (Anthropic, 첨부파일 기반)
 │   │   ├── channel-conversations/    채널톡 대화 조회
 │   │   ├── channel-webhook/          채널톡 → 우리 webhook (CHANNEL_WEBHOOK_TOKEN 검증)
 │   │   ├── cs-ai/                    CS AI 답변 (Anthropic + RAG)
 │   │   ├── cs-history/               CS 상담 이력 CRUD
 │   │   ├── cs-policies/              CS 정책 CRUD
-│   │   ├── files/                    파일 업로드 (Supabase Storage)
+│   │   ├── files/                    파일 업로드 (Supabase Storage, instructor+session 매칭)
 │   │   ├── lecture-analyze-gemini/   ★ 강의 영상 분석 (Gemini, SSE 스트리밍)
 │   │   ├── lecture-history/          분석 이력
 │   │   ├── login-log/                로그인 로그 (verifyApiAuth 강제)
@@ -91,6 +95,7 @@ lecture-dashboard/
 │   │   ├── sheets-meta/              시트 메타데이터
 │   │   ├── tools/
 │   │   │   ├── order-sync/           ★ 주문 동기화 (nlab → 결제자 시트)
+│   │   │   ├── project-planner/      ★ 멀티 봇 오케스트레이터 (Promise.all 병렬)
 │   │   │   ├── shoong-bulk/courses/  슝 강의 검색
 │   │   │   ├── shoong-bulk/send/     ★ 슝 대량 발송 (DB or 수동 명단)
 │   │   │   ├── shoong-send/          슝 단건 발송
@@ -101,7 +106,7 @@ lecture-dashboard/
 │   ├── layout.tsx                    HTML 루트
 │   └── page.js                       세션·로그인 셸
 ├── components/
-│   ├── Dashboard.js                  ★ 9516줄 모놀리식 — 모든 탭 UI
+│   ├── Dashboard.js                  ★ 모놀리식 — 모든 탭 UI (1만줄+)
 │   ├── HelpTooltip.js                도움말 툴팁
 │   └── Login.js                      로그인 카드
 ├── lib/
@@ -109,12 +114,19 @@ lecture-dashboard/
 │   ├── auth.js                       세션 생성/연장/삭제
 │   ├── googleAuth.js                 서비스 계정 토큰 생성
 │   ├── nlabSupabase.js               nlab DB 클라이언트 (서버 전용)
-│   └── supabase.js                   자체 DB 클라이언트
+│   ├── supabase.js                   자체 DB 클라이언트
+│   └── planners/                     ★ 프로젝트 기획 봇 모듈
+│       ├── _config.js                지침/레퍼런스 DB 로드 헬퍼 (폴백 처리)
+│       ├── ebook.js                  무료 전자책 봇 (Phase 1 활성)
+│       └── index.js                  레지스트리 + PLANNER_META
 ├── supabase/                         자체 DB 마이그레이션 SQL
 │   ├── create_lecture_analysis_cache.sql
 │   ├── create_lecture_analysis_history.sql
 │   ├── create_payer_tab_mappings.sql
-│   └── create_user_permissions.sql
+│   ├── create_user_permissions.sql
+│   ├── add_session_id_to_attachments.sql  ← 자료를 강사+기수에 매칭
+│   ├── create_ai_prompts.sql               ← 봇별 지침/레퍼런스 테이블
+│   └── fix_ai_prompts_rls.sql              ← RLS 비활성 (위 마이그레이션이 이미 포함하나 hot-fix용 별도)
 ├── docs/                             ★ 핸드오프 문서들
 │   ├── order-sync-automation.md
 │   ├── shoong-alimtok-automation.md
@@ -137,9 +149,10 @@ lecture-dashboard/
 | 메뉴 | 핵심 기능 | 데이터 출처 |
 |---|---|---|
 | **대시보드** | 강사+기수 선택 → KPI 카드 (매출, 영업이익, ROAS, 카톡방, 결제건수 등) + 차트 | `/api/sheets` (Google Sheets) + `/api/sales-analysis` (nlab DB) |
-| **상세 정보** | 강사 메모, 첨부파일/링크, AI 종합 분석 | `memos`/`youtube_links` 테이블, `/api/files`, `/api/analyze` (Anthropic) |
 | **랭킹** | 모든 강사를 지표별 정렬 | `/api/sheets` 전체 데이터 |
 | **대조** | 두 강사·기수 좌우 비교 | 동일 |
+
+> ❌ 메인-상세 정보 페이지는 2026-05-05 제거됨. 강사 메모/첨부파일은 **프로젝트 기획**으로 통합 (자료는 강사+기수 조합에 매칭되어 DB 저장).
 
 ### 업무 도구 (`툴` 메뉴 안의 서브툴)
 | 서브툴 | 기능 |
@@ -151,6 +164,12 @@ lecture-dashboard/
 | **슝 알림톡 발송** | 3섹션: 🧪 테스트 / 📢 실전(DB 검색) / 📁 수동 업로드(CSV) |
 | **주문 동기화** | nlab `TossCustomer` → 결제자 시트 자동 append |
 
+### 프로젝트 기획 (별도 메뉴)
+| 메뉴 | 기능 | 데이터 흐름 |
+|---|---|---|
+| **🪄 프로젝트 기획** | 강사·기수 선택 + 자료 업로드 + 멀티 봇 병렬 호출 | 자체 DB(`instructors`/`sessions`/`instructor_attachments`) + `/api/tools/project-planner` → `lib/planners/<key>.js` × N |
+| **🪄 기획 봇 설정** (jinwoo) | 봇별 지침/레퍼런스 CRUD | 자체 DB(`ai_prompts`/`ai_references`) + `/api/admin/planner-config` |
+
 ### 관리자 / 자료
 | 메뉴 | 기능 |
 |---|---|
@@ -159,19 +178,20 @@ lecture-dashboard/
 | **무료강의 분석기** | YouTube URL → Gemini → 마크다운 분석 리포트, 이력 저장 |
 | **시트 설정** | 강사 매출 시트의 컬럼 인덱스 매핑 (DB `sheet_column_config`) |
 | **결제자 데이터** | 결제자 시트 직접 조회/검색 |
+| **기획 봇 설정** (jinwoo) | 7개 봇별 지침(`ai_prompts`) + 레퍼런스(`ai_references`) DB 관리 |
 | **권한 설정** (jinwoo 전용) | 일반 관리자별 메뉴 표시 권한 토글 |
 
 ---
 
-## 4. 환경변수
+## 4. 환경변수 + DB 마이그레이션
 
 전체 목록은 [`.env.example`](.env.example) 참조. 요약:
 
-### 필수
+### 환경변수 — 필수
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` — 자체 DB
 - `NLAB_SUPABASE_URL`, `NLAB_SUPABASE_SERVICE_ROLE_KEY` — nlab 운영 DB
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` — Sheets API
-- `ANTHROPIC_API_KEY` — Claude
+- `ANTHROPIC_API_KEY` — Claude (`/api/analyze`, `/api/cs-ai`, 프로젝트 기획 봇들)
 - `GEMINI_API_KEY` — 강의 분석기 (2026-05 신규)
 - `SHOONG_API_KEY`, `SHOONG_SENDER_KEY` — 알림톡
 - `CHANNEL_ACCESS_KEY`, `CHANNEL_ACCESS_SECRET`, `CHANNEL_WEBHOOK_TOKEN` — 채널톡
@@ -184,6 +204,19 @@ lecture-dashboard/
 - ~~`PYTHON_BACKEND_URL`~~, ~~`NEXT_PUBLIC_PYTHON_BACKEND_URL`~~ — Python 백엔드 제거
 
 ⚠️ Vercel 환경변수 변경 후엔 **수동 Redeploy 필요**.
+
+### DB 마이그레이션 — 자체 Supabase에서 실행
+
+순서대로 한 번씩 실행 (모두 IF NOT EXISTS 처리되어 재실행 안전):
+
+1. `supabase/create_user_permissions.sql` — 권한 테이블 (구버전, 이미 적용됨)
+2. `supabase/create_payer_tab_mappings.sql` — 결제자 탭 매핑 (이미 적용됨)
+3. `supabase/create_lecture_analysis_*.sql` — 강의 분석 캐시/이력 (이미 적용됨)
+4. `supabase/add_session_id_to_attachments.sql` — **2026-05 신규**. 자료를 강사+기수 조합에 매칭. session_id 컬럼 추가
+5. `supabase/create_ai_prompts.sql` — **2026-05 신규**. 봇별 지침/레퍼런스 테이블 + 트리거 + RLS 비활성
+6. `supabase/fix_ai_prompts_rls.sql` — 5번이 이미 RLS 비활성 포함하지만, 이미 5번을 RLS 미비활성으로 돌린 환경의 hot-fix용 별도 파일
+
+각 파일 내용은 [SQL Editor](https://supabase.com/dashboard/project/aznxzcpcsraqsvkoozfc/sql)에 복붙해서 Run.
 
 ---
 
@@ -310,11 +343,47 @@ const username = auth.user.username
 if (username !== 'jinwoo') return 403
 ```
 
+### 5-11. 프로젝트 기획 — 봇 추가 절차
+
+새 봇(예: 붐업, 알림톡 등) 활성화하려면:
+1. `lib/planners/<key>.js` 생성 — `ebook.js` 패턴 복사 (시스템 프롬프트, JSON 출력 강제, `loadPlannerConfig(featureKey, defaults)` 사용)
+2. `lib/planners/index.js`에 import + `planners` 등록
+3. `Dashboard.js`의 두 군데 `PLANNER_META`에서 `enabled: true`로 변경:
+   - 프로젝트 기획 탭 (currentTab === 'project-planner') 내부 IIFE
+   - 기획 봇 설정 탭 (currentTab === 'planner-config') 내부 IIFE
+4. 프로젝트 기획 결과 카드 분기 추가: `renderPlanContent(taskKey, plan)` 안에 `if (taskKey === 'boomUp') {...}` 같은 새 분기. 출력 JSON 구조에 맞춰 매핑.
+5. 어드민이 `/planner-config`에서 그 봇의 지침·레퍼런스 입력하면 즉시 반영.
+
+### 5-12. 봇 지침/레퍼런스 DB 패턴
+
+- `ai_prompts(feature_key UNIQUE, instructions)` — 1:1
+- `ai_references(feature_key, title, content, tags[], meta jsonb, enabled, sort_order)` — 1:N
+- 두 테이블 모두 RLS 비활성 (어드민 API gate로 충분)
+- `lib/planners/_config.js`의 `loadPlannerConfig(featureKey, {instructions, references})` — DB 비어있으면 `defaults` 폴백
+- 매 봇 호출마다 DB SELECT 2개 → Anthropic prompt-caching으로 시스템 프롬프트는 5분 내 재호출 시 90% 할인
+- 어드민 변경 즉시 다음 호출부터 반영 (캐시 invalidation 불필요)
+
+### 5-13. (준비중) 배지 동작
+
+매출표 시트(`allSheetData`)에 등장하지 않는 강사·기수에 자동 부착:
+- `isInstructorPreparing(name)` — 시트의 `(.+?)\s+\d+\s*기` 정규식 매치에 강사명이 없으면 true
+- `isSessionPreparing(inst, sess)` — 시트에 `"강사명 기수명"` 풀네임이 없으면 true
+- 강의 진행되고 매출표에 등장하면 자동으로 배지 사라짐 (별도 플래그 X)
+- 신규 강사는 `addInstructor`가 자동으로 `session_name='준비중'` 기수 1개를 같이 만들어줘서 즉시 기획 진입 가능
+
 ---
 
 ## 6. 최근 작업 (이 브랜치 `claude/distracted-saha-9a699e`)
 
 ```
+a2a334b  신규 강사 추가 시 '준비중' 기수 자동 생성 + 시트 등록 강제 검증 제거
+4132046  프로젝트 기획: 시트에 데이터 없는 강사·기수에 (준비중) 배지
+bc930a0  fix(planner): 강사 드롭다운에서 신규 강사 누락되던 문제
+e449e60  fix(planner-config): ai_prompts / ai_references RLS 비활성
+94805c9  관리자 페이지: 기획 봇 설정 (지침/레퍼런스 CRUD) + 플래너 DB 로드
+99a14ef  프로젝트 기획: 강사·기수 선택 + 자료 업로드 통합 + 상세정보 페이지 제거
+bec6a47  프로젝트 기획 멀티 봇 오케스트레이터 (Phase 1 - 전자책 1개)
+7aada51  docs: CLAUDE.md 마스터 문서 추가
 fa3a057  정리: Python 백엔드 제거(Gemini 직접 호출) + design-preview 삭제 + .env.example
 635c92a  보안 수정: user-permissions / login-log 인증 우회 차단
 91fcd3c  슝 알림톡: 사이드바 라벨 정리 + UI 3섹션 구조 + CSV 수동 업로드
@@ -377,6 +446,34 @@ be9ad92  UI 리프레시: 사이드바·로그인·상단바 + 디자인 토큰
 - yt-dlp 오디오 다운로드 폴백 — Vercel 환경 제약(바이너리 X, 300초 한도). 비공개/연령제한/지역제한 영상은 분석 불가 (전체 1~5%)
 - Map-Reduce 긴 자막 분할 — Gemini의 영상 URL 모드는 자체 컨텍스트로 처리
 
+**G. 프로젝트 기획 멀티 봇 오케스트레이터 (bec6a47, 99a14ef)**
+- 새 사이드바 메뉴 **🪄 프로젝트 기획** + 라우트 `/api/tools/project-planner`.
+- 겉으론 1개 버튼 ([🪄 기획 생성])이지만 안에선 봇별 모듈을 `Promise.all` 병렬 실행:
+  - `lib/planners/index.js` — 레지스트리 + `PLANNER_META` (label/icon/desc/enabled)
+  - `lib/planners/<key>.js` — 봇별 시스템 프롬프트 빌더 + Anthropic 호출 + JSON 파서
+  - 한 봇 실패가 다른 봇에 전파 안 됨 (각자 try/catch)
+- Phase 1: **무료 전자책 1개만 활성**. 나머지 6개(붐업/알림톡/바이럴 질문/PPT/상페/단톡방 공지)는 UI에 '준비 중' 배지로 자리만.
+- 입력 화면 3섹션:
+  - 강사·기수 선택 (드롭다운 + 새 강사/기수 추가 버튼)
+  - 자료 업로드 (드래그앤드롭, 파일/폴더/링크) — 강사+기수 조합에 매칭되어 DB 저장 (`instructor_attachments.session_id` 신설)
+  - 주제 + 추가 컨텍스트 + 항목 체크박스 + 생성 버튼
+- 결과 화면: 항목별 펼침 카드, [🔄 이 섹션만 다시] [📋 JSON 복사], 토큰 사용량 details.
+- 메인-상세 정보 페이지 제거. 첨부파일/메모 인프라는 프로젝트 기획으로 이전.
+
+**H. 어드민 기획 봇 설정 (94805c9, e449e60)**
+- 사이드바 jinwoo 전용 **🪄 기획 봇 설정** 메뉴 (`Library` 아이콘).
+- 새 DB 테이블 2개: `ai_prompts` (봇별 지침 1:1), `ai_references` (봇별 모범 사례 1:N).
+- 새 라우트 `/api/admin/planner-config` — GET / POST(action=save-instructions/add-reference/update-reference/delete-reference). jinwoo 권한 필수.
+- `lib/planners/_config.js` 헬퍼 — 봇 호출 직전 DB에서 지침·레퍼런스 로드, 비어있으면 `lib/planners/<key>.js`의 `DEFAULT_*`로 폴백.
+- 어드민 UI: 좌측 봇 목록 + 우측 지침 textarea(저장 버튼) + 레퍼런스 카드 리스트(추가/수정/삭제/ON·OFF).
+- ⚠️ Supabase가 새 테이블에 RLS 자동 활성 → INSERT 막힘 → `ALTER TABLE ... DISABLE ROW LEVEL SECURITY` 적용 (e449e60). 어드민 API에서 jinwoo 강제하므로 DB RLS는 중복.
+
+**I. 신규 강사·기수 워크플로 (bc930a0, 4132046, a2a334b)**
+- 강사 드롭다운 데이터 소스: `sessions` 테이블(기수 있는 강사만) → `instructors` 테이블(전체)으로 변경 → 신규 강사도 즉시 노출.
+- `addInstructor` 수정: 강사 row 생성 직후 `sessions`에 `{session_name: '준비중', free_class_date: null}` 자리표시 row 자동 insert. 신규 강사는 즉시 (강사) / 준비중 조합으로 선택 가능.
+- `addSession` 수정: 시트 데이터 강제 검증 제거. 시트에 있으면 `free_class_date` 자동 채우고, 없어도 null로 통과.
+- (준비중) 배지 자동 동작: `allSheetData` 의 이름과 매칭 안 되면 자동 표시. 강의 끝나고 매출표에 등장하면 배지 자동 사라짐. 충돌 발생 X.
+
 ---
 
 ## 7. 앞으로 할 일
@@ -398,14 +495,18 @@ be9ad92  UI 리프레시: 사이드바·로그인·상단바 + 디자인 토큰
 
 **1번 PPT 자동 생성을 제외한 8개는 공통 엔진 1개로 커버 가능**: 강사 컨텍스트(녹음본·메모·자료) + 레퍼런스 풀 + 프롬프트 → LLM → 형식화된 출력. 출력 형식만 다름.
 
-**Phase 0 — 빠진 인프라 (~4일)**:
-- `references` 테이블 + 어드민 업로드 UI (강사·카테고리별 모범 사례 라이브러리)
-- `ai_prompts` 테이블 + 어드민 편집 UI (프롬프트 핫스왑)
-- `<AiDraftEditor>` 공통 컴포넌트 (좌: 입력·컨텍스트, 중: AI 출력 편집, 우: 액션)
-- 노션 API 통합 (`/api/integrations/notion/page`) — 첨부 링크 자동 텍스트화
-- Gemini STT 어댑터 (`/api/integrations/transcribe`) — 음성 첨부 자동 텍스트화
+**Phase 0 — 빠진 인프라 (대부분 완료됨, 2026-05-05 기준)**:
+- ✅ `ai_references` 테이블 + 어드민 업로드 UI — 봇별 모범 사례 라이브러리 (CRUD + ON/OFF + 정렬)
+- ✅ `ai_prompts` 테이블 + 어드민 편집 UI — 프롬프트 핫스왑 (저장 즉시 다음 호출부터 반영)
+- ✅ 멀티 봇 오케스트레이터 (`/api/tools/project-planner` + `lib/planners/` 레지스트리)
+- ✅ 자료 업로드(파일/폴더/링크) — 강사+기수 조합에 매칭
+- ⏳ 노션 API 통합 (`/api/integrations/notion/page`) — 첨부 링크 자동 텍스트화 (미시작)
+- ⏳ Gemini STT 어댑터 (`/api/integrations/transcribe`) — 음성 첨부 자동 텍스트화 (미시작)
+- ⏳ `<AiDraftEditor>` 공통 컴포넌트 분리 — 현재 프로젝트 기획 탭 안에 인라인 (Dashboard.js 점진 분리 시작 사례로 활용 가능)
 
-**Phase 1 (~3~4일)**: 멘트류 4개 (3 → 7 → 6 → 5)
+**Phase 1 — 봇 추가 (~3~4일, 진행 중)**: 1차 활성 봇은 무료 전자책. 다음 후보 4개 (3 → 7 → 6 → 5)
+- 새 봇 추가 절차는 § 5-11 참조
+
 **Phase 2 (~4~5일)**: 기획 초안 3개 (4 → 9 → 8)
 **Phase 3 (별도)**: PPT 자동 생성 (1번)
 
@@ -419,13 +520,15 @@ be9ad92  UI 리프레시: 사이드바·로그인·상단바 + 디자인 토큰
 - design-preview 제거
 - `.env.example` 신규
 - 사이드바 "(테스트)" 라벨 정리
+- 메인-상세 정보 페이지 제거 (프로젝트 기획으로 흡수)
 
 🟢 남은 항목:
-- **Sentry 도입** (1시간) — 프로덕션 에러 캡처. AI 9개 기능 출시 전 권장
-- **`Dashboard.js` 점진 분리** (분기마다 1~2개 추출) — 9516줄 단일 파일. 신규 기능은 새 파일에 만들고 기존은 천천히 추출. AI 기획 Phase 0의 `<AiDraftEditor>`가 첫 분리 사례.
+- **Sentry 도입** (1시간) — 프로덕션 에러 캡처. AI 봇 추가 전 권장
+- **`Dashboard.js` 점진 분리** (분기마다 1~2개 추출) — 1만 줄+ 단일 파일. 신규 기능은 새 파일에 만들고 기존은 천천히 추출. 프로젝트 기획 탭의 IIFE 안에 있는 로직(예: `<AiDraftEditor>`)이 첫 분리 사례 후보.
 - **`sheet_column_config` DB 동기화** — 매출 컬럼 변경(I→K)을 시트 설정 UI에서 한 번 저장 필요 (코드 기본값과 일치시키기)
 - **TypeScript 점진 마이그레이션** — 신규 파일만 `.tsx`. 강제 변환 X.
 - **번들 크기 최적화** — `recharts`/`xlsx` 동적 import. 측정 후 결정.
+- **준비중 기수 자동 정리** — 정식 기수(예: '1기')가 추가되면 같은 강사의 '준비중' row를 자동 삭제하거나 inactive 처리 (현재는 사용자 수동 정리)
 
 ### 7-3. 운영 모니터링 메모
 
