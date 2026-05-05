@@ -8298,6 +8298,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       <b>{selectedInstructor}</b> 강사의 기수가 아직 없습니다. 우측 <b>+</b> 버튼으로 첫 기수를 추가하세요. (예: "1기")
                     </div>
                   )}
+                  {/* 진단용 — 프론트가 실제 받은 데이터 확인. 문제 해결되면 제거 가능. */}
+                  <details style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-faint)' }}>
+                    <summary style={{ cursor: 'pointer' }}>🔍 디버그: 로드된 데이터 ({instructors.length}명 강사, {sessions.length}개 기수)</summary>
+                    <div style={{ marginTop: '6px', padding: '8px', background: 'rgba(0,0,0,0.30)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '11px', maxHeight: '120px', overflowY: 'auto' }}>
+                      <div style={{ color: '#94a3b8', marginBottom: '4px' }}>강사 ({instructors.length}):</div>
+                      <div style={{ color: '#cbd5e1' }}>{instructors.map(i => i.name).join(', ') || '(없음)'}</div>
+                    </div>
+                  </details>
                 </div>
 
                 {/* ───── 2. 자료 업로드 ───── */}
