@@ -8038,9 +8038,19 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               const m = raw.match(/^(.+?)\s+\d+\s*기/)
               sheetInstructorSet.add(m ? m[1].trim() : raw)
             })
-            const isInstructorPreparing = (name) => !!name && !sheetInstructorSet.has(name)
+            // 시트가 아직 로드되지 않은 상태에서는 모든 강사를 '준비중'으로 잘못 표기하는 깜빡임 방지 →
+            // sheetReady가 false면 배지 보류 (false 반환).
+            const sheetReady = sheetInstructorSet.size > 0
+            const isInstructorPreparing = (name) => {
+              if (!sheetReady || !name) return false
+              // 'session_name=준비중'과 일관성: 그냥 시트에 없으면 true
+              return !sheetInstructorSet.has(name)
+            }
             const isSessionPreparing = (instName, sessName) => {
-              if (!instName || !sessName) return true
+              if (!instName || !sessName) return false
+              // 자리표시 준비중 기수는 항상 (준비중)
+              if (sessName === '준비중') return true
+              if (!sheetReady) return false
               return !sheetFullNameSet.has(`${instName} ${sessName}`)
             }
 
