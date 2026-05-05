@@ -38,13 +38,21 @@ export async function GET(request) {
     ])
     if (instRes.error) throw instRes.error
     if (sessRes.error) throw sessRes.error
+    const instructorsData = instRes.data || []
+    const sessionsData = sessRes.data || []
+    console.log(
+      `[/api/admin/instructors GET] usingServiceRole=${isUsingServiceRole} ` +
+      `instructors.count=${instructorsData.length} sessions.count=${sessionsData.length} ` +
+      `instructors=[${instructorsData.map(i => i.name).join(', ')}]`
+    )
     return Response.json({
       success: true,
-      instructors: instRes.data || [],
-      sessions: sessRes.data || [],
+      instructors: instructorsData,
+      sessions: sessionsData,
       _diagnostic: { usingServiceRole: isUsingServiceRole },
     })
   } catch (err) {
+    console.error('[/api/admin/instructors GET] error:', err)
     return Response.json({ error: err.message }, { status: 500 })
   }
 }
@@ -70,11 +78,32 @@ export async function POST(request) {
         .select()
         .single()
       if (instErr) {
+        console.error(`[POST create-instructor] INSERT 실패 name="${name}":`, instErr)
         return Response.json({ error: '강사 INSERT 실패: ' + instErr.message, code: instErr.code }, { status: 500 })
       }
       if (!created || !created.id) {
+        console.error(`[POST create-instructor] INSERT 후 row 없음 (read-back 차단)`)
         return Response.json({ error: 'INSERT 후 행을 가져올 수 없음 (RLS SELECT 정책 의심)' }, { status: 500 })
       }
+      console.log(`[POST create-instructor] inserted id=${created.id} name="${created.name}"`)
+
+      // 진단: INSERT 직후 별도 SELECT로 실제 DB에 commit 됐는지 검증.
+      // service_role로 select했는데 0 rows이면 트랜잭션 문제 등 더 깊은 이슈.
+      const { data: verify, error: verifyErr } = await supabase
+        .from('instructors')
+        .select('id, name, created_at')
+        .eq('id', created.id)
+        .maybeSingle()
+      if (verifyErr || !verify) {
+        console.error(`[POST create-instructor] VERIFY 실패! id=${created.id} name="${created.name}" verify=${JSON.stringify(verify)} err=${verifyErr?.message}`)
+        return Response.json({
+          error: 'INSERT는 성공했는데 직후 SELECT에서 행이 안 보입니다. DB 트리거/뷰/제약 확인 필요.',
+          createdId: created.id,
+          verify,
+          verifyErr: verifyErr?.message,
+        }, { status: 500 })
+      }
+      console.log(`[POST create-instructor] verified ok: id=${verify.id}`)
 
       // 자리표시 기수 자동 생성 (실패해도 강사 등록은 살림)
       let placeholderSession = null
