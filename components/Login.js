@@ -315,14 +315,6 @@ export default function Login({ onLogin }) {
             </button>
           </form>
 
-          <p style={{
-            textAlign: 'center',
-            color: 'var(--text-faint)',
-            fontSize: '11.5px',
-            marginTop: '20px',
-          }}>
-            테스트 계정 · admin / 1234
-          </p>
         </div>
 
         {/* Footer */}

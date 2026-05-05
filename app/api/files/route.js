@@ -57,6 +57,9 @@ export async function POST(request) {
     const linkUrl = formData.get('link_url')
     const linkTitle = formData.get('link_title')
     const description = formData.get('description')
+    // 'material'(기본) | 'ebook'(강사 전자책 원문 - AI가 핵심 자료로 사용)
+    const fileRoleRaw = formData.get('file_role')
+    const fileRole = fileRoleRaw === 'ebook' ? 'ebook' : 'material'
 
     if (!instructorId) {
       return NextResponse.json({ error: 'instructor_id 필요' }, { status: 400 })
@@ -70,6 +73,7 @@ export async function POST(request) {
           instructor_id: instructorId,
           session_id: sessionId,
           file_type: 'link',
+          file_role: fileRole,
           file_name: linkTitle || linkUrl,
           file_url: linkUrl,
           description: description || null
@@ -162,6 +166,7 @@ export async function POST(request) {
         instructor_id: instructorId,
         session_id: sessionId,
         file_type: category,
+        file_role: fileRole,
         file_name: fileName,
         file_url: urlData.publicUrl,
         file_size: buffer.length,

@@ -158,6 +158,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [uploadProgress, setUploadProgress] = useState({ show: false, current: 0, total: 0, fileName: '' })
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
+  const ebookInputRef = useRef(null) // 전자책(file_role='ebook') 전용 업로드
 
   // 툴 관련 상태
   const [currentTool, setCurrentTool] = useState('crm') // crm, kakao, youtube (inflow는 권한 필요)
@@ -348,6 +349,16 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_error, setPpError] = useState('')
   const [pp_taskRetrying, setPpTaskRetrying] = useState(null) // 개별 재생성 중인 task key
   const [pp_expanded, setPpExpanded] = useState({})
+
+  // 👥 계정 관리 (관리자 전용) 상태
+  const [am_loading, setAmLoading] = useState(false)
+  const [am_accounts, setAmAccounts] = useState([])
+  const [am_allFeatures, setAmAllFeatures] = useState([])
+  const [am_modal, setAmModal] = useState(null) // null | 'add' | { id, ... } (편집용)
+  const [am_draft, setAmDraft] = useState({ name: '', username: '', password: '', features: ['basic-dashboard', 'tools', 'resources', 'lecture-analyzer'] })
+  const [am_busy, setAmBusy] = useState(false)
+  const [am_revealPwd, setAmRevealPwd] = useState({}) // { [id]: true }
+  const [am_message, setAmMessage] = useState('')
 
   // 🛠️ 기획 봇 설정 (관리자 전용) 상태
   const [pc_loading, setPcLoading] = useState(false)
@@ -999,18 +1010,18 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     if (currentTab === 'payer-data' && payerSheetTabs.length === 0) {
       loadPayerSheetTabs(payerSheetYear)
     }
-    if (currentTab === 'admin-permissions' && loginId === 'jinwoo' && permUsers.length === 0) {
-      setPermLoading(true)
-      fetch(`/api/user-permissions?action=all-users`, { headers: getAuthHeaders() })
+    if (currentTab === 'account-management' && loginId === 'jinwoo' && am_accounts.length === 0) {
+      setAmLoading(true)
+      fetch('/api/admin/accounts', { headers: getAuthHeaders() })
         .then(r => r.json())
         .then(data => {
           if (data.success) {
-            setPermUsers(data.users)
-            setPermAllFeatures(data.allFeatures)
+            setAmAccounts(data.accounts || [])
+            setAmAllFeatures(data.allFeatures || [])
           }
         })
         .catch(() => {})
-        .finally(() => setPermLoading(false))
+        .finally(() => setAmLoading(false))
     }
     if (currentTab === 'planner-config' && loginId === 'jinwoo' && !pc_loaded) {
       setPcLoading(true)
@@ -1429,7 +1440,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }
   }
 
-  const uploadFiles = async (files) => {
+  const uploadFiles = async (files, role = 'material') => {
     if (!files || files.length === 0) return
     const instructorId = getSelectedInstructorId()
     if (!instructorId) return
@@ -1461,6 +1472,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       formData.append('instructor_id', instructorId)
       if (selectedSessionId) formData.append('session_id', selectedSessionId)
       formData.append('file_type', 'file')
+      formData.append('file_role', role)
 
       try {
         const response = await fetch('/api/files', {
@@ -1503,9 +1515,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   }
 
   const handleFileUpload = async (e) => {
-    await uploadFiles(e.target.files)
+    await uploadFiles(e.target.files, 'material')
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (folderInputRef.current) folderInputRef.current.value = ''
+  }
+
+  const handleEbookUpload = async (e) => {
+    await uploadFiles(e.target.files, 'ebook')
+    if (ebookInputRef.current) ebookInputRef.current.value = ''
   }
 
   // 드래그 앤 드롭 핸들러
@@ -2198,10 +2215,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     active={currentTab === 'planner-config'}
                     collapsed={sidebarCollapsed && !isMobile}
                     onClick={() => { setCurrentTab('planner-config'); if(isMobile) setMobileMenuOpen(false) }} />
-                  <SidebarItem icon={ShieldCheck} label="권한 설정" shortLabel="권한"
-                    active={currentTab === 'admin-permissions'}
+                  <SidebarItem icon={ShieldCheck} label="계정 관리" shortLabel="계정"
+                    active={currentTab === 'account-management'}
                     collapsed={sidebarCollapsed && !isMobile}
-                    onClick={() => { setCurrentTab('admin-permissions'); if(isMobile) setMobileMenuOpen(false) }} />
+                    onClick={() => { setCurrentTab('account-management'); if(isMobile) setMobileMenuOpen(false) }} />
                 </>
               )}
             </>
@@ -7994,11 +8011,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             const buildAttachmentSummary = () => {
               if (!attachments || attachments.length === 0) return ''
               const lines = attachments.map((a) => {
-                const tag = a.session_id ? '[기수전용]' : '[강사공통]'
+                // 전자책 본문은 서버에서 별도 추출해 ebookContents로 따로 전달됨 → 여기선 메타만 표시
+                const role = a.file_role === 'ebook' ? '[전자책]' : (a.session_id ? '[기수전용]' : '[강사공통]')
                 if (a.file_type === 'link') {
-                  return `- ${tag} ${a.file_name} → ${a.file_url}${a.description ? ' :: ' + a.description : ''}`
+                  return `- ${role} ${a.file_name} → ${a.file_url}${a.description ? ' :: ' + a.description : ''}`
                 }
-                return `- ${tag} ${a.file_name} (${a.file_type}${a.file_size ? `, ${Math.round(a.file_size / 1024)}KB` : ''})${a.description ? ' :: ' + a.description : ''}`
+                return `- ${role} ${a.file_name} (${a.file_type}${a.file_size ? `, ${Math.round(a.file_size / 1024)}KB` : ''})${a.description ? ' :: ' + a.description : ''}`
               })
               return '\n\n[첨부 자료 목록]\n' + lines.join('\n')
             }
@@ -8013,6 +8031,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 setPpError('주제와 최소 1개 항목이 필요합니다.')
                 return null
               }
+              // 전자책이 필요한 task 사전 검증 (현재는 'ebook')
+              if (tasks.includes('ebook')) {
+                const ebookCount = attachments.filter(a => a.file_role === 'ebook').length
+                if (ebookCount === 0) {
+                  alert('📚 무료 전자책 기획안을 만들려면 강사가 제공한 전자책 파일이 필요합니다.\n\n자료 영역의 [📚 전자책] 버튼으로 PDF나 텍스트 파일을 먼저 업로드해주세요.')
+                  return null
+                }
+              }
               setPpError('')
               if (overrideTasks) setPpTaskRetrying(overrideTasks[0])
               else setPpLoading(true)
@@ -8025,6 +8051,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   body: JSON.stringify({
                     instructor: selectedInstructor,
                     sessionName: currentSession?.session_name || '',
+                    sessionId: selectedSessionId, // 서버가 전자책 첨부 조회에 사용
                     topic: pp_topic,
                     additionalContext: fullContext,
                     enabledTasks: tasks,
@@ -8236,12 +8263,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '15px' }}>📎</span> 자료 (파일 / 링크)
+                      <span style={{ fontSize: '15px' }}>📎</span> 자료 (파일 / 링크 / 전자책)
                       <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 강사·기수에 매칭되어 DB에 저장</span>
                     </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple style={{ display: 'none' }} />
                       <input type="file" ref={folderInputRef} onChange={handleFileUpload} webkitdirectory="" directory="" multiple style={{ display: 'none' }} />
+                      <input type="file" ref={ebookInputRef} onChange={handleEbookUpload} accept=".pdf,.txt,.md,.markdown" multiple style={{ display: 'none' }} />
                       <button onClick={() => fileInputRef.current?.click()} disabled={!ready || fileUploading}
                         style={{ padding: '7px 12px', background: 'var(--accent-grad)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5 }}>
                         {fileUploading ? '업로드 중…' : '📁 파일'}
@@ -8253,6 +8281,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       <button onClick={() => setShowFileModal(true)} disabled={!ready}
                         style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '12px', fontWeight: 600, cursor: ready ? 'pointer' : 'not-allowed', opacity: ready ? 1 : 0.5 }}>
                         🔗 링크
+                      </button>
+                      <button onClick={() => ebookInputRef.current?.click()} disabled={!ready || fileUploading}
+                        title="강사가 제공한 전자책 PDF/텍스트만 업로드. AI가 핵심 자료로 사용."
+                        style={{ padding: '7px 12px', background: 'linear-gradient(135deg, #d97706, #f59e0b)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 700, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5, boxShadow: '0 4px 10px rgba(245,158,11,0.30)' }}>
+                        📚 전자책
                       </button>
                     </div>
                   </div>
@@ -8283,13 +8316,21 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       </div>
                       <div style={{ background: 'rgba(0,0,0,0.20)', borderRadius: '8px', maxHeight: '260px', overflowY: 'auto' }}>
                         {attachments.map((file, idx) => {
-                          const tagColor = file.session_id ? '#a5b4fc' : '#94a3b8'
-                          const tagBg = file.session_id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)'
+                          const isEbook = file.file_role === 'ebook'
+                          const tagColor = isEbook ? '#fbbf24' : (file.session_id ? '#a5b4fc' : '#94a3b8')
+                          const tagBg = isEbook ? 'rgba(245,158,11,0.20)' : (file.session_id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)')
+                          const tagLabel = isEbook ? '📚 전자책' : (file.session_id ? '기수전용' : '강사공통')
                           return (
-                            <div key={file.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: idx < attachments.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', gap: '8px' }}>
-                              <span style={{ fontSize: '14px' }}>{getFileIcon(file.file_type)}</span>
-                              <span style={{ fontSize: '10px', padding: '2px 6px', background: tagBg, color: tagColor, borderRadius: '4px', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                {file.session_id ? '기수전용' : '강사공통'}
+                            <div key={file.id} style={{
+                              display: 'flex', alignItems: 'center',
+                              padding: '8px 12px',
+                              borderBottom: idx < attachments.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                              gap: '8px',
+                              background: isEbook ? 'rgba(245,158,11,0.06)' : 'transparent',
+                            }}>
+                              <span style={{ fontSize: '14px' }}>{isEbook ? '📚' : getFileIcon(file.file_type)}</span>
+                              <span style={{ fontSize: '10px', padding: '2px 6px', background: tagBg, color: tagColor, borderRadius: '4px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                {tagLabel}
                               </span>
                               <a href={file.file_url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, color: file.file_type === 'link' ? '#a5b4fc' : '#e2e8f0', fontSize: '12px', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {file.file_name}
@@ -9639,178 +9680,286 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             )
           })()}
 
-          {/* 권한 설정 탭 (jinwoo 전용) */}
-          {currentTab === 'admin-permissions' && loginId === 'jinwoo' && (
-            <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-              <div style={{ marginBottom: '24px' }}>
-                <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '4px' }}>
-                  🔐 권한 설정
-                </h2>
-                <p style={{ color: '#64748b', fontSize: '13px' }}>가입된 계정별로 접근 가능한 기능을 설정합니다.</p>
-              </div>
+          {/* 👥 계정 관리 탭 (jinwoo 전용) — 이름·아이디·비밀번호·권한 CRUD */}
+          {currentTab === 'account-management' && loginId === 'jinwoo' && (() => {
+            const FEATURE_LABELS = {
+              'basic-dashboard': '기본 대시보드',
+              'tools':           '업무 툴',
+              'resources':       '시트 통합',
+              'cs-ai':           'CS AI',
+              'lecture-analyzer':'무료강의 분석기',
+              'project-planner': '프로젝트 기획',
+              'sheet-settings':  '시트 설정',
+              'payer-data':      '결제자 데이터',
+            }
 
-              {permLoading ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>불러오는 중...</div>
-              ) : (
-                <div style={{
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '16px',
-                  overflow: 'hidden'
-                }}>
-                  {/* 테이블 헤더 */}
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr 1fr 1fr',
-                    padding: '12px 20px',
-                    borderBottom: '1px solid rgba(255,255,255,0.08)',
-                    background: 'rgba(255,255,255,0.03)'
-                  }}>
-                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>이름</span>
-                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' }}>아이디</span>
-                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', textAlign: 'right' }}>권한 수</span>
+            const openAdd = () => {
+              setAmDraft({ name: '', username: '', password: '', features: ['basic-dashboard', 'tools', 'resources', 'lecture-analyzer'] })
+              setAmModal('add')
+              setAmMessage('')
+            }
+            const openEdit = (acc) => {
+              setAmDraft({ name: acc.name || '', username: acc.username || '', password: acc.password || '', features: [...(acc.features || [])] })
+              setAmModal({ id: acc.id, originalUsername: acc.username })
+              setAmMessage('')
+            }
+            const closeModal = () => {
+              if (am_busy) return
+              setAmModal(null)
+            }
+            const toggleFeatureInDraft = (key) => {
+              setAmDraft(d => ({
+                ...d,
+                features: d.features.includes(key) ? d.features.filter(f => f !== key) : [...d.features, key]
+              }))
+            }
+
+            const submitModal = async () => {
+              const isAdd = am_modal === 'add'
+              const id = am_modal && am_modal.id
+              if (!am_draft.name.trim() || !am_draft.username.trim() || (isAdd && !am_draft.password.trim())) {
+                setAmMessage('❌ 이름·아이디·비밀번호 모두 필요')
+                return
+              }
+              setAmBusy(true)
+              setAmMessage('')
+              try {
+                const body = isAdd
+                  ? { action: 'create', name: am_draft.name.trim(), username: am_draft.username.trim(), password: am_draft.password.trim(), features: am_draft.features }
+                  : { action: 'update', id, name: am_draft.name.trim(), username: am_draft.username.trim(), password: am_draft.password.trim() || undefined, features: am_draft.features }
+                const res = await fetch('/api/admin/accounts', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify(body),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+                // 갱신
+                const refreshed = await fetch('/api/admin/accounts', { headers: getAuthHeaders() }).then(r => r.json())
+                if (refreshed.success) setAmAccounts(refreshed.accounts || [])
+                setAmModal(null)
+                setAmMessage(isAdd ? '✅ 계정 추가됨' : '✅ 계정 수정됨')
+              } catch (e) {
+                setAmMessage('❌ ' + e.message)
+              } finally {
+                setAmBusy(false)
+              }
+            }
+
+            const deleteAccount = async (acc) => {
+              if (acc.isSuperAdmin) {
+                alert('슈퍼어드민(jinwoo) 계정은 삭제할 수 없습니다.')
+                return
+              }
+              if (!confirm(`정말로 계정 "${acc.name} (${acc.username})" 을(를) 삭제할까요?\n\n이 계정으로 로그인된 활성 세션도 모두 종료됩니다.`)) return
+              setAmBusy(true)
+              try {
+                const res = await fetch('/api/admin/accounts', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify({ action: 'delete', id: acc.id }),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+                setAmAccounts(prev => prev.filter(a => a.id !== acc.id))
+                setAmMessage('✅ 계정 삭제됨')
+              } catch (e) {
+                setAmMessage('❌ ' + e.message)
+              } finally {
+                setAmBusy(false)
+              }
+            }
+
+            const togglePwdReveal = (id) => {
+              setAmRevealPwd(s => ({ ...s, [id]: !s[id] }))
+            }
+
+            return (
+              <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1100px', margin: '0 auto' }}>
+                <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--accent-grad)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
+                        <ShieldCheck size={18} color="#fff" strokeWidth={2.2} />
+                      </span>
+                      계정 관리
+                    </h2>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.55 }}>
+                      관리자 계정의 이름·아이디·비밀번호·메뉴 권한을 등록·수정·삭제합니다. 슈퍼어드민(jinwoo)은 보호되어 변경 불가.
+                    </p>
                   </div>
+                  <button onClick={openAdd}
+                    style={{ padding: '10px 16px', background: 'var(--accent-grad)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 6px 14px rgba(99,102,241,0.30)' }}>
+                    ➕ 새 계정 추가
+                  </button>
+                </div>
 
-                  {permUsers.map((user, idx) => {
-                    const isSuper = user.isSuperAdmin
-                    const editFeatures = permEditMap[user.id] || user.features
-                    const isExpanded = permExpandedUser === user.id
-                    const enabledCount = isSuper ? permAllFeatures.length : editFeatures.length
+                {am_message && (
+                  <div style={{
+                    marginBottom: '14px', padding: '10px 14px',
+                    background: am_message.startsWith('✅') ? 'rgba(16,185,129,0.10)' : 'rgba(239,68,68,0.10)',
+                    border: `1px solid ${am_message.startsWith('✅') ? 'rgba(16,185,129,0.30)' : 'rgba(239,68,68,0.30)'}`,
+                    borderRadius: '8px',
+                    color: am_message.startsWith('✅') ? '#34d399' : '#fca5a5',
+                    fontSize: '13px',
+                  }}>{am_message}</div>
+                )}
 
-                    return (
-                      <div key={user.id} style={{
-                        borderBottom: idx < permUsers.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
-                      }}>
-                        {/* 행 (클릭 가능) */}
-                        <div
-                          onClick={() => setPermExpandedUser(isExpanded ? null : user.id)}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '1fr 1fr 1fr',
-                            padding: '14px 20px',
-                            cursor: 'pointer',
-                            alignItems: 'center',
-                            background: isExpanded ? 'rgba(99,102,241,0.08)' : 'transparent',
-                            transition: 'background 0.2s'
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{
-                              width: '32px', height: '32px', borderRadius: '50%',
-                              background: isSuper ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.1)',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '13px', fontWeight: '700', color: '#fff', flexShrink: 0
-                            }}>
-                              {(user.name || user.username || '?')[0].toUpperCase()}
-                            </span>
-                            <span style={{ fontSize: '14px', fontWeight: '600', color: '#e2e8f0' }}>
-                              {user.name || user.username}
-                              {isSuper && <span style={{ marginLeft: '8px', fontSize: '10px', background: 'rgba(99,102,241,0.3)', padding: '2px 8px', borderRadius: '10px', color: '#a5b4fc' }}>최고 관리자</span>}
-                            </span>
-                          </div>
-                          <span style={{ fontSize: '13px', color: '#94a3b8' }}>@{user.username}</span>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
-                            <span style={{ fontSize: '13px', color: '#a5b4fc', fontWeight: '600' }}>
-                              {enabledCount} / {permAllFeatures.length}
-                            </span>
-                            <span style={{
-                              fontSize: '12px', color: '#64748b',
-                              transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                              transition: 'transform 0.2s'
-                            }}>▼</span>
-                          </div>
-                        </div>
+                {am_loading && (
+                  <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>불러오는 중…</div>
+                )}
 
-                        {/* 펼침 영역 */}
-                        {isExpanded && (
-                          <div style={{
-                            padding: '16px 20px',
-                            background: 'rgba(99,102,241,0.04)',
-                            borderTop: '1px solid rgba(255,255,255,0.06)'
-                          }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '8px', marginBottom: !isSuper ? '16px' : '0' }}>
-                              {permAllFeatures.map(f => {
-                                const checked = isSuper ? true : editFeatures.includes(f.key)
-                                return (
-                                  <label key={f.key} style={{
-                                    display: 'flex', alignItems: 'center', gap: '10px',
-                                    padding: '10px 14px', borderRadius: '10px',
-                                    background: checked ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)',
-                                    border: checked ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
-                                    cursor: isSuper ? 'default' : 'pointer',
-                                    opacity: isSuper ? 0.7 : 1,
-                                    transition: 'all 0.2s'
-                                  }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      disabled={isSuper}
-                                      onChange={() => {
-                                        if (isSuper) return
-                                        setPermEditMap(prev => {
-                                          const current = prev[user.id] || [...user.features]
-                                          const next = current.includes(f.key)
-                                            ? current.filter(k => k !== f.key)
-                                            : [...current, f.key]
-                                          return { ...prev, [user.id]: next }
-                                        })
-                                      }}
-                                      style={{ accentColor: '#6366f1', width: '16px', height: '16px' }}
-                                    />
-                                    <div>
-                                      <div style={{ fontSize: '13px', fontWeight: '600', color: checked ? '#a5b4fc' : 'rgba(255,255,255,0.6)' }}>{f.label}</div>
-                                      <div style={{ fontSize: '11px', color: '#64748b' }}>{f.desc}</div>
-                                    </div>
-                                  </label>
-                                )
-                              })}
+                {!am_loading && am_accounts.length === 0 && (
+                  <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '13px', border: '2px dashed var(--border)', borderRadius: '10px' }}>
+                    등록된 계정이 없습니다.
+                  </div>
+                )}
+
+                {!am_loading && am_accounts.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {am_accounts.map(acc => {
+                      const revealed = !!am_revealPwd[acc.id]
+                      return (
+                        <div key={acc.id} style={{
+                          background: 'rgba(255,255,255,0.04)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '12px',
+                          padding: '14px 16px',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                            <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'var(--accent-grad)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '14px', flexShrink: 0 }}>
+                              {(acc.name || acc.username || '?').trim().charAt(0).toUpperCase()}
                             </div>
-                            {!isSuper && (
-                              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                <button
-                                  onClick={async () => {
-                                    setPermSaving(user.id)
-                                    try {
-                                      const res = await fetch('/api/user-permissions', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                                        body: JSON.stringify({
-                                          action: 'save-permissions',
-                                          userId: user.id,
-                                          features: editFeatures
-                                        })
-                                      })
-                                      const data = await res.json()
-                                      if (data.success) {
-                                        setPermUsers(prev => prev.map(u => u.id === user.id ? { ...u, features: [...editFeatures] } : u))
-                                      } else {
-                                        alert(data.error || '저장 실패')
-                                      }
-                                    } catch (e) { alert('저장 중 오류') }
-                                    setPermSaving(null)
-                                  }}
-                                  disabled={permSaving === user.id}
-                                  style={{
-                                    padding: '8px 24px',
-                                    background: permSaving === user.id ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                                    border: 'none', borderRadius: '10px',
-                                    color: '#fff', fontSize: '13px', fontWeight: '600',
-                                    cursor: permSaving === user.id ? 'wait' : 'pointer'
-                                  }}
-                                >
-                                  {permSaving === user.id ? '저장 중...' : '저장'}
+                            <div style={{ flex: 1, minWidth: '180px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>{acc.name}</span>
+                                {acc.isSuperAdmin && (
+                                  <span style={{ fontSize: '10px', padding: '2px 8px', background: 'rgba(245,158,11,0.20)', color: '#fbbf24', borderRadius: '999px', fontWeight: 700 }}>슈퍼어드민</span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#94a3b8', fontFamily: 'monospace', marginTop: '2px' }}>@{acc.username}</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button onClick={() => openEdit(acc)} disabled={acc.isSuperAdmin || am_busy}
+                                style={{ padding: '7px 12px', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '7px', color: '#c7d2fe', fontSize: '12px', fontWeight: 600, cursor: acc.isSuperAdmin ? 'not-allowed' : 'pointer', opacity: acc.isSuperAdmin ? 0.4 : 1 }}>
+                                ✏️ 편집
+                              </button>
+                              <button onClick={() => deleteAccount(acc)} disabled={acc.isSuperAdmin || am_busy}
+                                style={{ padding: '7px 12px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.30)', borderRadius: '7px', color: '#f87171', fontSize: '12px', fontWeight: 600, cursor: acc.isSuperAdmin ? 'not-allowed' : 'pointer', opacity: acc.isSuperAdmin ? 0.4 : 1 }}>
+                                🗑️ 삭제
+                              </button>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+                            <div>
+                              <div style={{ color: 'var(--text-faint)', fontSize: '10px', fontWeight: 600, marginBottom: '3px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>비밀번호</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <code style={{ flex: 1, padding: '6px 10px', background: 'rgba(0,0,0,0.30)', border: '1px solid var(--border)', borderRadius: '6px', color: '#cbd5e1', fontSize: '12px', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {revealed ? (acc.password || '(빈 값)') : '••••••••'}
+                                </code>
+                                <button type="button" onClick={() => togglePwdReveal(acc.id)}
+                                  style={{ padding: '5px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '6px', color: '#94a3b8', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                  {revealed ? '숨기기' : '보기'}
                                 </button>
                               </div>
-                            )}
+                            </div>
+                            <div>
+                              <div style={{ color: 'var(--text-faint)', fontSize: '10px', fontWeight: 600, marginBottom: '3px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>권한 ({acc.features.length}/{Object.keys(FEATURE_LABELS).length})</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                {acc.features.map(f => (
+                                  <span key={f} style={{ fontSize: '10.5px', padding: '3px 8px', background: 'rgba(99,102,241,0.12)', color: '#c7d2fe', borderRadius: '999px', fontWeight: 600 }}>
+                                    {FEATURE_LABELS[f] || f}
+                                  </span>
+                                ))}
+                                {acc.features.length === 0 && (
+                                  <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>(권한 없음)</span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* 추가/편집 모달 */}
+                {am_modal && (
+                  <div onClick={closeModal}
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
+                    <div onClick={(e) => e.stopPropagation()}
+                      style={{ width: '100%', maxWidth: '500px', background: '#11131a', border: '1px solid var(--border)', borderRadius: '16px', padding: '24px', boxShadow: 'var(--shadow-lg)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+                        <h3 style={{ fontSize: '17px', fontWeight: 700 }}>
+                          {am_modal === 'add' ? '➕ 새 계정 추가' : '✏️ 계정 편집'}
+                        </h3>
+                        <button onClick={closeModal} disabled={am_busy}
+                          style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '22px', cursor: am_busy ? 'wait' : 'pointer' }}>×</button>
                       </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>이름 *</label>
+                          <input type="text" value={am_draft.name} onChange={(e) => setAmDraft(d => ({ ...d, name: e.target.value }))}
+                            placeholder="홍길동"
+                            style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>아이디 *</label>
+                          <input type="text" value={am_draft.username} onChange={(e) => setAmDraft(d => ({ ...d, username: e.target.value }))}
+                            placeholder="hong"
+                            style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
+                            비밀번호 {am_modal === 'add' ? '*' : <span style={{ color: '#64748b', fontWeight: 400 }}>(변경 시에만 입력)</span>}
+                          </label>
+                          <input type="text" value={am_draft.password} onChange={(e) => setAmDraft(d => ({ ...d, password: e.target.value }))}
+                            placeholder={am_modal === 'add' ? '비밀번호' : '비워두면 기존 비밀번호 유지'}
+                            style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: 500 }}>권한 (메뉴 표시 여부)</label>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                            {Object.entries(FEATURE_LABELS).map(([key, label]) => {
+                              const checked = am_draft.features.includes(key)
+                              return (
+                                <label key={key} style={{
+                                  display: 'flex', alignItems: 'center', gap: '8px',
+                                  padding: '7px 10px',
+                                  background: checked ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.02)',
+                                  border: `1px solid ${checked ? 'rgba(99,102,241,0.35)' : 'var(--border)'}`,
+                                  borderRadius: '7px',
+                                  cursor: 'pointer',
+                                  fontSize: '12px',
+                                }}>
+                                  <input type="checkbox" checked={checked} onChange={() => toggleFeatureInDraft(key)}
+                                    style={{ accentColor: '#8b5cf6', cursor: 'pointer' }} />
+                                  <span>{label}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '20px' }}>
+                        <button onClick={closeModal} disabled={am_busy}
+                          style={{ padding: '9px 16px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', color: '#94a3b8', fontSize: '13px', cursor: am_busy ? 'wait' : 'pointer' }}>
+                          취소
+                        </button>
+                        <button onClick={submitModal} disabled={am_busy}
+                          style={{ padding: '9px 18px', background: 'var(--accent-grad)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: am_busy ? 'wait' : 'pointer', boxShadow: '0 6px 14px rgba(99,102,241,0.30)' }}>
+                          {am_busy ? '저장 중…' : (am_modal === 'add' ? '추가' : '저장')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
         </div>
 
