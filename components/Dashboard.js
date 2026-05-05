@@ -1297,19 +1297,28 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     if (!newInstructor.trim()) return
     const name = newInstructor.trim()
 
-    // 1) instructors 테이블에 INSERT
+    // 1) instructors 테이블에 INSERT (.select() 반환은 RLS 영향 받을 수 있음)
     const { data: created, error } = await supabase
       .from('instructors')
       .insert({ name })
       .select()
       .single()
+
     if (error) {
-      alert('강사 추가 실패: ' + error.message)
+      // RLS 추정: 'new row violates row-level security policy' 또는 read-back 0 rows
+      console.error('[addInstructor] insert error:', error)
+      alert('강사 추가 실패: ' + error.message + '\n\n관리자에게 문의: instructors 테이블의 RLS 정책을 확인해주세요.')
+      return
+    }
+    if (!created || !created.id) {
+      // INSERT는 성공했지만 RLS가 SELECT를 막아 created가 null인 케이스
+      console.error('[addInstructor] insert succeeded but row not returned. RLS SELECT 정책을 확인하세요. 응답:', { created, error })
+      alert('강사가 등록됐는지 확인할 수 없습니다. (RLS의 SELECT 정책이 신규 행을 가려서 응답을 못 받음)\n\nSupabase에서 다음 SQL을 실행하세요:\nALTER TABLE instructors DISABLE ROW LEVEL SECURITY;\nALTER TABLE sessions DISABLE ROW LEVEL SECURITY;')
       return
     }
 
     // 2) 즉시 로컬 state에도 반영 (React 재랜더 → 드롭다운에 즉시 노출).
-    //    뒤이어 loadInstructors()로 서버와 동기화. 둘 중 하나가 늦어도 사용자가 빈 화면을 보지 않게.
+    //    뒤이어 loadInstructors()로 서버와 동기화.
     setInstructors(prev => {
       // 같은 name이 이미 있으면 중복 회피
       if (prev.some(i => i.name === created.name)) return prev
