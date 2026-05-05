@@ -1153,7 +1153,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         headers: getAuthHeaders()
       })
       const data = await response.json()
-      if (!data.error) return data
+      // 시트에 등록 안 된 신규 '준비중' 케이스: { data: null, notFound: true } → null 반환
+      if (data?.notFound || data?.error) return null
+      return data
     } catch (error) {
       console.error('시트 데이터 로드 실패:', error)
     }

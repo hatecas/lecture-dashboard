@@ -140,7 +140,9 @@ export async function GET(request) {
       const normalizedName = name.replace(/\s+/g, ' ').trim()
       const found = allData.find(d => d.name === normalizedName)
       if (found) return NextResponse.json(found)
-      return NextResponse.json({ error: '데이터를 찾을 수 없습니다' }, { status: 404 })
+      // 시트에 없는 강사·기수도 정상 케이스(신규 '준비중' 단계). 404 → 200 + null 반환해서
+      // 브라우저 콘솔에 빨간 에러로 찍히지 않게.
+      return NextResponse.json({ data: null, notFound: true })
     }
 
     // 전체 반환
