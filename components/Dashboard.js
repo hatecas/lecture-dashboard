@@ -1107,33 +1107,44 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }
   }
 
-  const loadInstructors = async () => {
-    const { data } = await supabase.from('instructors').select('*').order('name')
-    if (data) setInstructors(data)
+  // 서버 라우트(/api/admin/instructors GET, service_role)로 instructors+sessions 한 번에 로드.
+  // anon 키 SELECT가 RLS에 가려지는 케이스를 회피.
+  const loadInstructorsAndSessions = async () => {
+    try {
+      const res = await fetch('/api/admin/instructors', { headers: getAuthHeaders(), cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        console.error('[loadInstructorsAndSessions] server error:', data)
+        return
+      }
+      const instructorsData = data.instructors || []
+      const sessionsData = data.sessions || []
+      setInstructors(instructorsData)
+      if (sessionsData.length > 0) {
+        setSessions(sessionsData)
+        // 최초 진입 시 첫 강사·기수 자동 선택
+        const sortedInstructorNames = [...new Set(sessionsData.map(s => s.instructors?.name))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'))
+        const firstInstructor = sortedInstructorNames[0] || ''
+        const getNum = (name) => { const m = name?.match(/(\d+)/); return m ? parseInt(m[1]) : 0 }
+        setSelectedInstructor(prev => {
+          if (prev) return prev
+          const firstSession = sessionsData
+            .filter(s => s.instructors?.name === firstInstructor)
+            .sort((a, b) => getNum(a.session_name) - getNum(b.session_name))[0]
+          if (firstSession) setSelectedSessionId(firstSession.id)
+          return firstInstructor
+        })
+      }
+    } catch (e) {
+      console.error('[loadInstructorsAndSessions] network error:', e)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const loadSessions = async () => {
-    const { data } = await supabase
-      .from('sessions')
-      .select('*, instructors (name)')
-    if (data && data.length > 0) {
-      setSessions(data)
-      // 강사를 ㄱㄴㄷ순으로 정렬 후 첫 번째 강사 선택 (최초 로드 시에만)
-      const sortedInstructorNames = [...new Set(data.map(s => s.instructors?.name))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'ko'))
-      const firstInstructor = sortedInstructorNames[0] || ''
-      const getNum = (name) => { const m = name?.match(/(\d+)/); return m ? parseInt(m[1]) : 0 }
-      // 기존 선택이 없을 때만 기본값 설정
-      setSelectedInstructor(prev => {
-        if (prev) return prev // 이미 선택된 경우 유지
-        const firstSession = data
-          .filter(s => s.instructors?.name === firstInstructor)
-          .sort((a, b) => getNum(a.session_name) - getNum(b.session_name))[0]
-        if (firstSession) setSelectedSessionId(firstSession.id)
-        return firstInstructor
-      })
-    }
-    setLoading(false)
-  }
+  // 기존 호출 호환용 — 둘 다 같은 endpoint를 호출하도록.
+  const loadInstructors = loadInstructorsAndSessions
+  const loadSessions = loadInstructorsAndSessions
 
   const loadSheetData = async (instructorName, sessionName) => {
     const name = `${instructorName} ${sessionName}`
@@ -1297,67 +1308,54 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     if (!newInstructor.trim()) return
     const name = newInstructor.trim()
 
-    // 1) instructors 테이블에 INSERT (.select() 반환은 RLS 영향 받을 수 있음)
-    const { data: created, error } = await supabase
-      .from('instructors')
-      .insert({ name })
-      .select()
-      .single()
-
-    if (error) {
-      // RLS 추정: 'new row violates row-level security policy' 또는 read-back 0 rows
-      console.error('[addInstructor] insert error:', error)
-      alert('강사 추가 실패: ' + error.message + '\n\n관리자에게 문의: instructors 테이블의 RLS 정책을 확인해주세요.')
+    // anon 키 직접 INSERT는 RLS에 silently 막힐 수 있음 → service_role 서버 라우트 경유로 전환.
+    let created = null
+    let placeholder = null
+    try {
+      const res = await fetch('/api/admin/instructors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ action: 'create-instructor', name }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        console.error('[addInstructor] server error:', data)
+        alert('강사 추가 실패: ' + (data.error || `HTTP ${res.status}`))
+        return
+      }
+      created = data.instructor
+      placeholder = data.placeholderSession
+      if (data._diagnostic && !data._diagnostic.usingServiceRole) {
+        console.warn('[addInstructor] 서버가 anon 키로 폴백 중. SUPABASE_SERVICE_ROLE_KEY 환경변수를 설정하세요.')
+      }
+    } catch (e) {
+      console.error('[addInstructor] network error:', e)
+      alert('강사 추가 중 네트워크 오류: ' + (e?.message || e))
       return
     }
+
     if (!created || !created.id) {
-      // INSERT는 성공했지만 RLS가 SELECT를 막아 created가 null인 케이스
-      console.error('[addInstructor] insert succeeded but row not returned. RLS SELECT 정책을 확인하세요. 응답:', { created, error })
-      alert('강사가 등록됐는지 확인할 수 없습니다. (RLS의 SELECT 정책이 신규 행을 가려서 응답을 못 받음)\n\nSupabase에서 다음 SQL을 실행하세요:\nALTER TABLE instructors DISABLE ROW LEVEL SECURITY;\nALTER TABLE sessions DISABLE ROW LEVEL SECURITY;')
+      alert('강사가 등록됐는지 확인할 수 없습니다. 잠시 후 페이지를 새로고침해 확인해주세요.')
       return
     }
 
-    // 2) 즉시 로컬 state에도 반영 (React 재랜더 → 드롭다운에 즉시 노출).
-    //    뒤이어 loadInstructors()로 서버와 동기화.
+    // 즉시 로컬 state에 반영 → 드롭다운에 즉시 노출
     setInstructors(prev => {
-      // 같은 name이 이미 있으면 중복 회피
       if (prev.some(i => i.name === created.name)) return prev
       return [...prev, created].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'))
     })
-
-    // 3) 신규 강사가 즉시 기획 단계 진입 가능하도록 "준비중" 자리표시 기수 자동 생성.
-    //    실패해도 강사 등록 자체는 살림 (사용자가 + 기수 버튼으로 수동 추가 가능).
-    let placeholder = null
-    try {
-      const { data: phData, error: phErr } = await supabase
-        .from('sessions')
-        .insert({
-          instructor_id: created.id,
-          session_name: '준비중',
-          topic: '',
-          free_class_date: null,
-        })
-        .select()
-        .single()
-      if (phErr) {
-        console.warn('준비중 기수 자동 생성 실패:', phErr.message)
-      } else {
-        placeholder = phData
-        // 즉시 로컬 sessions에 반영
-        setSessions(prev => [...prev, { ...placeholder, instructors: { name: created.name } }])
-      }
-    } catch (e) {
-      console.warn('준비중 기수 자동 생성 예외:', e?.message || e)
+    if (placeholder?.id) {
+      setSessions(prev => [...prev, { ...placeholder, instructors: { name: created.name } }])
     }
 
     setNewInstructor('')
     setShowAddModal(false)
 
-    // 4) 백그라운드 동기화 (실패해도 무시 — 위에서 이미 로컬 반영됨)
+    // 백그라운드 동기화 (실패해도 무시)
     loadInstructors().catch(() => {})
     loadSessions().catch(() => {})
 
-    // 5) 새로 추가한 강사·기수 자동 선택 → 드롭다운에 즉시 노출 + 자료 영역 활성화
+    // 자동 선택
     setSelectedInstructor(name)
     if (placeholder?.id) setSelectedSessionId(placeholder.id)
   }
@@ -1720,42 +1718,51 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     if (!newSession.instructor_id || !newSession.session_name) return
 
     // 시트에 데이터가 있으면 free_class_date 자동 채움. 없어도 진행 (준비중 상태로 DB에 저장).
-    // 기획 단계엔 시트 데이터가 아직 없으니 강제 검증 X.
     const instructor = instructors.find(i => i.id === newSession.instructor_id)
     let freeClassDate = null
     try {
       const sheetCheck = await loadSheetData(instructor?.name, newSession.session_name)
       if (sheetCheck) freeClassDate = sheetCheck.freeClassDate || null
-    } catch (_) {
-      // 시트 조회 실패해도 무시 — DB에 우선 등록
-    }
+    } catch (_) {}
 
-    const { data: created, error } = await supabase
-      .from('sessions')
-      .insert({
-        instructor_id: newSession.instructor_id,
-        session_name: newSession.session_name.trim(),
-        topic: newSession.topic,
-        free_class_date: freeClassDate,
+    // service_role 서버 라우트 경유 (anon 키 RLS 우회)
+    let created = null
+    try {
+      const res = await fetch('/api/admin/instructors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          action: 'create-session',
+          instructor_id: newSession.instructor_id,
+          session_name: newSession.session_name.trim(),
+          topic: newSession.topic || '',
+          free_class_date: freeClassDate,
+        }),
       })
-      .select()
-      .single()
-
-    if (error) {
-      alert('기수 추가 실패: ' + error.message)
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        alert('기수 추가 실패: ' + (data.error || `HTTP ${res.status}`))
+        return
+      }
+      created = data.session
+    } catch (e) {
+      alert('기수 추가 중 네트워크 오류: ' + (e?.message || e))
       return
     }
 
-    // 즉시 로컬 sessions state에 반영 (드롭다운 즉시 갱신)
-    const instName = instructor?.name || ''
+    if (!created?.id) {
+      alert('기수가 등록됐는지 확인할 수 없습니다.')
+      return
+    }
+
+    // 즉시 로컬 sessions state에 반영
+    const instName = instructor?.name || created.instructors?.name || ''
     setSessions(prev => [...prev, { ...created, instructors: { name: instName } }])
 
     setNewSession({ instructor_id: '', session_name: '', topic: '' })
     setShowAddModal(false)
-    // 백그라운드 동기화
     loadSessions().catch(() => {})
-    // 방금 추가한 기수 자동 선택
-    if (created?.id) setSelectedSessionId(created.id)
+    setSelectedSessionId(created.id)
   }
 
   const deleteInstructor = async (id) => {
