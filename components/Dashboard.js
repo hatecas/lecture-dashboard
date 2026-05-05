@@ -1297,6 +1297,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     if (!newInstructor.trim()) return
     const name = newInstructor.trim()
 
+    // 1) instructors 테이블에 INSERT
     const { data: created, error } = await supabase
       .from('instructors')
       .insert({ name })
@@ -1307,26 +1308,47 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       return
     }
 
-    // 신규 강사가 즉시 기획 단계 진입 가능하도록 "준비중" 자리표시 기수 자동 생성.
-    // session_name='준비중'이라 시트 매칭 안 되니 (준비중) 배지 자동 부착.
-    // 강의가 실제로 진행되면 + 버튼으로 "1기" 같은 정식 기수 추가하고 이건 삭제하면 됨.
-    const { data: placeholder } = await supabase
-      .from('sessions')
-      .insert({
-        instructor_id: created.id,
-        session_name: '준비중',
-        topic: '',
-        free_class_date: null,
-      })
-      .select()
-      .single()
+    // 2) 즉시 로컬 state에도 반영 (React 재랜더 → 드롭다운에 즉시 노출).
+    //    뒤이어 loadInstructors()로 서버와 동기화. 둘 중 하나가 늦어도 사용자가 빈 화면을 보지 않게.
+    setInstructors(prev => {
+      // 같은 name이 이미 있으면 중복 회피
+      if (prev.some(i => i.name === created.name)) return prev
+      return [...prev, created].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'))
+    })
+
+    // 3) 신규 강사가 즉시 기획 단계 진입 가능하도록 "준비중" 자리표시 기수 자동 생성.
+    //    실패해도 강사 등록 자체는 살림 (사용자가 + 기수 버튼으로 수동 추가 가능).
+    let placeholder = null
+    try {
+      const { data: phData, error: phErr } = await supabase
+        .from('sessions')
+        .insert({
+          instructor_id: created.id,
+          session_name: '준비중',
+          topic: '',
+          free_class_date: null,
+        })
+        .select()
+        .single()
+      if (phErr) {
+        console.warn('준비중 기수 자동 생성 실패:', phErr.message)
+      } else {
+        placeholder = phData
+        // 즉시 로컬 sessions에 반영
+        setSessions(prev => [...prev, { ...placeholder, instructors: { name: created.name } }])
+      }
+    } catch (e) {
+      console.warn('준비중 기수 자동 생성 예외:', e?.message || e)
+    }
 
     setNewInstructor('')
     setShowAddModal(false)
-    await loadInstructors()
-    await loadSessions()
 
-    // 새로 추가한 강사·기수 자동 선택 → 드롭다운에 즉시 노출 + 자료 영역 활성화
+    // 4) 백그라운드 동기화 (실패해도 무시 — 위에서 이미 로컬 반영됨)
+    loadInstructors().catch(() => {})
+    loadSessions().catch(() => {})
+
+    // 5) 새로 추가한 강사·기수 자동 선택 → 드롭다운에 즉시 노출 + 자료 영역 활성화
     setSelectedInstructor(name)
     if (placeholder?.id) setSelectedSessionId(placeholder.id)
   }
@@ -1715,9 +1737,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       return
     }
 
+    // 즉시 로컬 sessions state에 반영 (드롭다운 즉시 갱신)
+    const instName = instructor?.name || ''
+    setSessions(prev => [...prev, { ...created, instructors: { name: instName } }])
+
     setNewSession({ instructor_id: '', session_name: '', topic: '' })
     setShowAddModal(false)
-    await loadSessions()
+    // 백그라운드 동기화
+    loadSessions().catch(() => {})
     // 방금 추가한 기수 자동 선택
     if (created?.id) setSelectedSessionId(created.id)
   }
