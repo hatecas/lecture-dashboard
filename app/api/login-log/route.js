@@ -1,6 +1,16 @@
 import { NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@supabase/supabase-js'
 import { verifyApiAuth } from '@/lib/apiAuth'
+
+// service_role 키로 RLS 우회 — login_logs INSERT가 anon 키 RLS 정책에
+// silently 막히던 이슈 영구 해결.
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+)
+
+const isUsingServiceRole = !!process.env.SUPABASE_SERVICE_ROLE_KEY
 
 export async function POST(request) {
   try {
@@ -27,16 +37,23 @@ export async function POST(request) {
     const { error } = await supabase.from('login_logs').insert({
       name,
       ip_address: ip,
-      user_agent: userAgent
+      user_agent: userAgent,
     })
 
     if (error) {
-      console.error('Login log insert error:', error)
+      // 실패 시 클라이언트엔 success 안 돌려주고 에러 노출 (이전엔 success로 가렸음)
+      console.error('[login-log] insert error:', error, `usingServiceRole=${isUsingServiceRole}`)
+      return NextResponse.json({
+        error: 'login log insert failed: ' + error.message,
+        code: error.code,
+        usingServiceRole: isUsingServiceRole,
+      }, { status: 500 })
     }
 
+    console.log(`[login-log] recorded name="${name}" ip=${ip} usingServiceRole=${isUsingServiceRole}`)
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Login log error:', error)
-    return NextResponse.json({ error: 'Log failed' }, { status: 500 })
+    console.error('[login-log] unexpected error:', error)
+    return NextResponse.json({ error: 'Log failed: ' + (error?.message || error) }, { status: 500 })
   }
 }
