@@ -1224,22 +1224,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         }
       }
 
-      // 시트에 없는 강사/기수 삭제
-      const sheetInstructorNames = [...new Set(data.map(item => {
-        const parts = item.name.replace(/\s+/g, ' ').trim().split(' ')
-        return parts.slice(0, -1).join(' ')
-      }))]
-
-      const { data: dbInstructors } = await supabase.from('instructors').select('*')
-      if (dbInstructors) {
-        for (const inst of dbInstructors) {
-          if (!sheetInstructorNames.includes(inst.name.trim())) {
-            // 시트에 없는 강사 삭제 (cascade로 sessions도 삭제됨)
-            await supabase.from('sessions').delete().eq('instructor_id', inst.id)
-            await supabase.from('instructors').delete().eq('id', inst.id)
-          }
-        }
-      }
+      // ⚠️ 과거에 "시트에 없는 강사/기수 자동 삭제" 로직이 여기 있었음.
+      // 프로젝트 기획에서 신규 강사를 시트보다 먼저 등록하는 워크플로와 충돌:
+      // 사용자가 추가한 신규 강사("테스트", "나혜선" 등 준비중 단계의 강사)가
+      // syncFromSheet 돌 때마다 silently 삭제됨 → 새로고침하면 사라지는 증상.
+      //
+      // 정책 변경: 시트는 "추가 source"로만 사용. 삭제는 사용자가 명시적으로
+      // 수행 (사이드바 → 강사/기수 삭제 모달).
+      // 여기선 시트에 새로 생긴 강사·기수만 INSERT하고 끝.
 
       await loadInstructors()
       await loadSessions()
