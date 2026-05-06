@@ -197,7 +197,7 @@ lecture-dashboard/
 - `CHANNEL_ACCESS_KEY`, `CHANNEL_ACCESS_SECRET`, `CHANNEL_WEBHOOK_TOKEN` — 채널톡
 
 ### 선택
-- `GEMINI_MODEL` — 기본 `gemini-2.0-flash`
+- `GEMINI_MODEL` — 기본 `gemini-2.5-flash` (2026-05부터 신규 프로젝트는 2.0-flash 차단되어 2.5-flash로 변경)
 - `CHANNEL_AUTO_REPLY` — `true`면 자동 답변, 그 외엔 추천 모드
 
 ### 제거됨 (2026-05)

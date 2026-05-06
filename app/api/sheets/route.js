@@ -42,7 +42,20 @@ async function getSheetConfig() {
 }
 
 // Google Sheets API로 데이터 가져오기 (서비스 계정 인증)
-async function fetchSheetData(sheetId, range) {
+// - fresh 캐시(60초): 동일 (sheetId,range)는 즉시 반환
+// - in-flight 요청 공유: 동시 호출이 외부 API를 두 번 때리지 않음
+// - 5xx/429 재시도: 1초 → 2초 백오프 (총 3회 시도). 일시적 장애에 강건.
+// - stale 폴백(10분): 모든 재시도가 실패해도 최근 성공 데이터가 10분 이내면 그걸 반환.
+//   빈 차트/500 에러 대신 약간 오래된 데이터를 보여주는 게 사용자 경험에 낫다.
+const SHEET_CACHE_TTL_MS = 60 * 1000
+const SHEET_STALE_TTL_MS = 10 * 60 * 1000
+const sheetCache = new Map() // key: `${sheetId}::${range}` → { ts, rows }
+const sheetInflight = new Map() // key → Promise<rows>
+
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+async function fetchSheetDataOnce(sheetId, range) {
   const accessToken = await getGoogleAccessToken()
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`
   const response = await fetch(url, {
@@ -50,10 +63,53 @@ async function fetchSheetData(sheetId, range) {
   })
   if (!response.ok) {
     const err = await response.text()
-    throw new Error(`Google Sheets API 오류: ${response.status} - ${err}`)
+    const e = new Error(`Google Sheets API 오류: ${response.status} - ${err}`)
+    e.status = response.status
+    e.retryable = RETRYABLE_STATUS.has(response.status)
+    throw e
   }
   const data = await response.json()
   return data.values || []
+}
+
+async function fetchSheetData(sheetId, range) {
+  const key = `${sheetId}::${range}`
+  const cached = sheetCache.get(key)
+  if (cached && Date.now() - cached.ts < SHEET_CACHE_TTL_MS) {
+    return cached.rows
+  }
+  const inflight = sheetInflight.get(key)
+  if (inflight) return inflight
+
+  const promise = (async () => {
+    const delays = [1000, 2000] // 총 3회 시도
+    let lastErr = null
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+      try {
+        const rows = await fetchSheetDataOnce(sheetId, range)
+        sheetCache.set(key, { ts: Date.now(), rows })
+        return rows
+      } catch (err) {
+        lastErr = err
+        if (!err.retryable || attempt === delays.length) break
+        console.warn(`[/api/sheets] ${err.status} 재시도 ${attempt + 1}/${delays.length} (${delays[attempt]}ms 대기)`)
+        await sleep(delays[attempt])
+      }
+    }
+    // 모든 재시도 실패. stale 캐시(10분 이내) 있으면 그걸 폴백으로.
+    const stale = sheetCache.get(key)
+    if (stale && Date.now() - stale.ts < SHEET_STALE_TTL_MS) {
+      console.warn(`[/api/sheets] 외부 API 실패 → stale 캐시 폴백 (${Math.round((Date.now() - stale.ts) / 1000)}s old): ${lastErr?.message}`)
+      return stale.rows
+    }
+    throw lastErr
+  })()
+  sheetInflight.set(key, promise)
+  try {
+    return await promise
+  } finally {
+    sheetInflight.delete(key)
+  }
 }
 
 export async function GET(request) {
@@ -149,7 +205,15 @@ export async function GET(request) {
     return NextResponse.json({ data: allData })
 
   } catch (error) {
-    console.error('시트 API 오류:', error)
+    console.error('시트 API 오류:', error?.message || error)
+    // 외부 Google API 일시 장애(5xx/429)는 503으로 노출해 클라이언트가 일시적 에러로 다룰 수 있게.
+    const upstreamStatus = error?.status
+    if (upstreamStatus && RETRYABLE_STATUS.has(upstreamStatus)) {
+      return NextResponse.json(
+        { error: 'Google Sheets 일시 장애. 잠시 후 다시 시도해주세요.', upstreamStatus },
+        { status: 503, headers: { 'Retry-After': '30' } }
+      )
+    }
     return NextResponse.json({ error: '시트 데이터 로드 실패' }, { status: 500 })
   }
 }
