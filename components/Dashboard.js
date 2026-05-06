@@ -9375,16 +9375,19 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             </div>
           )}
 
-          {/* 🛠️ 기획 봇 설정 탭 (jinwoo 전용) */}
+          {/* 🛠️ 기획 봇 설정 탭 (jinwoo 전용)
+              ※ 여기서는 모든 봇을 enabled=true로 풀어 지침/레퍼런스 사전 작성 가능.
+                실제 실행 가능 여부는 lib/planners/index.js의 PLANNER_META를 따르고,
+                project-planner 탭의 PLANNER_META에서 체크박스 활성화 여부가 결정됨. */}
           {currentTab === 'planner-config' && loginId === 'jinwoo' && (() => {
             const PLANNER_META = {
               ebook:             { label: '무료 전자책 기획안',     icon: '📚', enabled: true },
-              boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', enabled: false },
-              alimtalk:          { label: '알림톡 / 채널톡 멘트',    icon: '💬', enabled: false },
-              viralQ:            { label: '바이럴 질문',            icon: '❓', enabled: false },
-              ppt:               { label: '강의 PPT outline',       icon: '📋', enabled: false },
-              salesPage:         { label: '무료 상페 카피',          icon: '📄', enabled: false },
-              groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', enabled: false },
+              boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', enabled: true },
+              alimtalk:          { label: '알림톡 / 채널톡 멘트',    icon: '💬', enabled: true },
+              viralQ:            { label: '바이럴 질문',            icon: '❓', enabled: true },
+              ppt:               { label: '강의 PPT outline',       icon: '📋', enabled: true },
+              salesPage:         { label: '무료 상페 카피',          icon: '📄', enabled: true },
+              groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', enabled: true },
             }
 
             const pickFeature = (key) => {
