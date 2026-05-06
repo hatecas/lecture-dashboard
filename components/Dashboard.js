@@ -374,6 +374,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pc_editRefDraft, setPcEditRefDraft] = useState({ title: '', content: '' })
   const [pc_busyRefId, setPcBusyRefId] = useState(null)
   const [pc_message, setPcMessage] = useState('')
+  const [pc_extracting, setPcExtracting] = useState(false)  // 새 레퍼런스 폼: 파일에서 텍스트 추출 중
 
   // 주문 동기화(nlab DB / CSV → 결제자 시트 append) 상태
   const [orderSyncMode, setOrderSyncMode] = useState('supabase') // 'supabase' | 'csv'
@@ -9425,6 +9426,34 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
             }
 
+            // 파일(PDF/이미지/텍스트)을 Gemini로 텍스트 추출 → 새 레퍼런스 폼 자동 채움.
+            // 제목은 이미 입력되어 있으면 보존, 비어있으면 파일명에서 확장자 떼고 채움.
+            const extractFromFile = async (file) => {
+              if (!file) return
+              setPcExtracting(true)
+              setPcMessage('')
+              try {
+                const fd = new FormData()
+                fd.append('file', file)
+                const res = await fetch('/api/admin/planner-config/extract-file', {
+                  method: 'POST',
+                  headers: getAuthHeaders(),  // Content-Type은 FormData가 자동 설정
+                  body: fd,
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+                setPcNewRef(prev => ({
+                  title: prev.title || (file.name || '').replace(/\.[^.]+$/, ''),
+                  content: data.text || '',
+                }))
+                setPcMessage(`✅ "${file.name}"에서 ${data.charCount?.toLocaleString() || 0}자 추출${data.truncated ? ' (8만자에서 절단)' : ''}. 검토 후 추가 버튼을 눌러주세요.`)
+              } catch (e) {
+                setPcMessage('❌ 파일 추출 실패: ' + e.message)
+              } finally {
+                setPcExtracting(false)
+              }
+            }
+
             const addReference = async () => {
               if (!pc_newRef.title.trim() || !pc_newRef.content.trim()) {
                 setPcMessage('❌ 제목과 본문 모두 필수')
@@ -9651,17 +9680,57 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
                         {pc_addingRef && (
                           <div style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '10px', padding: '14px', marginBottom: '12px' }}>
+                            {/* 파일 업로드: PDF/이미지/텍스트 → Gemini로 추출 후 본문 자동 채움 */}
+                            <label
+                              onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+                              onDrop={(e) => {
+                                e.preventDefault(); e.stopPropagation()
+                                const f = e.dataTransfer?.files?.[0]
+                                if (f && !pc_extracting) extractFromFile(f)
+                              }}
+                              style={{
+                                display: 'block',
+                                padding: '14px',
+                                marginBottom: '10px',
+                                background: 'rgba(0,0,0,0.20)',
+                                border: '1.5px dashed ' + (pc_extracting ? 'rgba(99,102,241,0.6)' : 'rgba(255,255,255,0.18)'),
+                                borderRadius: '8px',
+                                color: '#cbd5e1',
+                                fontSize: '12px',
+                                textAlign: 'center',
+                                cursor: pc_extracting ? 'wait' : 'pointer',
+                                lineHeight: 1.5,
+                              }}>
+                              <input type="file"
+                                accept=".pdf,.txt,.md,.json,.xml,image/*,application/pdf"
+                                disabled={pc_extracting}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0]
+                                  if (f) extractFromFile(f)
+                                  e.target.value = ''  // 같은 파일 재선택 가능하게
+                                }}
+                                style={{ display: 'none' }} />
+                              {pc_extracting ? (
+                                <span>⏳ Gemini로 텍스트 추출 중… (PDF는 30~60초 걸릴 수 있음)</span>
+                              ) : (
+                                <span>
+                                  📎 <b>파일 업로드</b> (PDF · 이미지 · 텍스트) — 클릭하거나 여기로 드래그<br/>
+                                  <span style={{ fontSize: '11px', color: '#64748b' }}>Gemini가 OCR/텍스트 추출 후 본문에 자동 입력됩니다.</span>
+                                </span>
+                              )}
+                            </label>
+
                             <input type="text" value={pc_newRef.title} onChange={(e) => setPcNewRef(s => ({ ...s, title: e.target.value }))}
                               placeholder="레퍼런스 제목 (예: 청담언니 루시 - 유튜브 수익화)"
                               style={{ width: '100%', padding: '9px 11px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '13px', marginBottom: '8px', boxSizing: 'border-box' }} />
                             <textarea value={pc_newRef.content} onChange={(e) => setPcNewRef(s => ({ ...s, content: e.target.value }))} rows={10}
-                              placeholder="모범 사례 본문 (썸네일 카피 + 제목 + 본문 카피 + CTA를 통째로 붙여넣기)"
+                              placeholder="모범 사례 본문 (직접 붙여넣기 또는 위 파일 업로드로 자동 입력)"
                               style={{ width: '100%', padding: '11px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.55, resize: 'vertical', minHeight: '160px' }} />
                             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
                               <button onClick={() => { setPcAddingRef(false); setPcNewRef({ title: '', content: '' }) }}
                                 style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>취소</button>
-                              <button onClick={addReference} disabled={pc_savingInstructions}
-                                style={{ padding: '8px 16px', background: 'var(--accent-grad)', border: 'none', borderRadius: '7px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: pc_savingInstructions ? 'wait' : 'pointer' }}>
+                              <button onClick={addReference} disabled={pc_savingInstructions || pc_extracting}
+                                style={{ padding: '8px 16px', background: 'var(--accent-grad)', border: 'none', borderRadius: '7px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: (pc_savingInstructions || pc_extracting) ? 'wait' : 'pointer' }}>
                                 {pc_savingInstructions ? '추가 중…' : '추가'}
                               </button>
                             </div>
