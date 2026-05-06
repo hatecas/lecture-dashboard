@@ -91,15 +91,19 @@ export async function POST(request) {
 
     if (action === 'add-reference') {
       const { featureKey, title, content, tags = [], meta = {}, sortOrder = 0 } = body
-      if (!featureKey || !title || !content) {
-        return Response.json({ error: 'featureKey, title, content 필수' }, { status: 400 })
+      if (!featureKey || !content) {
+        return Response.json({ error: 'featureKey, content 필수' }, { status: 400 })
       }
+      // title은 NOT NULL 컬럼이므로 비어있으면 본문 앞부분에서 한 줄 자동 생성.
+      const trimmedTitle = String(title || '').trim()
+      const trimmedContent = String(content).trim()
+      const fallbackTitle = trimmedContent.split('\n')[0].slice(0, 60).trim() || '(제목 없음)'
       const { data, error } = await supabase
         .from('ai_references')
         .insert({
           feature_key: featureKey,
-          title: String(title).trim(),
-          content: String(content).trim(),
+          title: trimmedTitle || fallbackTitle,
+          content: trimmedContent,
           tags: Array.isArray(tags) ? tags : [],
           meta: typeof meta === 'object' && meta !== null ? meta : {},
           sort_order: Number(sortOrder) || 0,

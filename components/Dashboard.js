@@ -9455,8 +9455,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             }
 
             const addReference = async () => {
-              if (!pc_newRef.title.trim() || !pc_newRef.content.trim()) {
-                setPcMessage('❌ 제목과 본문 모두 필수')
+              if (!pc_newRef.content.trim()) {
+                setPcMessage('❌ 본문은 필수')
                 return
               }
               setPcSavingInstructions(true)
@@ -9721,11 +9721,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             </label>
 
                             <input type="text" value={pc_newRef.title} onChange={(e) => setPcNewRef(s => ({ ...s, title: e.target.value }))}
-                              placeholder="레퍼런스 제목 (필수, 예: 청담언니 루시 - 유튜브 수익화)"
+                              placeholder="레퍼런스 제목 (선택 — 비우면 본문 첫 줄로 자동 생성)"
                               style={{
                                 width: '100%', padding: '9px 11px',
                                 background: 'rgba(0,0,0,0.40)',
-                                border: '1px solid ' + (pc_message.startsWith('❌') && !pc_newRef.title.trim() ? '#ef4444' : 'var(--border)'),
+                                border: '1px solid var(--border)',
                                 borderRadius: '7px', color: '#fff', fontSize: '13px', marginBottom: '8px', boxSizing: 'border-box'
                               }} />
                             <textarea value={pc_newRef.content} onChange={(e) => setPcNewRef(s => ({ ...s, content: e.target.value }))} rows={10}
