@@ -9721,11 +9721,32 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             </label>
 
                             <input type="text" value={pc_newRef.title} onChange={(e) => setPcNewRef(s => ({ ...s, title: e.target.value }))}
-                              placeholder="레퍼런스 제목 (예: 청담언니 루시 - 유튜브 수익화)"
-                              style={{ width: '100%', padding: '9px 11px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '13px', marginBottom: '8px', boxSizing: 'border-box' }} />
+                              placeholder="레퍼런스 제목 (필수, 예: 청담언니 루시 - 유튜브 수익화)"
+                              style={{
+                                width: '100%', padding: '9px 11px',
+                                background: 'rgba(0,0,0,0.40)',
+                                border: '1px solid ' + (pc_message.startsWith('❌') && !pc_newRef.title.trim() ? '#ef4444' : 'var(--border)'),
+                                borderRadius: '7px', color: '#fff', fontSize: '13px', marginBottom: '8px', boxSizing: 'border-box'
+                              }} />
                             <textarea value={pc_newRef.content} onChange={(e) => setPcNewRef(s => ({ ...s, content: e.target.value }))} rows={10}
                               placeholder="모범 사례 본문 (직접 붙여넣기 또는 위 파일 업로드로 자동 입력)"
-                              style={{ width: '100%', padding: '11px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.55, resize: 'vertical', minHeight: '160px' }} />
+                              style={{
+                                width: '100%', padding: '11px',
+                                background: 'rgba(0,0,0,0.40)',
+                                border: '1px solid ' + (pc_message.startsWith('❌') && !pc_newRef.content.trim() ? '#ef4444' : 'var(--border)'),
+                                borderRadius: '7px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.55, resize: 'vertical', minHeight: '160px'
+                              }} />
+                            {pc_message && (
+                              <div style={{
+                                marginTop: '10px',
+                                padding: '8px 12px',
+                                background: pc_message.startsWith('✅') ? 'rgba(16,185,129,0.10)' : 'rgba(239,68,68,0.10)',
+                                border: '1px solid ' + (pc_message.startsWith('✅') ? 'rgba(16,185,129,0.30)' : 'rgba(239,68,68,0.30)'),
+                                borderRadius: '7px',
+                                color: pc_message.startsWith('✅') ? '#34d399' : '#fca5a5',
+                                fontSize: '12px',
+                              }}>{pc_message}</div>
+                            )}
                             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
                               <button onClick={() => { setPcAddingRef(false); setPcNewRef({ title: '', content: '' }) }}
                                 style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>취소</button>
