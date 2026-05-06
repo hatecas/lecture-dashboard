@@ -8006,12 +8006,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           {currentTab === 'project-planner' && (() => {
             const PLANNER_META = {
               ebook:             { label: '무료 전자책 기획안',     icon: '📚', desc: '썸네일 카피 + 제목 + 도입 후크 + 본문 4섹션 + CTA', enabled: true },
-              boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', desc: '단톡방/라이브 시작 직전 분위기 띄우는 멘트 3종',     enabled: false },
-              alimtalk:          { label: '알림톡 / 채널톡 멘트',    icon: '💬', desc: '슝 알림톡 변수에 그대로 꽂을 수 있는 멘트',          enabled: false },
-              viralQ:            { label: '바이럴 질문',            icon: '❓', desc: '단톡방 참여 유도 질문 10개',                       enabled: false },
-              ppt:               { label: '강의 PPT outline',       icon: '📋', desc: '슬라이드별 outline + 발표 멘트 초안',             enabled: false },
-              salesPage:         { label: '무료 상페 카피',          icon: '📄', desc: '무료강의 상세페이지 섹션별 카피',                  enabled: false },
-              groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', desc: 'D-1 / D-day / D+1 시점별 공지',                  enabled: false },
+              boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', desc: '단톡방/라이브 시작 직전 분위기 띄우는 멘트 3종',     enabled: true },
+              alimtalk:          { label: '알림톡 / 채널톡 멘트',    icon: '💬', desc: '슝 알림톡 변수에 그대로 꽂을 수 있는 멘트',          enabled: true },
+              viralQ:            { label: '바이럴 질문',            icon: '❓', desc: '단톡방 참여 유도 질문 10개',                       enabled: true },
+              ppt:               { label: '강의 PPT outline',       icon: '📋', desc: '슬라이드별 outline + 발표 멘트 초안',             enabled: true },
+              salesPage:         { label: '무료 상페 카피',          icon: '📄', desc: '무료강의 상세페이지 섹션별 카피',                  enabled: true },
+              groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', desc: 'D-1 / D-day / D+1 시점별 공지',                  enabled: true },
             }
 
             // 강사/기수는 전역 selectedInstructor + selectedSessionId 사용. 자료는 attachments 재사용.
@@ -8139,29 +8139,36 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
             }
 
+            // 봇별 결과 카드 렌더러. 새 봇 추가 시 분기 추가.
+            // 공통 박스 스타일 헬퍼.
+            const _label = { fontSize: '11px', color: 'var(--text-faint)', fontWeight: 600, marginBottom: '4px' }
+            const _accent = { fontSize: '11px', color: '#a5b4fc', fontWeight: 600, marginBottom: '6px' }
+            const _box = { padding: '12px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '10px' }
+            const _boxAccent = { padding: '12px 14px', background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '10px' }
+
             const renderPlanContent = (taskKey, plan) => {
               if (taskKey === 'ebook') {
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <div style={{ padding: '12px 14px', background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '10px' }}>
-                      <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600, marginBottom: '4px' }}>썸네일 카피 (세로형)</div>
+                    <div style={_boxAccent}>
+                      <div style={_accent}>썸네일 카피 (세로형)</div>
                       <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{plan.thumbnailCopy}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 600, marginBottom: '4px' }}>전자책 제목</div>
+                      <div style={_label}>전자책 제목</div>
                       <div style={{ fontSize: '17px', fontWeight: 700, color: '#fff' }}>{plan.title}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 600, marginBottom: '4px' }}>도입 후크</div>
+                      <div style={_label}>도입 후크</div>
                       <div style={{ fontSize: '15px', fontStyle: 'italic', color: '#cbd5e1' }}>{plan.introHook}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 600, marginBottom: '4px' }}>문제 도입 단락</div>
+                      <div style={_label}>문제 도입 단락</div>
                       <div style={{ fontSize: '14px', color: '#cbd5e1', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{plan.problemFraming}</div>
                     </div>
                     {Array.isArray(plan.sections) && plan.sections.map((s, i) => (
-                      <div key={i} style={{ padding: '12px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '10px' }}>
-                        <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600, marginBottom: '6px' }}>섹션 {i + 1}</div>
+                      <div key={i} style={_box}>
+                        <div style={_accent}>섹션 {i + 1}</div>
                         <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>{s.heading}</div>
                         <div style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>{s.body}</div>
                       </div>
@@ -8173,6 +8180,180 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   </div>
                 )
               }
+
+              if (taskKey === 'boomUp' && Array.isArray(plan?.messages)) {
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {plan.messages.map((m, i) => (
+                      <div key={i} style={_box}>
+                        <div style={_accent}>{m.style || `스타일 ${i + 1}`}</div>
+                        <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{m.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+
+              if (taskKey === 'alimtalk') {
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={_boxAccent}>
+                      <div style={_accent}>알림톡 본문</div>
+                      <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{plan.alimtalkBody}</div>
+                    </div>
+                    {Array.isArray(plan.variables) && plan.variables.length > 0 && (
+                      <div>
+                        <div style={_label}>사용 변수</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {plan.variables.map((v, i) => (
+                            <div key={i} style={{ fontSize: '12.5px', color: '#cbd5e1' }}>
+                              <code style={{ background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: '4px', color: '#a5b4fc', marginRight: '6px' }}>{v.name}</code>
+                              {v.description}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {plan.channelFollowup && (
+                      <div style={{ padding: '12px 14px', background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: '10px' }}>
+                        <div style={{ fontSize: '11px', color: '#86efac', fontWeight: 600, marginBottom: '4px' }}>채널톡 후속 멘트</div>
+                        <div style={{ fontSize: '13.5px', color: '#fff', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{plan.channelFollowup}</div>
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+
+              if (taskKey === 'viralQ' && Array.isArray(plan?.questions)) {
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {plan.questions.map((q, i) => (
+                      <div key={i} style={{ display: 'flex', gap: '10px', padding: '10px 12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                        <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 700, minWidth: '20px' }}>Q{i + 1}</div>
+                        <div style={{ flex: 1 }}>
+                          {q.category && <div style={{ fontSize: '10.5px', color: '#94a3b8', marginBottom: '2px' }}>{q.category}</div>}
+                          <div style={{ fontSize: '13.5px', color: '#fff', lineHeight: 1.6 }}>{q.text}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+
+              if (taskKey === 'ppt') {
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={_boxAccent}>
+                      <div style={_accent}>강의 제목 · 총 {plan.totalSlides || (plan.slides?.length ?? 0)}장</div>
+                      <div style={{ fontSize: '17px', fontWeight: 700, color: '#fff' }}>{plan.title}</div>
+                    </div>
+                    {Array.isArray(plan.slides) && plan.slides.map((s, i) => (
+                      <div key={i} style={_box}>
+                        <div style={_accent}>슬라이드 {s.slideNumber || i + 1}</div>
+                        <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>{s.title}</div>
+                        {Array.isArray(s.bullets) && s.bullets.length > 0 && (
+                          <ul style={{ margin: '4px 0 8px 18px', padding: 0, fontSize: '13px', color: '#cbd5e1', lineHeight: 1.65 }}>
+                            {s.bullets.map((b, j) => <li key={j}>{b}</li>)}
+                          </ul>
+                        )}
+                        {s.speakerNotes && (
+                          <div style={{ marginTop: '6px', padding: '8px 10px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', borderLeft: '2px solid rgba(99,102,241,0.5)' }}>
+                            <div style={{ fontSize: '10.5px', color: '#94a3b8', marginBottom: '2px' }}>🎤 발표 멘트</div>
+                            <div style={{ fontSize: '12.5px', color: '#cbd5e1', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{s.speakerNotes}</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+
+              if (taskKey === 'salesPage') {
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={_boxAccent}>
+                      <div style={_accent}>히어로 카피</div>
+                      <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>{plan.headline}</div>
+                      <div style={{ fontSize: '14px', color: '#cbd5e1', fontStyle: 'italic' }}>{plan.subheadline}</div>
+                    </div>
+                    {Array.isArray(plan.painPoints) && plan.painPoints.length > 0 && (
+                      <div style={_box}>
+                        <div style={_accent}>Pain — 수강생이 겪는 문제</div>
+                        <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.7 }}>
+                          {plan.painPoints.map((p, i) => <li key={i}>{p}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {plan.promise && (
+                      <div style={_box}>
+                        <div style={_accent}>Promise — 약속</div>
+                        <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{plan.promise}</div>
+                      </div>
+                    )}
+                    {plan.proof && (
+                      <div style={_box}>
+                        <div style={_accent}>Proof — 신뢰 근거</div>
+                        <div style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{plan.proof}</div>
+                      </div>
+                    )}
+                    {Array.isArray(plan.curriculumPreview) && plan.curriculumPreview.length > 0 && (
+                      <div style={_box}>
+                        <div style={_accent}>커리큘럼 미리보기</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                          {plan.curriculumPreview.map((c, i) => (
+                            <div key={i} style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: 1.6 }}>
+                              <b style={{ color: '#a5b4fc', marginRight: '6px' }}>{c.session}</b>
+                              <span style={{ color: '#fff', fontWeight: 600 }}>{c.title}</span>
+                              {c.preview && <div style={{ fontSize: '12.5px', color: '#94a3b8', marginTop: '2px' }}>{c.preview}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {plan.cta && (
+                      <div style={{ padding: '12px 14px', background: 'rgba(168,85,247,0.10)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: '10px' }}>
+                        <div style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: 600, marginBottom: '4px' }}>CTA</div>
+                        <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{plan.cta}</div>
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+
+              if (taskKey === 'groupAnnouncement' && Array.isArray(plan?.announcements)) {
+                const timingColors = {
+                  'D-1': 'rgba(251,191,36,0.10)',
+                  'D-day': 'rgba(99,102,241,0.10)',
+                  'D+1': 'rgba(34,197,94,0.10)',
+                }
+                const timingBorders = {
+                  'D-1': 'rgba(251,191,36,0.30)',
+                  'D-day': 'rgba(99,102,241,0.30)',
+                  'D+1': 'rgba(34,197,94,0.30)',
+                }
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {plan.announcements.map((a, i) => (
+                      <div key={i} style={{
+                        padding: '12px 14px',
+                        background: timingColors[a.timing] || 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${timingBorders[a.timing] || 'var(--border)'}`,
+                        borderRadius: '10px',
+                      }}>
+                        <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 700, marginBottom: '4px' }}>{a.timing}</div>
+                        {a.title && <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>{a.title}</div>}
+                        <div style={{ fontSize: '13.5px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{a.body}</div>
+                        {a.callToAction && (
+                          <div style={{ marginTop: '8px', fontSize: '12px', color: '#94a3b8' }}>
+                            <b>다음 행동:</b> {a.callToAction}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
+
               return (
                 <pre style={{ fontSize: '12px', color: '#cbd5e1', background: 'rgba(0,0,0,0.30)', padding: '12px', borderRadius: '8px', overflow: 'auto', maxHeight: '400px', margin: 0 }}>
                   {JSON.stringify(plan, null, 2)}
