@@ -5,7 +5,8 @@ import { verifyApiAuth } from '@/lib/apiAuth'
 export const maxDuration = 300
 export const runtime = 'nodejs'
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
+// gemini-2.0-flash는 2026-05부터 신규 프로젝트에 비공개. 2.5-flash가 후속 모델.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
 
 // SSE 헬퍼
 const sseEvent = (data) =>
@@ -112,7 +113,7 @@ export async function POST(request) {
     })
   }
 
-  const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+  const client = new GoogleGenAI({ apiKey: (process.env.GEMINI_API_KEY || '').trim() })
 
   const stream = new ReadableStream({
     async start(controller) {

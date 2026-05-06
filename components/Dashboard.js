@@ -937,8 +937,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   }
 
   useEffect(() => {
-    loadSessions()
-    loadInstructors()
+    // loadInstructors/loadSessions는 같은 endpoint(/api/admin/instructors)를 호출하는 별칭.
+    // 둘 다 호출하면 같은 fetch가 2번 나가므로 한 번만 호출.
+    loadInstructorsAndSessions()
     loadPayerTabMappings()
 
     // 모바일 감지
@@ -1089,11 +1090,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   }, [selectedInstructor, instructors, selectedSessionId])
 
   // 전체 시트 데이터 로드 (랭킹/대조용)
+  // sessions 객체 참조가 바뀔 때마다 재호출되어 /api/sheets가 폭주하는 문제가 있어
+  // sessions가 처음 채워졌는지 여부(length>0)로 단순화.
   useEffect(() => {
     if (sessions.length > 0) {
       loadAllSheetData()
     }
-  }, [sessions])
+  }, [sessions.length > 0])
 
   const loadAllSheetData = async () => {
     try {

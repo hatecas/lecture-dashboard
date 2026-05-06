@@ -40,11 +40,14 @@ export async function GET(request) {
     if (sessRes.error) throw sessRes.error
     const instructorsData = instRes.data || []
     const sessionsData = sessRes.data || []
-    console.log(
-      `[/api/admin/instructors GET] usingServiceRole=${isUsingServiceRole} ` +
-      `instructors.count=${instructorsData.length} sessions.count=${sessionsData.length} ` +
-      `instructors=[${instructorsData.map(i => i.name).join(', ')}]`
-    )
+    // 진단 로그는 service_role 미사용 시(=의심 상황)에만, 그리고 이름 덤프는 제외.
+    // 정상 케이스에선 매 요청마다 37명 이름 한 줄씩 찍혀 dev 콘솔이 도배됨.
+    if (!isUsingServiceRole) {
+      console.warn(
+        `[/api/admin/instructors GET] usingServiceRole=false → anon 키 폴백 중 ` +
+        `(instructors=${instructorsData.length}, sessions=${sessionsData.length})`
+      )
+    }
     return Response.json({
       success: true,
       instructors: instructorsData,

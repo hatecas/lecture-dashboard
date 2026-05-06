@@ -116,6 +116,16 @@ export async function POST(request) {
 
   // 전자책이 필수인 task에서 실제로 추출된 본문이 0이면 fail-fast.
   const ebookOk = ebookContents.some((e) => e.text && e.text.trim())
+  // 진단: 첨부는 있는데 추출이 모두 실패한 케이스(예: pdf-parse 모듈 누락)와
+  // 첨부 자체가 없는 케이스를 구분해서 사용자에게 알린다.
+  const ebookHasRows = ebookContents.length > 0
+  const ebookFailureReason = needsEbook
+    ? (ebookHasRows && !ebookOk
+        ? `전자책 파일은 있으나 텍스트 추출 실패. 원인: ${ebookExtractionMessages.join(' | ') || '알 수 없음'}`
+        : !ebookHasRows
+          ? '전자책 원문이 필요합니다. 자료 업로드 영역에서 [📚 전자책]으로 강사 전자책 PDF/텍스트를 먼저 추가해주세요.'
+          : null)
+    : null
 
   // 병렬 실행. 한 항목 실패가 다른 항목 실패로 번지지 않게 각자 try/catch.
   const settled = await Promise.all(
@@ -125,7 +135,7 @@ export async function POST(request) {
         const taskContext = { ...context }
         if (TASKS_NEEDING_EBOOK.has(taskKey)) {
           if (!ebookOk) {
-            throw new Error('전자책 원문이 필요합니다. 자료 업로드 영역에서 [📚 전자책]으로 강사 전자책 PDF/텍스트를 먼저 추가해주세요.')
+            throw new Error(ebookFailureReason || '전자책 원문이 필요합니다.')
           }
           taskContext.ebookContents = ebookContents
         }
