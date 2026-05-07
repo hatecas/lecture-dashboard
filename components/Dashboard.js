@@ -1768,6 +1768,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }
   }
 
+  // 파일 한도. 클라이언트와 서버(/api/files/sign-upload) 둘 다 동일.
+  // 200MB. Supabase Storage 버킷의 file_size_limit도 200MB 이상으로 설정되어 있어야 함.
+  const MAX_FILE_BYTES = 200 * 1024 * 1024
+  // 작은 파일은 서버 라우트로, 큰 파일은 sign-upload + 직접 업로드.
+  // Vercel 함수 본문 한도(약 4.5MB) 회피용.
+  const DIRECT_UPLOAD_THRESHOLD = 4 * 1024 * 1024
+
   const uploadFiles = async (files, role = 'material') => {
     if (!files || files.length === 0) return
     const instructorId = getSelectedInstructorId()
@@ -1778,10 +1785,17 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     // 압축 파일 필터링 (ZIP, RAR, 7Z 등)
     const archiveExtensions = ['.zip', '.rar', '.7z', '.tar', '.gz']
     const archiveFiles = fileArray.filter(f => archiveExtensions.some(ext => f.name.toLowerCase().endsWith(ext)))
-    const validFiles = fileArray.filter(f => !archiveExtensions.some(ext => f.name.toLowerCase().endsWith(ext)))
+    let validFiles = fileArray.filter(f => !archiveExtensions.some(ext => f.name.toLowerCase().endsWith(ext)))
 
     if (archiveFiles.length > 0) {
       alert(`압축 파일(${archiveFiles.map(f => f.name).join(', ')})은 AI 분석을 지원하지 않아 업로드가 불가능합니다.`)
+    }
+
+    // 200MB 초과 파일 차단
+    const tooBig = validFiles.filter(f => f.size > MAX_FILE_BYTES)
+    if (tooBig.length > 0) {
+      alert(`다음 파일은 200MB를 초과해 업로드할 수 없습니다:\n${tooBig.map(f => `· ${f.name} (${(f.size / 1024 / 1024).toFixed(1)}MB)`).join('\n')}`)
+      validFiles = validFiles.filter(f => f.size <= MAX_FILE_BYTES)
     }
 
     if (validFiles.length === 0) return
@@ -1791,28 +1805,91 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
     let successCount = 0
     let failCount = 0
-    const PARALLEL_LIMIT = 5 // 동시 업로드 개수
+    const PARALLEL_LIMIT = 5
 
-    // 파일 업로드 함수
-    const uploadSingleFile = async (file) => {
+    // 작은 파일: 기존 흐름 (formData로 서버에 파일 전송)
+    const uploadSmall = async (file) => {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('instructor_id', instructorId)
       if (selectedSessionId) formData.append('session_id', selectedSessionId)
       formData.append('file_type', 'file')
       formData.append('file_role', role)
-
       try {
         const response = await fetch('/api/files', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
-          body: formData
+          body: formData,
         })
         const result = await response.json()
-        return result.success
-      } catch (e) {
+        return result.success === true
+      } catch {
         return false
       }
+    }
+
+    // 큰 파일: sign-upload로 토큰 발급 → Supabase 직접 업로드 → 메타만 서버에 기록
+    const uploadLarge = async (file) => {
+      try {
+        // 1) sign-upload
+        const signRes = await fetch('/api/files/sign-upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          },
+          body: JSON.stringify({
+            instructor_id: instructorId,
+            file_name: file.name,
+            file_size: file.size,
+          }),
+        })
+        const signData = await signRes.json()
+        if (!signRes.ok || !signData.success) {
+          console.warn('[upload] sign-upload 실패:', signData.error)
+          return false
+        }
+
+        // 2) Supabase Storage 직접 업로드 (signed URL 사용)
+        // signed URL은 풀 URL이라서 그대로 PUT 가능
+        const putRes = await fetch(signData.signed_url, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream',
+            'x-upsert': 'false',
+          },
+          body: file,
+        })
+        if (!putRes.ok) {
+          const errText = await putRes.text().catch(() => '')
+          console.warn('[upload] Supabase PUT 실패:', putRes.status, errText.slice(0, 200))
+          return false
+        }
+
+        // 3) 메타데이터 기록 (storage_path만 보냄)
+        const metaForm = new FormData()
+        metaForm.append('instructor_id', instructorId)
+        if (selectedSessionId) metaForm.append('session_id', selectedSessionId)
+        metaForm.append('file_role', role)
+        metaForm.append('storage_path', signData.storage_path)
+        metaForm.append('file_name', file.name)
+        metaForm.append('file_size', String(file.size))
+        metaForm.append('mime_type', file.type || '')
+        const metaRes = await fetch('/api/files', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+          body: metaForm,
+        })
+        const metaData = await metaRes.json()
+        return metaData.success === true
+      } catch (e) {
+        console.warn('[upload] uploadLarge 예외:', e?.message)
+        return false
+      }
+    }
+
+    const uploadSingleFile = async (file) => {
+      return file.size > DIRECT_UPLOAD_THRESHOLD ? uploadLarge(file) : uploadSmall(file)
     }
 
     // 병렬 업로드 (5개씩)
@@ -1832,7 +1909,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     setUploadProgress({ show: false, current: 0, total: 0, fileName: '' })
     loadAttachments()
 
-    // 결과 알림
     if (failCount === 0) {
       alert(`✅ ${successCount}개 파일 업로드 완료!`)
     } else if (successCount === 0) {
@@ -8903,7 +8979,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ fontSize: '15px' }}>📎</span> 자료 (파일 / 링크 / 전자책)
-                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 강사·기수에 매칭되어 DB에 저장</span>
+                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 강사·기수에 매칭되어 DB에 저장 · <b style={{ color: '#cbd5e1' }}>파일당 최대 200MB</b></span>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple style={{ display: 'none' }} />
