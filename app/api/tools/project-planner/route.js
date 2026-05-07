@@ -13,18 +13,20 @@ const supabaseSelf = createClient(
 )
 
 // 전자책 파일을 입력으로 받는 task 목록.
-// 새 봇이 전자책을 입력으로 쓰려면 여기에 추가하면 자동으로 텍스트 추출됨.
 const TASKS_NEEDING_EBOOK = new Set(['ebook'])
 
 // POST /api/tools/project-planner
-// body: {
-//   instructor: string,
-//   sessionName?: string,
-//   topic: string,
-//   additionalContext?: string,
-//   enabledTasks: string[]  // PLANNER_META keys (예: ['ebook'])
-// }
-// 응답: { success, results: { [taskKey]: { ok, plan|error, usage?, durationMs } } }
+// body: { instructor, sessionName?, sessionId?, topic, additionalContext?, enabledTasks: string[] }
+//
+// 응답: text/event-stream (SSE). 이벤트 종류:
+//   start       { tasks: string[], skipped: object }
+//   phase       { phase: 'ebook_extracting' | 'planning' }
+//   task_start  { task }
+//   task_done   { task, result: { ok, plan?, usage?, model?, error?, durationMs } }
+//   done        { skipped, executed, ebookSummary }
+//   fatal       { message }   ← 스트림 도중 치명적 오류
+//
+// 입력 검증 실패 등 스트림 시작 전 오류는 일반 JSON(4xx/5xx)으로 응답한다.
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
@@ -45,7 +47,7 @@ export async function POST(request) {
   const {
     instructor,
     sessionName,
-    sessionId,           // 신규: 전자책 첨부 조회용
+    sessionId,
     topic,
     additionalContext,
     enabledTasks = [],
@@ -75,7 +77,6 @@ export async function POST(request) {
     }
     validTasks.push(t)
   }
-
   if (validTasks.length === 0) {
     return Response.json({
       error: '실행 가능한 기획 항목이 없습니다.',
@@ -90,89 +91,124 @@ export async function POST(request) {
     additionalContext: (additionalContext || '').trim(),
   }
 
-  // 전자책 입력이 필요한 task가 하나라도 있으면 첨부에서 텍스트 추출.
-  let ebookContents = []
-  let ebookExtractionMessages = []
-  const needsEbook = validTasks.some((t) => TASKS_NEEDING_EBOOK.has(t))
-  if (needsEbook && sessionId) {
-    try {
-      const { data: ebookRows, error } = await supabaseSelf
-        .from('instructor_attachments')
-        .select('id, file_name, file_url, mime_type, file_type, file_role')
-        .eq('session_id', sessionId)
-        .eq('file_role', 'ebook')
-      if (error) throw error
-      if (ebookRows && ebookRows.length > 0) {
-        ebookContents = await extractEbookContents(ebookRows)
-        ebookExtractionMessages = ebookContents
-          .filter((e) => e.error)
-          .map((e) => `${e.name}: ${e.error}`)
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    async start(controller) {
+      let closed = false
+      const send = (event, data) => {
+        if (closed) return
+        try {
+          controller.enqueue(
+            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`)
+          )
+        } catch {
+          // 컨트롤러가 닫혔거나 클라이언트가 끊은 경우 무시
+        }
       }
-    } catch (e) {
-      console.error('전자책 텍스트 추출 실패:', e)
-      ebookExtractionMessages.push('전자책 조회 실패: ' + (e?.message || e))
-    }
-  }
 
-  // 전자책이 필수인 task에서 실제로 추출된 본문이 0이면 fail-fast.
-  const ebookOk = ebookContents.some((e) => e.text && e.text.trim())
-  // 진단: 첨부는 있는데 추출이 모두 실패한 케이스(예: pdf-parse 모듈 누락)와
-  // 첨부 자체가 없는 케이스를 구분해서 사용자에게 알린다.
-  const ebookHasRows = ebookContents.length > 0
-  const ebookFailureReason = needsEbook
-    ? (ebookHasRows && !ebookOk
-        ? `전자책 파일은 있으나 텍스트 추출 실패. 원인: ${ebookExtractionMessages.join(' | ') || '알 수 없음'}`
-        : !ebookHasRows
-          ? '전자책 원문이 필요합니다. 자료 업로드 영역에서 [📚 전자책]으로 강사 전자책 PDF/텍스트를 먼저 추가해주세요.'
-          : null)
-    : null
-
-  // 병렬 실행. 한 항목 실패가 다른 항목 실패로 번지지 않게 각자 try/catch.
-  const settled = await Promise.all(
-    validTasks.map(async (taskKey) => {
-      const start = Date.now()
       try {
-        const taskContext = { ...context }
-        if (TASKS_NEEDING_EBOOK.has(taskKey)) {
-          if (!ebookOk) {
-            throw new Error(ebookFailureReason || '전자책 원문이 필요합니다.')
+        send('start', { tasks: validTasks, skipped })
+
+        // 전자책 입력이 필요한 task가 하나라도 있으면 첨부에서 텍스트 추출
+        let ebookContents = []
+        let ebookExtractionMessages = []
+        const needsEbook = validTasks.some((t) => TASKS_NEEDING_EBOOK.has(t))
+        if (needsEbook && sessionId) {
+          send('phase', { phase: 'ebook_extracting' })
+          try {
+            const { data: ebookRows, error } = await supabaseSelf
+              .from('instructor_attachments')
+              .select('id, file_name, file_url, mime_type, file_type, file_role')
+              .eq('session_id', sessionId)
+              .eq('file_role', 'ebook')
+            if (error) throw error
+            if (ebookRows && ebookRows.length > 0) {
+              ebookContents = await extractEbookContents(ebookRows)
+              ebookExtractionMessages = ebookContents
+                .filter((e) => e.error)
+                .map((e) => `${e.name}: ${e.error}`)
+            }
+          } catch (e) {
+            console.error('전자책 텍스트 추출 실패:', e)
+            ebookExtractionMessages.push('전자책 조회 실패: ' + (e?.message || e))
           }
-          taskContext.ebookContents = ebookContents
         }
-        const { plan, usage, model } = await planners[taskKey](taskContext)
-        return {
-          task: taskKey,
-          ok: true,
-          plan,
-          usage,
-          model,
-          durationMs: Date.now() - start,
-        }
-      } catch (err) {
-        return {
-          task: taskKey,
-          ok: false,
-          error: err?.message || String(err),
-          durationMs: Date.now() - start,
-        }
+
+        const ebookOk = ebookContents.some((e) => e.text && e.text.trim())
+        const ebookHasRows = ebookContents.length > 0
+        const ebookFailureReason = needsEbook
+          ? (ebookHasRows && !ebookOk
+              ? `전자책 파일은 있으나 텍스트 추출 실패. 원인: ${ebookExtractionMessages.join(' | ') || '알 수 없음'}`
+              : !ebookHasRows
+                ? '전자책 원문이 필요합니다. 자료 업로드 영역에서 [📚 전자책]으로 강사 전자책 PDF/텍스트를 먼저 추가해주세요.'
+                : null)
+          : null
+
+        send('phase', { phase: 'planning' })
+
+        // 병렬 실행. 완료되는 순서대로 task_done 이벤트가 나간다.
+        await Promise.all(
+          validTasks.map(async (taskKey) => {
+            send('task_start', { task: taskKey })
+            const start = Date.now()
+            try {
+              const taskContext = { ...context }
+              if (TASKS_NEEDING_EBOOK.has(taskKey)) {
+                if (!ebookOk) {
+                  throw new Error(ebookFailureReason || '전자책 원문이 필요합니다.')
+                }
+                taskContext.ebookContents = ebookContents
+              }
+              const { plan, usage, model } = await planners[taskKey](taskContext)
+              send('task_done', {
+                task: taskKey,
+                result: {
+                  ok: true,
+                  plan,
+                  usage,
+                  model,
+                  durationMs: Date.now() - start,
+                },
+              })
+            } catch (err) {
+              send('task_done', {
+                task: taskKey,
+                result: {
+                  ok: false,
+                  error: err?.message || String(err),
+                  durationMs: Date.now() - start,
+                },
+              })
+            }
+          })
+        )
+
+        send('done', {
+          skipped,
+          executed: validTasks,
+          ebookSummary: needsEbook ? {
+            count: ebookContents.length,
+            successCount: ebookContents.filter((e) => e.text && e.text.trim()).length,
+            issues: ebookExtractionMessages,
+            truncated: ebookContents.some((e) => e.truncated),
+          } : null,
+        })
+      } catch (e) {
+        console.error('project-planner stream error:', e)
+        send('fatal', { message: e?.message || String(e) })
+      } finally {
+        closed = true
+        try { controller.close() } catch {}
       }
-    })
-  )
+    },
+  })
 
-  const results = {}
-  for (const r of settled) results[r.task] = r
-
-  return Response.json({
-    success: true,
-    results,
-    skipped,
-    requested: enabledTasks,
-    executed: validTasks,
-    ebookSummary: needsEbook ? {
-      count: ebookContents.length,
-      successCount: ebookContents.filter(e => e.text && e.text.trim()).length,
-      issues: ebookExtractionMessages,
-      truncated: ebookContents.some(e => e.truncated),
-    } : null,
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
   })
 }

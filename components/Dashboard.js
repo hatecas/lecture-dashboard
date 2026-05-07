@@ -27,6 +27,41 @@ import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
 import * as XLSX from 'xlsx'
 
+// 프로젝트 기획 SSE 스트림 reader. 각 이벤트(start / phase / task_start / task_done / done / fatal)를
+// onEvent(event, data)로 콜백한다. 비-SSE 응답(JSON 에러)은 res.ok 체크로 호출자가 먼저 거른다.
+async function readPlannerSSE(res, onEvent) {
+  if (!res.body) throw new Error('스트림 응답이 없습니다.')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let sepIdx
+    // SSE는 빈 줄(\n\n)로 이벤트 구분
+    while ((sepIdx = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, sepIdx)
+      buffer = buffer.slice(sepIdx + 2)
+      if (!block.trim()) continue
+      let event = 'message'
+      const dataLines = []
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event: ')) event = line.slice(7).trim()
+        else if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data: ')) dataLines.push(line.slice(6))
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5))
+      }
+      let data = null
+      if (dataLines.length > 0) {
+        const raw = dataLines.join('\n')
+        try { data = JSON.parse(raw) } catch { data = raw }
+      }
+      try { onEvent(event, data) } catch (e) { console.error('planner SSE handler error:', e) }
+    }
+  }
+}
+
 function SidebarItem({
   icon: Icon,
   label,
@@ -349,6 +384,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_error, setPpError] = useState('')
   const [pp_taskRetrying, setPpTaskRetrying] = useState(null) // 개별 재생성 중인 task key
   const [pp_expanded, setPpExpanded] = useState({})
+  // 진행상황 표시용. 현재 실행 중인 run의 task별 상태와 단계.
+  // pp_taskStatus: { [taskKey]: { status: 'pending'|'running'|'done'|'error', startedAt?: number, durationMs?: number } }
+  const [pp_taskStatus, setPpTaskStatus] = useState({})
+  const [pp_runTasks, setPpRunTasks] = useState([]) // 현재 run에서 진행 중인 task key 목록 (idle 시 빈 배열)
+  const [pp_phase, setPpPhase] = useState('') // 'starting' | 'ebook_extracting' | 'planning' | 'done'
+  const [pp_startedAt, setPpStartedAt] = useState(0)
+  const [pp_tick, setPpTick] = useState(0) // 진행 중 elapsed-time 표시를 갱신하기 위한 더미 카운터
 
   // 👥 계정 관리 (관리자 전용) 상태
   const [am_loading, setAmLoading] = useState(false)
@@ -963,6 +1005,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       setCurrentTool('crm')
     }
   }, [permissions.canUseInflow])
+
+  // 프로젝트 기획 진행 중일 때만 elapsed-time 표시를 250ms마다 갱신.
+  useEffect(() => {
+    if (!pp_loading && !pp_taskRetrying) return
+    const id = setInterval(() => setPpTick((t) => t + 1), 250)
+    return () => clearInterval(id)
+  }, [pp_loading, pp_taskRetrying])
 
   // 슝 툴 진입 시 서버 .env 기본값(SHOONG_API_KEY, SHOONG_SENDER_KEY) 로드해서 폼/curl 자동 채움
   useEffect(() => {
@@ -8076,24 +8125,39 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               const tasks = overrideTasks || pp_enabledTasks
               if (!ready) {
                 setPpError('강사와 기수를 먼저 선택하세요.')
-                return null
+                return
               }
               if (!pp_topic.trim() || tasks.length === 0) {
                 setPpError('주제와 최소 1개 항목이 필요합니다.')
-                return null
+                return
               }
               // 전자책이 필요한 task 사전 검증 (현재는 'ebook')
               if (tasks.includes('ebook')) {
                 const ebookCount = attachments.filter(a => a.file_role === 'ebook').length
                 if (ebookCount === 0) {
                   alert('📚 무료 전자책 기획안을 만들려면 강사가 제공한 전자책 파일이 필요합니다.\n\n자료 영역의 [📚 전자책] 버튼으로 PDF나 텍스트 파일을 먼저 업로드해주세요.')
-                  return null
+                  return
                 }
               }
               setPpError('')
-              if (overrideTasks) setPpTaskRetrying(overrideTasks[0])
-              else setPpLoading(true)
+              setPpStartedAt(Date.now())
+              setPpPhase('starting')
+              setPpRunTasks(tasks)
+              // 새 run의 task들을 pending으로 초기화. 재생성이면 그 task만 갱신.
+              setPpTaskStatus(prev => {
+                const next = overrideTasks ? { ...prev } : {}
+                for (const t of tasks) next[t] = { status: 'pending' }
+                return next
+              })
+              if (overrideTasks) {
+                setPpTaskRetrying(overrideTasks[0])
+              } else {
+                setPpLoading(true)
+                setPpResults({}) // 결과 영역 초기화 → 스트림으로 채워질 예정
+                setPpExpanded({})
+              }
 
+              let firstSuccess = null
               try {
                 const fullContext = (pp_additionalContext.trim() + buildAttachmentSummary()).trim()
                 const res = await fetch('/api/tools/project-planner', {
@@ -8108,36 +8172,61 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     enabledTasks: tasks,
                   })
                 })
-                const data = await res.json()
                 if (!res.ok) {
+                  // 스트림 시작 전 에러는 일반 JSON
+                  const data = await res.json().catch(() => ({}))
                   setPpError(data.error || `요청 실패 (HTTP ${res.status})`)
-                  return null
+                  return
                 }
-                return data
+
+                await readPlannerSSE(res, (event, data) => {
+                  if (event === 'start') {
+                    setPpPhase('starting')
+                  } else if (event === 'phase') {
+                    setPpPhase(data?.phase || '')
+                  } else if (event === 'task_start') {
+                    if (!data?.task) return
+                    setPpTaskStatus(prev => ({
+                      ...prev,
+                      [data.task]: { status: 'running', startedAt: Date.now() },
+                    }))
+                  } else if (event === 'task_done') {
+                    if (!data?.task || !data?.result) return
+                    const r = data.result
+                    setPpTaskStatus(prev => ({
+                      ...prev,
+                      [data.task]: {
+                        status: r.ok ? 'done' : 'error',
+                        durationMs: r.durationMs,
+                      },
+                    }))
+                    setPpResults(prev => ({
+                      ...(prev || {}),
+                      [data.task]: { task: data.task, ...r },
+                    }))
+                    // 배치 생성에서 첫 성공 항목만 자동 펼침. 재생성에서는 사용자 펼침 상태 유지.
+                    if (!overrideTasks && r.ok && !firstSuccess) {
+                      firstSuccess = data.task
+                      setPpExpanded(prev => ({ ...prev, [data.task]: true }))
+                    }
+                  } else if (event === 'done') {
+                    setPpPhase('done')
+                  } else if (event === 'fatal') {
+                    setPpError(data?.message || '서버 스트림 오류')
+                  }
+                })
               } catch (e) {
                 setPpError('네트워크 오류: ' + e.message)
-                return null
               } finally {
                 setPpLoading(false)
                 setPpTaskRetrying(null)
+                setPpRunTasks([])
+                setPpPhase('')
               }
             }
 
-            const handleGenerate = async () => {
-              const data = await runPlanner()
-              if (data) {
-                setPpResults(data.results)
-                const firstSuccess = Object.entries(data.results).find(([_, v]) => v.ok)?.[0]
-                if (firstSuccess) setPpExpanded({ [firstSuccess]: true })
-              }
-            }
-
-            const handleRegenerate = async (taskKey) => {
-              const data = await runPlanner([taskKey])
-              if (data?.results?.[taskKey]) {
-                setPpResults(prev => ({ ...prev, [taskKey]: data.results[taskKey] }))
-              }
-            }
+            const handleGenerate = async () => { await runPlanner() }
+            const handleRegenerate = async (taskKey) => { await runPlanner([taskKey]) }
 
             // 봇별 결과 카드 렌더러. 새 봇 추가 시 분기 추가.
             // 공통 박스 스타일 헬퍼.
@@ -8655,6 +8744,106 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   {pp_error && (
                     <div style={{ marginTop: '12px', padding: '10px 12px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.30)', borderRadius: '8px', color: '#fca5a5', fontSize: '12.5px' }}>⚠️ {pp_error}</div>
                   )}
+
+                  {/* ───── 진행상황 ───── */}
+                  {(() => {
+                    const busy = pp_loading || !!pp_taskRetrying
+                    if (!busy || pp_runTasks.length === 0) return null
+                    void pp_tick // useEffect interval로 갱신되어 elapsed 표시가 흐름
+                    const totalTasks = pp_runTasks.length
+                    const completedCount = pp_runTasks.filter(t => {
+                      const s = pp_taskStatus[t]?.status
+                      return s === 'done' || s === 'error'
+                    }).length
+                    const elapsed = pp_startedAt ? (Date.now() - pp_startedAt) : 0
+                    const phaseLabel =
+                      pp_phase === 'ebook_extracting' ? '📚 전자책 텍스트 추출 중...' :
+                      pp_phase === 'planning' ? '🪄 기획 생성 중...' :
+                      pp_phase === 'done' ? '✅ 마무리 중...' :
+                      '⏳ 준비 중...'
+                    // 단계별 의미를 살린 진행률: ebook 추출 단계 5%, planning 시작 시 10% 베이스라인 + 완료비율.
+                    let progressPercent = 0
+                    if (pp_phase === 'starting') progressPercent = 3
+                    else if (pp_phase === 'ebook_extracting') progressPercent = 8
+                    else if (pp_phase === 'planning' || pp_phase === 'done') {
+                      const ratio = totalTasks > 0 ? completedCount / totalTasks : 0
+                      progressPercent = Math.round(10 + ratio * 90)
+                    }
+                    if (pp_phase === 'done') progressPercent = 100
+                    return (
+                      <div style={{
+                        marginTop: '14px',
+                        padding: '14px 16px',
+                        background: 'rgba(99,102,241,0.08)',
+                        border: '1px solid rgba(99,102,241,0.25)',
+                        borderRadius: '12px',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px', flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: '13px', color: '#c7d2fe', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span>{phaseLabel}</span>
+                            <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500, padding: '2px 8px', background: 'rgba(255,255,255,0.05)', borderRadius: '999px' }}>
+                              {completedCount} / {totalTasks} 완료
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '11.5px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                            {(elapsed / 1000).toFixed(1)}s
+                          </div>
+                        </div>
+                        <div style={{
+                          height: '8px',
+                          background: 'rgba(255,255,255,0.06)',
+                          borderRadius: '999px',
+                          overflow: 'hidden',
+                          position: 'relative',
+                        }}>
+                          <div style={{
+                            height: '100%',
+                            width: progressPercent + '%',
+                            background: 'var(--accent-grad)',
+                            transition: 'width 0.4s ease',
+                            borderRadius: '999px',
+                          }} />
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '12px' }}>
+                          {pp_runTasks.map((k) => {
+                            const meta = PLANNER_META[k] || { label: k, icon: '🧩' }
+                            const s = pp_taskStatus[k] || { status: 'pending' }
+                            const taskElapsed = (s.status === 'running' && s.startedAt)
+                              ? ((Date.now() - s.startedAt) / 1000).toFixed(1)
+                              : null
+                            const dur = (s.durationMs != null) ? (s.durationMs / 1000).toFixed(1) : null
+                            const palette =
+                              s.status === 'done' ? { bg: 'rgba(16,185,129,0.12)', fg: '#34d399', icon: '✅' } :
+                              s.status === 'error' ? { bg: 'rgba(239,68,68,0.12)', fg: '#fca5a5', icon: '❌' } :
+                              s.status === 'running' ? { bg: 'rgba(99,102,241,0.18)', fg: '#c7d2fe', icon: '⏳' } :
+                              { bg: 'rgba(255,255,255,0.05)', fg: '#94a3b8', icon: '⏸' }
+                            return (
+                              <div key={k} style={{
+                                fontSize: '11.5px',
+                                padding: '5px 11px',
+                                borderRadius: '999px',
+                                background: palette.bg,
+                                color: palette.fg,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontWeight: 600,
+                              }}>
+                                <span>{palette.icon}</span>
+                                <span>{meta.icon} {meta.label}</span>
+                                {taskElapsed && (
+                                  <span style={{ opacity: 0.75, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{taskElapsed}s</span>
+                                )}
+                                {dur && (
+                                  <span style={{ opacity: 0.75, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{dur}s</span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 {/* ───── 결과 ───── */}
