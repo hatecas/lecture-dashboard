@@ -27,6 +27,211 @@ import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
 import * as XLSX from 'xlsx'
 
+// 정리봇 markdown 렌더러 (의존성 없는 경량 구현).
+// 지원: ## / ### 헤더, - 불릿, 1. 번호, | ... | 표(GFM), > 인용, --- 구분선,
+//       **굵게**, *기울임*, _기울임_, `코드`, 단락.
+// JSX 반환. dangerouslySetInnerHTML 사용 안 함 (XSS 안전).
+function MarkdownView({ content }) {
+  if (!content || typeof content !== 'string') return null
+
+  // 인라인 파싱: **bold**, *em*/_em_, `code`. 분할-병합 방식.
+  const renderInline = (text, keyPrefix = 'i') => {
+    if (!text) return null
+    const tokens = []
+    let rest = text
+    let i = 0
+    const RX = /(\*\*([^*\n]+?)\*\*|\*([^*\n]+?)\*|_([^_\n]+?)_|`([^`\n]+?)`)/
+    while (rest.length > 0) {
+      const m = rest.match(RX)
+      if (!m) { tokens.push(rest); break }
+      const idx = m.index
+      if (idx > 0) tokens.push(rest.slice(0, idx))
+      if (m[2] !== undefined) tokens.push(<strong key={`${keyPrefix}-b-${i++}`} style={{ color: '#fff' }}>{m[2]}</strong>)
+      else if (m[3] !== undefined) tokens.push(<em key={`${keyPrefix}-e-${i++}`}>{m[3]}</em>)
+      else if (m[4] !== undefined) tokens.push(<em key={`${keyPrefix}-e-${i++}`}>{m[4]}</em>)
+      else if (m[5] !== undefined) tokens.push(<code key={`${keyPrefix}-c-${i++}`} style={{ background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: '4px', fontSize: '12px', color: '#a5b4fc' }}>{m[5]}</code>)
+      rest = rest.slice(idx + m[0].length)
+    }
+    return tokens
+  }
+
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  const blocks = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    const trimmed = line.trim()
+
+    if (trimmed === '') { i++; continue }
+    if (trimmed === '---' || trimmed === '***') {
+      blocks.push({ type: 'hr' }); i++; continue
+    }
+
+    // 헤더
+    let m
+    if ((m = trimmed.match(/^(#{1,4})\s+(.+)$/))) {
+      blocks.push({ type: 'heading', level: m[1].length, text: m[2] })
+      i++; continue
+    }
+
+    // 표: 헤더 라인 | ... | + 다음 줄이 |---|---| 형태
+    if (/^\|.+\|$/.test(trimmed) && i + 1 < lines.length && /^\|[\s:|-]+\|$/.test(lines[i + 1].trim())) {
+      const headerCells = trimmed.slice(1, -1).split('|').map((s) => s.trim())
+      i += 2 // 헤더 + 구분선 건너뜀
+      const rows = []
+      while (i < lines.length && /^\|.+\|$/.test(lines[i].trim())) {
+        const rowCells = lines[i].trim().slice(1, -1).split('|').map((s) => s.trim())
+        rows.push(rowCells)
+        i++
+      }
+      blocks.push({ type: 'table', headers: headerCells, rows })
+      continue
+    }
+
+    // 불릿 리스트
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items = []
+      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^[-*]\s+/, ''))
+        i++
+      }
+      blocks.push({ type: 'ul', items }); continue
+    }
+
+    // 번호 리스트
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items = []
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^\d+\.\s+/, ''))
+        i++
+      }
+      blocks.push({ type: 'ol', items }); continue
+    }
+
+    // 인용
+    if (/^>\s?/.test(trimmed)) {
+      const buf = []
+      while (i < lines.length && /^>\s?/.test(lines[i].trim())) {
+        buf.push(lines[i].trim().replace(/^>\s?/, ''))
+        i++
+      }
+      blocks.push({ type: 'quote', text: buf.join('\n') }); continue
+    }
+
+    // 단락 (빈 줄 또는 다른 블록 만날 때까지)
+    const buf = []
+    while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,4}\s|[-*]\s|\d+\.\s|>\s?|\|.+\|)/.test(lines[i].trim()) && lines[i].trim() !== '---') {
+      buf.push(lines[i])
+      i++
+    }
+    blocks.push({ type: 'p', text: buf.join('\n') })
+  }
+
+  return (
+    <div className="md-view" style={{ color: '#e2e8f0', fontSize: '13px', lineHeight: 1.7 }}>
+      {blocks.map((b, idx) => {
+        const k = `b-${idx}`
+        if (b.type === 'hr') return <hr key={k} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '14px 0' }} />
+        if (b.type === 'heading') {
+          const sizes = { 1: '22px', 2: '17px', 3: '15px', 4: '13.5px' }
+          const top = b.level === 1 ? '12px' : b.level === 2 ? '18px' : '14px'
+          return (
+            <div key={k} style={{
+              fontSize: sizes[b.level] || '14px',
+              fontWeight: 700,
+              color: '#fff',
+              marginTop: top,
+              marginBottom: '8px',
+              borderBottom: b.level <= 2 ? '1px solid rgba(99,102,241,0.20)' : 'none',
+              paddingBottom: b.level <= 2 ? '4px' : 0,
+            }}>{renderInline(b.text, `${k}-h`)}</div>
+          )
+        }
+        if (b.type === 'table') {
+          return (
+            <div key={k} style={{ overflowX: 'auto', margin: '10px 0' }}>
+              <table style={{
+                borderCollapse: 'collapse',
+                width: '100%',
+                fontSize: '12.5px',
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid var(--border)',
+                borderRadius: '6px',
+                overflow: 'hidden',
+              }}>
+                <thead>
+                  <tr>
+                    {b.headers.map((h, hi) => (
+                      <th key={hi} style={{
+                        padding: '8px 12px',
+                        background: 'rgba(99,102,241,0.10)',
+                        color: '#c7d2fe',
+                        fontWeight: 600,
+                        textAlign: 'left',
+                        borderBottom: '1px solid rgba(99,102,241,0.25)',
+                      }}>{renderInline(h, `${k}-th-${hi}`)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {b.rows.map((row, ri) => (
+                    <tr key={ri} style={{ background: ri % 2 ? 'rgba(255,255,255,0.015)' : 'transparent' }}>
+                      {row.map((cell, ci) => (
+                        <td key={ci} style={{
+                          padding: '7px 12px',
+                          borderBottom: '1px solid rgba(255,255,255,0.04)',
+                          verticalAlign: 'top',
+                          color: '#cbd5e1',
+                        }}>{renderInline(cell, `${k}-td-${ri}-${ci}`)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+        if (b.type === 'ul') {
+          return (
+            <ul key={k} style={{ margin: '6px 0 10px 22px', padding: 0 }}>
+              {b.items.map((it, ii) => (
+                <li key={ii} style={{ margin: '3px 0', color: '#cbd5e1' }}>{renderInline(it, `${k}-li-${ii}`)}</li>
+              ))}
+            </ul>
+          )
+        }
+        if (b.type === 'ol') {
+          return (
+            <ol key={k} style={{ margin: '6px 0 10px 22px', padding: 0 }}>
+              {b.items.map((it, ii) => (
+                <li key={ii} style={{ margin: '3px 0', color: '#cbd5e1' }}>{renderInline(it, `${k}-li-${ii}`)}</li>
+              ))}
+            </ol>
+          )
+        }
+        if (b.type === 'quote') {
+          return (
+            <blockquote key={k} style={{
+              margin: '10px 0',
+              padding: '8px 14px',
+              borderLeft: '3px solid rgba(99,102,241,0.45)',
+              background: 'rgba(99,102,241,0.06)',
+              color: '#cbd5e1',
+              fontStyle: 'italic',
+              borderRadius: '0 6px 6px 0',
+              whiteSpace: 'pre-wrap',
+            }}>{renderInline(b.text, `${k}-q`)}</blockquote>
+          )
+        }
+        // paragraph
+        return (
+          <p key={k} style={{ margin: '6px 0', color: '#cbd5e1', whiteSpace: 'pre-wrap' }}>{renderInline(b.text, `${k}-p`)}</p>
+        )
+      })}
+    </div>
+  )
+}
+
 // 프로젝트 기획 SSE 스트림 reader. 각 이벤트(start / phase / task_start / task_done / done / fatal)를
 // onEvent(event, data)로 콜백한다. 비-SSE 응답(JSON 에러)은 res.ok 체크로 호출자가 먼저 거른다.
 async function readPlannerSSE(res, onEvent) {
@@ -389,6 +594,18 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_precheckResult, setPpPrecheckResult] = useState(null) // { ready, summary, questions }
   const [pp_modalOpen, setPpModalOpen] = useState(false)
   const [pp_answers, setPpAnswers] = useState({}) // { [questionIndex]: string }
+  // 정리봇 (강사 자료 정리본) 상태
+  const [pp_summary, setPpSummary] = useState(null) // { id, content_md, version, updated_at, updated_by }
+  const [pp_summaryLoading, setPpSummaryLoading] = useState(false)
+  const [pp_summaryGenerating, setPpSummaryGenerating] = useState(false)
+  const [pp_summaryRevising, setPpSummaryRevising] = useState(false)
+  const [pp_summaryFeedback, setPpSummaryFeedback] = useState('')
+  const [pp_summaryError, setPpSummaryError] = useState('')
+  const [pp_summaryStartedAt, setPpSummaryStartedAt] = useState(0) // elapsed 표시용
+  // SSE 진행상황 — 정리봇 작업 중에만 의미 있음
+  const [pp_summaryPhase, setPpSummaryPhase] = useState('') // 'extracting' | 'ai_writing' | 'saving' | 'done'
+  const [pp_summaryItems, setPpSummaryItems] = useState([]) // [{ kind, name, status, blocks?, charCount?, durationMs?, error? }]
+  const [pp_summaryAiStartedAt, setPpSummaryAiStartedAt] = useState(0) // AI 단계 시작 시각
   // 진행상황 표시용. 현재 실행 중인 run의 task별 상태와 단계.
   // pp_taskStatus: { [taskKey]: { status: 'pending'|'running'|'done'|'error', startedAt?: number, durationMs?: number } }
   const [pp_taskStatus, setPpTaskStatus] = useState({})
@@ -1011,12 +1228,42 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }
   }, [permissions.canUseInflow])
 
-  // 프로젝트 기획 진행 중일 때만 elapsed-time 표시를 250ms마다 갱신.
+  // 프로젝트 기획/정리봇 진행 중일 때만 elapsed-time 표시를 250ms마다 갱신.
   useEffect(() => {
-    if (!pp_loading && !pp_taskRetrying) return
+    if (!pp_loading && !pp_taskRetrying && !pp_summaryGenerating && !pp_summaryRevising) return
     const id = setInterval(() => setPpTick((t) => t + 1), 250)
     return () => clearInterval(id)
-  }, [pp_loading, pp_taskRetrying])
+  }, [pp_loading, pp_taskRetrying, pp_summaryGenerating, pp_summaryRevising])
+
+  // 강사·기수 변경 시 정리봇 정리본 자동 로드 (있으면 표시, 없으면 null)
+  useEffect(() => {
+    if (!selectedSessionId || currentTab !== 'project-planner') {
+      setPpSummary(null)
+      return
+    }
+    let cancelled = false
+    const run = async () => {
+      setPpSummaryLoading(true)
+      setPpSummaryError('')
+      try {
+        const res = await fetch(`/api/tools/project-planner/summary?sessionId=${selectedSessionId}`, {
+          headers: { ...getAuthHeaders() },
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (!cancelled) setPpSummary(data.summary || null)
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('[summary] 로드 실패:', e?.message)
+          setPpSummary(null)
+        }
+      } finally {
+        if (!cancelled) setPpSummaryLoading(false)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [selectedSessionId, currentTab])
 
   // 슝 툴 진입 시 서버 .env 기본값(SHOONG_API_KEY, SHOONG_SENDER_KEY) 로드해서 폼/curl 자동 채움
   useEffect(() => {
@@ -8738,6 +8985,413 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     </>
                   )}
                 </div>
+
+                {/* ───── 2.5. 정리봇 — 강사 자료 정리본 (다른 기획 봇들과 분리) ───── */}
+                {(() => {
+                  // SSE reader로 진행 상황 처리. 이벤트 핸들러가 state 업데이트.
+                  const runSummarySSE = async (action, payload) => {
+                    setPpSummaryError('')
+                    setPpSummaryStartedAt(Date.now())
+                    setPpSummaryAiStartedAt(0)
+                    setPpSummaryPhase(action === 'generate' ? 'extracting' : 'ai_writing')
+                    setPpSummaryItems([])
+
+                    try {
+                      const res = await fetch('/api/tools/project-planner/summary', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify(payload),
+                      })
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({}))
+                        setPpSummaryError(data.error || `요청 실패 (HTTP ${res.status})`)
+                        return
+                      }
+                      let gotResult = false
+                      await readPlannerSSE(res, (event, data) => {
+                        if (event === 'phase') {
+                          setPpSummaryPhase(data?.phase || '')
+                          if (data?.phase === 'ai_writing') setPpSummaryAiStartedAt(Date.now())
+                        } else if (event === 'item_start') {
+                          setPpSummaryItems((prev) => [
+                            ...prev.filter((it) => !(it.kind === data.kind && it.name === data.name)),
+                            { kind: data.kind, name: data.name, status: 'progress' },
+                          ])
+                        } else if (event === 'item_progress') {
+                          setPpSummaryItems((prev) => prev.map((it) =>
+                            (it.kind === data.kind && it.name === data.name)
+                              ? {
+                                  ...it,
+                                  blocks: data.blocks ?? it.blocks,
+                                  chars: data.chars ?? it.chars,
+                                  stage: data.stage ?? it.stage,
+                                  bytes: data.bytes ?? it.bytes,
+                                  mode: data.mode ?? it.mode,
+                                }
+                              : it
+                          ))
+                        } else if (event === 'item_done') {
+                          setPpSummaryItems((prev) => prev.map((it) =>
+                            (it.kind === data.kind && it.name === data.name)
+                              ? {
+                                  ...it,
+                                  status: 'done',
+                                  charCount: data.charCount,
+                                  blocks: data.blocks ?? it.blocks,
+                                  durationMs: data.durationMs,
+                                  truncated: data.truncated,
+                                  audioCount: data.audioCount ?? it.audioCount,
+                                  audioOk: data.audioOk ?? it.audioOk,
+                                  mode: data.mode ?? it.mode,
+                                }
+                              : it
+                          ))
+                        } else if (event === 'item_error') {
+                          setPpSummaryItems((prev) => prev.map((it) =>
+                            (it.kind === data.kind && it.name === data.name)
+                              ? { ...it, status: 'error', error: data.error }
+                              : it
+                          ))
+                        } else if (event === 'ai_start') {
+                          setPpSummaryAiStartedAt(Date.now())
+                        } else if (event === 'ai_done') {
+                          // ai_done 후 phase=saving 으로 곧 이어짐
+                        } else if (event === 'result') {
+                          if (data?.summary) {
+                            setPpSummary(data.summary)
+                            gotResult = true
+                          }
+                        } else if (event === 'fatal') {
+                          setPpSummaryError(data?.message || '서버 스트림 오류')
+                        }
+                      })
+                      if (!gotResult && !pp_summaryError) {
+                        // 스트림은 끝났는데 result 이벤트가 안 온 경우
+                        setPpSummaryError('정리본 생성이 완료되지 않았습니다. 다시 시도해주세요.')
+                      }
+                    } catch (e) {
+                      setPpSummaryError('네트워크 오류: ' + e.message)
+                    }
+                  }
+
+                  const generateSummaryHandler = async () => {
+                    if (!ready) { setPpSummaryError('강사·기수를 먼저 선택하세요.'); return }
+                    setPpSummaryGenerating(true)
+                    try {
+                      await runSummarySSE('generate', {
+                        action: 'generate',
+                        sessionId: selectedSessionId,
+                        instructor: selectedInstructor,
+                        sessionName: currentSession?.session_name || '',
+                        additionalContext: pp_additionalContext || '',
+                      })
+                    } finally {
+                      setPpSummaryGenerating(false)
+                      setPpSummaryPhase('')
+                    }
+                  }
+                  const reviseSummaryHandler = async () => {
+                    if (!pp_summary) return
+                    if (!pp_summaryFeedback.trim()) { setPpSummaryError('수정 요청 내용을 입력하세요.'); return }
+                    setPpSummaryRevising(true)
+                    try {
+                      await runSummarySSE('revise', {
+                        action: 'revise',
+                        sessionId: selectedSessionId,
+                        instructor: selectedInstructor,
+                        sessionName: currentSession?.session_name || '',
+                        feedback: pp_summaryFeedback,
+                      })
+                      setPpSummaryFeedback('')
+                    } finally {
+                      setPpSummaryRevising(false)
+                      setPpSummaryPhase('')
+                    }
+                  }
+                  const busy = pp_summaryGenerating || pp_summaryRevising
+                  return (
+                    <div style={{
+                      background: 'rgba(34,197,94,0.04)',
+                      borderRadius: '14px',
+                      padding: '20px',
+                      border: '1px solid rgba(34,197,94,0.20)',
+                      marginBottom: '16px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '14px' }}>
+                        <div style={{ fontSize: '20px', marginTop: '-2px' }}>📋</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '3px' }}>
+                            강사 자료 정리본 <span style={{ fontSize: '11px', fontWeight: 500, color: '#86efac', marginLeft: '6px', padding: '2px 8px', background: 'rgba(34,197,94,0.12)', borderRadius: '999px' }}>정리봇</span>
+                          </div>
+                          <div style={{ fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.5 }}>
+                            첨부 자료(PDF/이미지/텍스트) + 추가 컨텍스트를 정리봇이 한 페이지로 정리합니다.
+                            아래 기획 봇들이 본 생성 시 이 정리본을 자동으로 참고합니다.
+                          </div>
+                        </div>
+                      </div>
+
+                      {pp_summaryLoading ? (
+                        <div style={{ padding: '14px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>
+                          정리본 불러오는 중…
+                        </div>
+                      ) : !pp_summary ? (
+                        <div style={{
+                          padding: '20px',
+                          textAlign: 'center',
+                          background: 'rgba(0,0,0,0.25)',
+                          borderRadius: '10px',
+                          border: '1px dashed var(--border)',
+                        }}>
+                          <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '12px' }}>
+                            아직 정리본이 없습니다. 첨부 자료를 추가한 뒤 정리를 생성하세요.
+                          </div>
+                          <button
+                            onClick={generateSummaryHandler}
+                            disabled={!ready || busy}
+                            style={{
+                              padding: '10px 22px',
+                              background: (!ready || busy) ? 'rgba(34,197,94,0.20)' : 'linear-gradient(135deg, #10b981, #14b8a6)',
+                              border: 'none',
+                              borderRadius: '9px',
+                              color: '#fff',
+                              fontSize: '13px',
+                              fontWeight: 700,
+                              cursor: busy ? 'wait' : (ready ? 'pointer' : 'not-allowed'),
+                              boxShadow: (!ready || busy) ? 'none' : '0 6px 14px rgba(16,185,129,0.30)',
+                            }}>
+                            {pp_summaryGenerating ? '🪄 정리 생성 중… (10~30초)' : (ready ? '🪄 정리 생성' : '강사·기수 선택 필요')}
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            marginBottom: '10px', flexWrap: 'wrap', gap: '8px',
+                          }}>
+                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                              v{pp_summary.version} · {new Date(pp_summary.updated_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
+                              {pp_summary.updated_by ? ` · ${pp_summary.updated_by}` : ''}
+                            </div>
+                            <button
+                              onClick={() => {
+                                if (!confirm('현재 정리본을 무시하고 첨부 자료/컨텍스트로 처음부터 다시 만들까요?')) return
+                                generateSummaryHandler()
+                              }}
+                              disabled={busy}
+                              style={{
+                                padding: '5px 11px',
+                                background: 'rgba(255,255,255,0.04)',
+                                border: '1px solid var(--border)',
+                                borderRadius: '7px',
+                                color: '#cbd5e1',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                cursor: busy ? 'wait' : 'pointer',
+                              }}>
+                              {pp_summaryGenerating ? '🔄 처음부터…' : '🔄 처음부터 다시'}
+                            </button>
+                          </div>
+
+                          <div style={{
+                            padding: '16px 20px',
+                            background: 'rgba(0,0,0,0.30)',
+                            borderRadius: '10px',
+                            border: '1px solid var(--border)',
+                            maxHeight: isMobile ? '70vh' : '760px',
+                            overflowY: 'auto',
+                          }}>
+                            <MarkdownView content={pp_summary.content_md} />
+                          </div>
+
+                          {/* 수정 요청 박스 */}
+                          <div style={{ marginTop: '14px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
+                              수정·보강 요청 <span style={{ color: '#64748b', fontSize: '11px', marginLeft: '6px' }}>· 잘못된 부분 / 추가할 내용을 적으면 정리봇이 그 부분만 반영해서 수정</span>
+                            </label>
+                            <textarea
+                              value={pp_summaryFeedback}
+                              onChange={(e) => setPpSummaryFeedback(e.target.value)}
+                              rows={3}
+                              placeholder="예) 강사 프로필 표에 'AI 자동화 5년차' 추가. 시행착오 사례 표에서 '광고 수익 5만원' 부분은 정확히 50만원으로 수정."
+                              style={{
+                                width: '100%',
+                                padding: '10px 12px',
+                                background: 'rgba(0,0,0,0.35)',
+                                border: '1px solid var(--border)',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                fontSize: '13px',
+                                boxSizing: 'border-box',
+                                fontFamily: 'inherit',
+                                resize: 'vertical',
+                              }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                              <button
+                                onClick={reviseSummaryHandler}
+                                disabled={busy || !pp_summaryFeedback.trim()}
+                                style={{
+                                  padding: '8px 18px',
+                                  background: (busy || !pp_summaryFeedback.trim()) ? 'rgba(34,197,94,0.20)' : 'linear-gradient(135deg, #10b981, #14b8a6)',
+                                  border: 'none',
+                                  borderRadius: '8px',
+                                  color: '#fff',
+                                  fontSize: '12.5px',
+                                  fontWeight: 700,
+                                  cursor: busy ? 'wait' : (pp_summaryFeedback.trim() ? 'pointer' : 'not-allowed'),
+                                  boxShadow: (busy || !pp_summaryFeedback.trim()) ? 'none' : '0 4px 10px rgba(16,185,129,0.25)',
+                                }}>
+                                {pp_summaryRevising ? '✏️ 수정 반영 중… (10~20초)' : '✏️ 수정 반영'}
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* 정리봇 진행 패널 — SSE 이벤트 기반 */}
+                      {(pp_summaryGenerating || pp_summaryRevising) && (() => {
+                        void pp_tick // 실시간 elapsed 갱신
+                        const elapsed = pp_summaryStartedAt ? (Date.now() - pp_summaryStartedAt) : 0
+                        const aiElapsed = pp_summaryAiStartedAt ? (Date.now() - pp_summaryAiStartedAt) : 0
+                        const isGen = pp_summaryGenerating
+
+                        const phaseLabel =
+                          pp_summaryPhase === 'extracting' ? '📋 첨부 자료 분석 중'
+                          : pp_summaryPhase === 'ai_writing' ? '✏️ AI가 정리 작성 중'
+                          : pp_summaryPhase === 'saving' ? '💾 저장 중'
+                          : pp_summaryPhase === 'done' ? '✅ 완료'
+                          : '⏳ 준비 중'
+
+                        // 진행률 추정: phase 가중치
+                        let pct = 5
+                        if (pp_summaryPhase === 'extracting') {
+                          // 아이템 진행도 비율
+                          const total = pp_summaryItems.length
+                          const done = pp_summaryItems.filter(it => it.status === 'done' || it.status === 'error').length
+                          pct = total > 0 ? 5 + Math.round((done / total) * 50) : 8
+                        } else if (pp_summaryPhase === 'ai_writing') pct = 60
+                        else if (pp_summaryPhase === 'saving') pct = 95
+                        else if (pp_summaryPhase === 'done') pct = 100
+
+                        return (
+                          <div style={{
+                            marginTop: '14px',
+                            padding: '14px 16px',
+                            background: 'rgba(34,197,94,0.06)',
+                            border: '1px solid rgba(34,197,94,0.20)',
+                            borderRadius: '10px',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px', flexWrap: 'wrap' }}>
+                              <div style={{ fontSize: '13px', color: '#86efac', fontWeight: 700 }}>{phaseLabel}</div>
+                              <div style={{ fontSize: '11.5px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                                전체 {(elapsed / 1000).toFixed(1)}s
+                                {pp_summaryPhase === 'ai_writing' && aiElapsed > 0 && (
+                                  <span style={{ marginLeft: '8px' }}>· AI {(aiElapsed / 1000).toFixed(1)}s</span>
+                                )}
+                              </div>
+                            </div>
+                            <div style={{
+                              height: '7px',
+                              background: 'rgba(255,255,255,0.06)',
+                              borderRadius: '999px',
+                              overflow: 'hidden',
+                            }}>
+                              <div style={{
+                                height: '100%',
+                                width: pct + '%',
+                                background: 'linear-gradient(135deg, #10b981, #14b8a6)',
+                                transition: 'width 0.4s ease',
+                                borderRadius: '999px',
+                              }} />
+                            </div>
+
+                            {/* 자료 추출 단계 — 아이템별 상태 라이브 표시 */}
+                            {pp_summaryItems.length > 0 && (
+                              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                {pp_summaryItems.map((it, i) => {
+                                  const icon =
+                                    it.status === 'done' ? '✅'
+                                    : it.status === 'error' ? '❌'
+                                    : it.status === 'progress' ? '⏳'
+                                    : '⏸'
+                                  const kindIcon =
+                                    it.kind === 'notion' ? '📋'
+                                    : it.kind === 'audio' ? '🎵'
+                                    : '📄'
+                                  // 오디오의 progress 단계 라벨
+                                  const audioStageLabel =
+                                    it.kind === 'audio' && it.status === 'progress'
+                                      ? (it.stage === 'downloading' ? '다운로드 중'
+                                        : it.stage === 'uploading' ? 'Gemini 업로드 중'
+                                        : it.stage === 'transcribing'
+                                            ? `받아쓰기 중${it.mode === 'files-api' ? ' (대용량)' : ''}`
+                                        : '처리 중')
+                                      : null
+                                  return (
+                                    <div key={i} style={{
+                                      fontSize: '11.5px',
+                                      color: it.status === 'error' ? '#fca5a5' : (it.status === 'done' ? '#cbd5e1' : '#c7d2fe'),
+                                      display: 'flex', alignItems: 'center', gap: '6px',
+                                      padding: '4px 8px',
+                                      background: it.status === 'progress' ? 'rgba(99,102,241,0.10)' : 'transparent',
+                                      borderRadius: '6px',
+                                    }}>
+                                      <span>{icon}</span>
+                                      <span>{kindIcon}</span>
+                                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {it.name}
+                                      </span>
+                                      {it.status === 'progress' && it.kind === 'notion' && it.blocks != null && (
+                                        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
+                                          {it.blocks}블록 가져옴
+                                        </span>
+                                      )}
+                                      {it.status === 'progress' && it.kind === 'audio' && audioStageLabel && (
+                                        <span style={{ color: '#94a3b8' }}>
+                                          {audioStageLabel}
+                                          {it.bytes ? ` (${(it.bytes / 1024 / 1024).toFixed(1)}MB)` : ''}
+                                        </span>
+                                      )}
+                                      {it.status === 'done' && (
+                                        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
+                                          {it.kind === 'notion' && it.blocks ? `${it.blocks}블록` : ''}
+                                          {it.kind === 'notion' && it.audioCount ? ` · 🎵${it.audioOk}/${it.audioCount}` : ''}
+                                          {it.kind === 'notion' && (it.blocks || it.audioCount) && it.charCount ? ' · ' : ''}
+                                          {it.charCount ? `${it.charCount.toLocaleString()}자` : ''}
+                                          {it.durationMs ? ` · ${(it.durationMs / 1000).toFixed(1)}s` : ''}
+                                          {it.truncated ? ' · ✂️일부' : ''}
+                                        </span>
+                                      )}
+                                      {it.status === 'error' && (
+                                        <span style={{ color: '#fca5a5', fontSize: '11px' }} title={it.error}>
+                                          실패
+                                        </span>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+
+                            {/* 단계별 안내 */}
+                            <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '10px', lineHeight: 1.5 }}>
+                              {pp_summaryPhase === 'extracting' && '※ 첨부된 노션 페이지·PDF가 많으면 분 단위로 걸릴 수 있습니다. 위 목록이 갱신되면 정상 작동 중입니다.'}
+                              {pp_summaryPhase === 'ai_writing' && '※ Claude가 자료 전체를 읽고 정리본을 작성하는 중입니다 (10~30초).'}
+                              {pp_summaryPhase === 'saving' && '※ 거의 다 됐습니다.'}
+                              {!pp_summaryPhase && (isGen ? '※ 곧 자료 분석을 시작합니다.' : '※ 곧 수정을 시작합니다.')}
+                            </div>
+                          </div>
+                        )
+                      })()}
+
+                      {pp_summaryError && (
+                        <div style={{ marginTop: '12px', padding: '10px 12px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.30)', borderRadius: '8px', color: '#fca5a5', fontSize: '12.5px' }}>
+                          ⚠️ {pp_summaryError}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* ───── 3. 주제 / 추가 컨텍스트 / 항목 / 생성 ───── */}
                 <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '14px', padding: '20px', border: '1px solid var(--border)', marginBottom: '16px' }}>
