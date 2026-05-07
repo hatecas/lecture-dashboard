@@ -24,7 +24,9 @@ import { isNotionUrl, fetchNotionPageAsMarkdown } from '@/lib/integrations/notio
 export const runtime = 'nodejs'
 export const maxDuration = 300 // 5분 (Vercel hobby 한도). 진행상황 SSE 표시되므로 여유롭게.
 
-const PER_FILE_CHAR_LIMIT = 80000
+// 첨부 자료 한 개당 본문 한도. Anthropic 입력 토큰 분당 한도(429) 회피 + 비용 절감.
+// 80K → 50K 축소 (이전엔 5개 첨부면 400K자 = ~100K토큰 → 한 번에 분당 한도 초과 잦음)
+const PER_FILE_CHAR_LIMIT = 50000
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
