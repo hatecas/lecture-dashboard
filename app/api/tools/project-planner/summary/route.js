@@ -147,30 +147,35 @@ export async function POST(request) {
     currentSummary = existing
   }
 
-  // 첨부 자료 로드 + 본문 추출 (파일 + 노션 링크 둘 다)
+  // 첨부 자료 로드 + 본문 추출 — 'generate' 모드만 수행.
+  // 'revise'는 기존 정리본 텍스트만 보고 부분 편집하므로 무거운 추출(노션 fetch + Gemini OCR)
+  // 다시 돌리지 않는다 (이전 버전에서 60초+ 걸리는 버그 원인). 자료가 새로 추가됐다면
+  // 사용자가 [🔄 처음부터 다시]를 눌러서 generate를 새로 돌려야 함.
   let attachments = []
   let extractedTexts = []
-  try {
-    attachments = await loadAttachments(instructorId, sessionId)
-    const extractableFiles = attachments.filter(isExtractableFile)
-    const notionLinks = attachments.filter(isNotionLink)
+  if (action === 'generate') {
+    try {
+      attachments = await loadAttachments(instructorId, sessionId)
+      const extractableFiles = attachments.filter(isExtractableFile)
+      const notionLinks = attachments.filter(isNotionLink)
 
-    const [fileTexts, notionTexts] = await Promise.all([
-      extractableFiles.length > 0 ? extractEbookContents(extractableFiles) : Promise.resolve([]),
-      notionLinks.length > 0 && process.env.NOTION_API_KEY
-        ? extractNotionContents(notionLinks)
-        : Promise.resolve(notionLinks.map((a) => ({
-            name: a.file_name || a.file_url,
-            text: '',
-            error: process.env.NOTION_API_KEY
-              ? '노션 링크 처리 비활성'
-              : 'NOTION_API_KEY 미설정 — Vercel/.env.local에 추가 후 재시작',
-          }))),
-    ])
-    extractedTexts = [...fileTexts, ...notionTexts]
-  } catch (e) {
-    console.error('[summary] 첨부/추출 실패:', e?.message || e)
-    // 추출 실패해도 정리는 시도 (메타라도 가지고)
+      const [fileTexts, notionTexts] = await Promise.all([
+        extractableFiles.length > 0 ? extractEbookContents(extractableFiles) : Promise.resolve([]),
+        notionLinks.length > 0 && process.env.NOTION_API_KEY
+          ? extractNotionContents(notionLinks)
+          : Promise.resolve(notionLinks.map((a) => ({
+              name: a.file_name || a.file_url,
+              text: '',
+              error: process.env.NOTION_API_KEY
+                ? '노션 링크 처리 비활성'
+                : 'NOTION_API_KEY 미설정 — Vercel/.env.local에 추가 후 재시작',
+            }))),
+      ])
+      extractedTexts = [...fileTexts, ...notionTexts]
+    } catch (e) {
+      console.error('[summary] 첨부/추출 실패:', e?.message || e)
+      // 추출 실패해도 정리는 시도 (메타라도 가지고)
+    }
   }
 
   try {

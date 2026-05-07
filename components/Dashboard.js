@@ -601,6 +601,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_summaryRevising, setPpSummaryRevising] = useState(false)
   const [pp_summaryFeedback, setPpSummaryFeedback] = useState('')
   const [pp_summaryError, setPpSummaryError] = useState('')
+  const [pp_summaryStartedAt, setPpSummaryStartedAt] = useState(0) // elapsed 표시용
   // 진행상황 표시용. 현재 실행 중인 run의 task별 상태와 단계.
   // pp_taskStatus: { [taskKey]: { status: 'pending'|'running'|'done'|'error', startedAt?: number, durationMs?: number } }
   const [pp_taskStatus, setPpTaskStatus] = useState({})
@@ -1223,12 +1224,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }
   }, [permissions.canUseInflow])
 
-  // 프로젝트 기획 진행 중일 때만 elapsed-time 표시를 250ms마다 갱신.
+  // 프로젝트 기획/정리봇 진행 중일 때만 elapsed-time 표시를 250ms마다 갱신.
   useEffect(() => {
-    if (!pp_loading && !pp_taskRetrying) return
+    if (!pp_loading && !pp_taskRetrying && !pp_summaryGenerating && !pp_summaryRevising) return
     const id = setInterval(() => setPpTick((t) => t + 1), 250)
     return () => clearInterval(id)
-  }, [pp_loading, pp_taskRetrying])
+  }, [pp_loading, pp_taskRetrying, pp_summaryGenerating, pp_summaryRevising])
 
   // 강사·기수 변경 시 정리봇 정리본 자동 로드 (있으면 표시, 없으면 null)
   useEffect(() => {
@@ -8986,6 +8987,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   const generateSummaryHandler = async () => {
                     if (!ready) { setPpSummaryError('강사·기수를 먼저 선택하세요.'); return }
                     setPpSummaryError('')
+                    setPpSummaryStartedAt(Date.now())
                     setPpSummaryGenerating(true)
                     try {
                       const res = await fetch('/api/tools/project-planner/summary', {
@@ -9015,6 +9017,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     if (!pp_summary) return
                     if (!pp_summaryFeedback.trim()) { setPpSummaryError('수정 요청 내용을 입력하세요.'); return }
                     setPpSummaryError('')
+                    setPpSummaryStartedAt(Date.now())
                     setPpSummaryRevising(true)
                     try {
                       const res = await fetch('/api/tools/project-planner/summary', {
@@ -9126,11 +9129,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           </div>
 
                           <div style={{
-                            padding: '14px 18px',
+                            padding: '16px 20px',
                             background: 'rgba(0,0,0,0.30)',
                             borderRadius: '10px',
                             border: '1px solid var(--border)',
-                            maxHeight: '420px',
+                            maxHeight: isMobile ? '70vh' : '760px',
                             overflowY: 'auto',
                           }}>
                             <MarkdownView content={pp_summary.content_md} />
@@ -9180,6 +9183,59 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           </div>
                         </>
                       )}
+
+                      {/* 정리봇 진행 패널 */}
+                      {(pp_summaryGenerating || pp_summaryRevising) && (() => {
+                        void pp_tick // tick 의존성 (실시간 갱신)
+                        const elapsed = pp_summaryStartedAt ? (Date.now() - pp_summaryStartedAt) : 0
+                        const elapsedSec = elapsed / 1000
+                        const isGen = pp_summaryGenerating
+                        // 단계별 추정: generate는 자료 추출(~5~15s) → 정리 작성(~10~20s).
+                        // revise는 단순 편집(~5~15s).
+                        const estTotal = isGen ? 30 : 12
+                        const pct = Math.min(95, Math.max(5, (elapsedSec / estTotal) * 100))
+                        const phase = isGen
+                          ? (elapsedSec < 8 ? '📋 자료 분석 중…'
+                              : elapsedSec < 20 ? '✏️ 정리 작성 중…'
+                              : '✏️ 마무리 중…')
+                          : (elapsedSec < 5 ? '📖 정리본 읽는 중…'
+                              : '✏️ 수정 반영 중…')
+                        return (
+                          <div style={{
+                            marginTop: '14px',
+                            padding: '12px 14px',
+                            background: 'rgba(34,197,94,0.06)',
+                            border: '1px solid rgba(34,197,94,0.20)',
+                            borderRadius: '10px',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+                              <div style={{ fontSize: '12.5px', color: '#86efac', fontWeight: 600 }}>{phase}</div>
+                              <div style={{ fontSize: '11.5px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                                {elapsedSec.toFixed(1)}s
+                              </div>
+                            </div>
+                            <div style={{
+                              height: '6px',
+                              background: 'rgba(255,255,255,0.06)',
+                              borderRadius: '999px',
+                              overflow: 'hidden',
+                            }}>
+                              <div style={{
+                                height: '100%',
+                                width: pct + '%',
+                                background: 'linear-gradient(135deg, #10b981, #14b8a6)',
+                                transition: 'width 0.3s ease',
+                                borderRadius: '999px',
+                              }} />
+                            </div>
+                            <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
+                              {isGen
+                                ? '※ 노션 페이지·PDF 자료가 많으면 자료 분석에 30초 이상 걸릴 수 있습니다.'
+                                : '※ 수정 반영은 보통 5~15초.'}
+                            </div>
+                          </div>
+                        )
+                      })()}
 
                       {pp_summaryError && (
                         <div style={{ marginTop: '12px', padding: '10px 12px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.30)', borderRadius: '8px', color: '#fca5a5', fontSize: '12.5px' }}>
