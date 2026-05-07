@@ -9020,13 +9020,30 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         } else if (event === 'item_progress') {
                           setPpSummaryItems((prev) => prev.map((it) =>
                             (it.kind === data.kind && it.name === data.name)
-                              ? { ...it, blocks: data.blocks ?? it.blocks, chars: data.chars ?? it.chars }
+                              ? {
+                                  ...it,
+                                  blocks: data.blocks ?? it.blocks,
+                                  chars: data.chars ?? it.chars,
+                                  stage: data.stage ?? it.stage,
+                                  bytes: data.bytes ?? it.bytes,
+                                  mode: data.mode ?? it.mode,
+                                }
                               : it
                           ))
                         } else if (event === 'item_done') {
                           setPpSummaryItems((prev) => prev.map((it) =>
                             (it.kind === data.kind && it.name === data.name)
-                              ? { ...it, status: 'done', charCount: data.charCount, blocks: data.blocks ?? it.blocks, durationMs: data.durationMs, truncated: data.truncated }
+                              ? {
+                                  ...it,
+                                  status: 'done',
+                                  charCount: data.charCount,
+                                  blocks: data.blocks ?? it.blocks,
+                                  durationMs: data.durationMs,
+                                  truncated: data.truncated,
+                                  audioCount: data.audioCount ?? it.audioCount,
+                                  audioOk: data.audioOk ?? it.audioOk,
+                                  mode: data.mode ?? it.mode,
+                                }
                               : it
                           ))
                         } else if (event === 'item_error') {
@@ -9297,7 +9314,19 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     : it.status === 'error' ? '❌'
                                     : it.status === 'progress' ? '⏳'
                                     : '⏸'
-                                  const kindIcon = it.kind === 'notion' ? '📋' : '📄'
+                                  const kindIcon =
+                                    it.kind === 'notion' ? '📋'
+                                    : it.kind === 'audio' ? '🎵'
+                                    : '📄'
+                                  // 오디오의 progress 단계 라벨
+                                  const audioStageLabel =
+                                    it.kind === 'audio' && it.status === 'progress'
+                                      ? (it.stage === 'downloading' ? '다운로드 중'
+                                        : it.stage === 'uploading' ? 'Gemini 업로드 중'
+                                        : it.stage === 'transcribing'
+                                            ? `받아쓰기 중${it.mode === 'files-api' ? ' (대용량)' : ''}`
+                                        : '처리 중')
+                                      : null
                                   return (
                                     <div key={i} style={{
                                       fontSize: '11.5px',
@@ -9317,9 +9346,17 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                           {it.blocks}블록 가져옴
                                         </span>
                                       )}
+                                      {it.status === 'progress' && it.kind === 'audio' && audioStageLabel && (
+                                        <span style={{ color: '#94a3b8' }}>
+                                          {audioStageLabel}
+                                          {it.bytes ? ` (${(it.bytes / 1024 / 1024).toFixed(1)}MB)` : ''}
+                                        </span>
+                                      )}
                                       {it.status === 'done' && (
                                         <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
-                                          {it.kind === 'notion' && it.blocks ? `${it.blocks}블록 · ` : ''}
+                                          {it.kind === 'notion' && it.blocks ? `${it.blocks}블록` : ''}
+                                          {it.kind === 'notion' && it.audioCount ? ` · 🎵${it.audioOk}/${it.audioCount}` : ''}
+                                          {it.kind === 'notion' && (it.blocks || it.audioCount) && it.charCount ? ' · ' : ''}
                                           {it.charCount ? `${it.charCount.toLocaleString()}자` : ''}
                                           {it.durationMs ? ` · ${(it.durationMs / 1000).toFixed(1)}s` : ''}
                                           {it.truncated ? ' · ✂️일부' : ''}

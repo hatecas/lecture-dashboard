@@ -190,7 +190,7 @@ export async function POST(request) {
             }
           }
 
-          // 1b. 노션 링크 추출 — 페이지 블록 카운트 실시간 푸시
+          // 1b. 노션 링크 추출 — 페이지 블록 카운트 + 안의 오디오 받아쓰기 진행 실시간 푸시
           for (const a of notionLinks) {
             const name = a.file_name || a.file_url
             send('item_start', { kind: 'notion', name })
@@ -203,6 +203,31 @@ export async function POST(request) {
                 onProgress: ({ count }) => {
                   send('item_progress', { kind: 'notion', name, blocks: count })
                 },
+                // 오디오 블록 받아쓰기는 별도 item으로 푸시 (kind='audio', parent=notion 페이지명)
+                onAudioProgress: (info) => {
+                  const audioName = `🎵 ${info.name} (in ${name})`
+                  if (info.status === 'start') {
+                    send('item_start', { kind: 'audio', name: audioName })
+                  } else if (info.status === 'progress') {
+                    send('item_progress', {
+                      kind: 'audio',
+                      name: audioName,
+                      stage: info.stage,
+                      bytes: info.bytes,
+                      mode: info.mode,
+                    })
+                  } else if (info.status === 'done') {
+                    send('item_done', {
+                      kind: 'audio',
+                      name: audioName,
+                      charCount: info.charCount,
+                      durationMs: info.durationMs,
+                      mode: info.mode,
+                    })
+                  } else if (info.status === 'error') {
+                    send('item_error', { kind: 'audio', name: audioName, error: info.error })
+                  }
+                },
               })
               if (!r.markdown || !r.markdown.trim()) {
                 throw new Error('노션 페이지가 비어있거나 본문이 없습니다.')
@@ -214,7 +239,16 @@ export async function POST(request) {
                 truncated = true
               }
               extractedTexts.push({ name, text, truncated })
-              send('item_done', { kind: 'notion', name, charCount: text.length, blocks: r.blockCount, durationMs: Date.now() - start, truncated })
+              send('item_done', {
+                kind: 'notion',
+                name,
+                charCount: text.length,
+                blocks: r.blockCount,
+                durationMs: Date.now() - start,
+                truncated,
+                audioCount: r.audioCount || 0,
+                audioOk: r.audioOk || 0,
+              })
             } catch (e) {
               const msg = e?.message || String(e)
               extractedTexts.push({ name, text: '', error: msg })
