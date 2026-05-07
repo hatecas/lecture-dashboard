@@ -3,10 +3,13 @@
 -- 한 (강사, 기수) 조합당 정리본 1개 (UNIQUE). 사용자가 수정 요청 보내면 기존 row를 UPDATE.
 -- 다른 봇(전자책/붐업/채널톡 등)이 본 생성 시 이 정리본을 컨텍스트에 자동 주입.
 
-CREATE TABLE IF NOT EXISTS instructor_summaries (
+-- 기존 잘못된 BIGINT 타입 테이블이 있으면 제거 (instructors.id / sessions.id가 UUID라서 타입 매칭 안 됨)
+DROP TABLE IF EXISTS instructor_summaries CASCADE;
+
+CREATE TABLE instructor_summaries (
   id BIGSERIAL PRIMARY KEY,
-  instructor_id BIGINT NOT NULL,
-  session_id BIGINT NOT NULL,
+  instructor_id UUID NOT NULL,
+  session_id UUID NOT NULL,
   content_md TEXT NOT NULL DEFAULT '',
   version INT NOT NULL DEFAULT 1,
   updated_by TEXT,

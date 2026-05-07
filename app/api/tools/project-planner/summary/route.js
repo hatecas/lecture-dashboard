@@ -57,8 +57,8 @@ export async function GET(request) {
   if (!auth.authenticated) return Response.json({ error: '인증 필요' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
-  const sessionId = parseInt(searchParams.get('sessionId') || '', 10)
-  if (!sessionId || Number.isNaN(sessionId)) {
+  const sessionId = (searchParams.get('sessionId') || '').trim()
+  if (!sessionId) {
     return Response.json({ error: 'sessionId는 필수' }, { status: 400 })
   }
 
