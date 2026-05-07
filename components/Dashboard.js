@@ -9196,10 +9196,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         const pct = Math.min(95, Math.max(5, (elapsedSec / estTotal) * 100))
                         const phase = isGen
                           ? (elapsedSec < 8 ? '📋 자료 분석 중…'
-                              : elapsedSec < 20 ? '✏️ 정리 작성 중…'
-                              : '✏️ 마무리 중…')
+                              : elapsedSec < 25 ? '✏️ 정리 작성 중…'
+                              : elapsedSec < 60 ? '✏️ 마무리 중…'
+                              : elapsedSec < 75 ? '🐢 자료가 많은 페이지인 것 같습니다…'
+                              : '⚠️ 곧 타임아웃될 수 있습니다 (75초 한도)')
                           : (elapsedSec < 5 ? '📖 정리본 읽는 중…'
-                              : '✏️ 수정 반영 중…')
+                              : elapsedSec < 20 ? '✏️ 수정 반영 중…'
+                              : '🐢 수정이 오래 걸리는 중… (취소하려면 새로고침)')
                         return (
                           <div style={{
                             marginTop: '14px',
