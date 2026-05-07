@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { generateSummary, reviseSummary } from '@/lib/planners/summarize'
 import { extractEbookContents } from '@/lib/planners/_text'
+import { isNotionUrl, fetchNotionPageAsMarkdown } from '@/lib/integrations/notion'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
@@ -17,15 +18,45 @@ const supabase = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 )
 
-// 정리봇이 본문 추출을 시도할 mime 타입. 노션 링크/오디오는 추출 안 됨(메타만).
+// 본문 추출 가능한 파일 첨부(PDF/이미지/텍스트)
 const EXTRACTABLE_MIME_PREFIXES = ['application/pdf', 'image/', 'text/']
 const EXTRACTABLE_MIME_INCLUDES = ['markdown', 'json', 'xml']
-function isExtractable(att) {
+function isExtractableFile(att) {
   if (att.file_type === 'link') return false
   const mime = (att.mime_type || '').toLowerCase()
   if (!mime) return false
   return EXTRACTABLE_MIME_PREFIXES.some((p) => mime.startsWith(p))
       || EXTRACTABLE_MIME_INCLUDES.some((s) => mime.includes(s))
+}
+
+// 노션 링크 첨부 (file_type==='link' 이면서 URL 도메인이 notion.so/notion.site)
+function isNotionLink(att) {
+  if (att.file_type !== 'link') return false
+  return isNotionUrl(att.file_url)
+}
+
+// 노션 링크 배열 → extractEbookContents와 동일 형식으로 변환
+//   [{ name, text, error?, truncated? }]
+async function extractNotionContents(notionLinks) {
+  return await Promise.all(
+    notionLinks.map(async (a) => {
+      const entry = { name: a.file_name || a.file_url }
+      try {
+        const r = await fetchNotionPageAsMarkdown(a.file_url)
+        if (!r.markdown || !r.markdown.trim()) {
+          entry.text = ''
+          entry.error = '노션 페이지가 비어있습니다.'
+        } else {
+          entry.text = r.markdown
+          if (r.truncated) entry.truncated = true
+        }
+      } catch (e) {
+        entry.text = ''
+        entry.error = e?.message || String(e)
+      }
+      return entry
+    })
+  )
 }
 
 // instructor_id 조회 (sessionId로부터)
@@ -116,16 +147,27 @@ export async function POST(request) {
     currentSummary = existing
   }
 
-  // 첨부 자료 로드 + 본문 추출
+  // 첨부 자료 로드 + 본문 추출 (파일 + 노션 링크 둘 다)
   let attachments = []
   let extractedTexts = []
   try {
     attachments = await loadAttachments(instructorId, sessionId)
-    const extractable = attachments.filter(isExtractable)
-    if (extractable.length > 0) {
-      // extractEbookContents는 사실 일반 PDF/이미지/텍스트 모두 받는 generic 함수.
-      extractedTexts = await extractEbookContents(extractable)
-    }
+    const extractableFiles = attachments.filter(isExtractableFile)
+    const notionLinks = attachments.filter(isNotionLink)
+
+    const [fileTexts, notionTexts] = await Promise.all([
+      extractableFiles.length > 0 ? extractEbookContents(extractableFiles) : Promise.resolve([]),
+      notionLinks.length > 0 && process.env.NOTION_API_KEY
+        ? extractNotionContents(notionLinks)
+        : Promise.resolve(notionLinks.map((a) => ({
+            name: a.file_name || a.file_url,
+            text: '',
+            error: process.env.NOTION_API_KEY
+              ? '노션 링크 처리 비활성'
+              : 'NOTION_API_KEY 미설정 — Vercel/.env.local에 추가 후 재시작',
+          }))),
+    ])
+    extractedTexts = [...fileTexts, ...notionTexts]
   } catch (e) {
     console.error('[summary] 첨부/추출 실패:', e?.message || e)
     // 추출 실패해도 정리는 시도 (메타라도 가지고)
