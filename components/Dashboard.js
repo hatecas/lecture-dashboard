@@ -384,6 +384,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_error, setPpError] = useState('')
   const [pp_taskRetrying, setPpTaskRetrying] = useState(null) // 개별 재생성 중인 task key
   const [pp_expanded, setPpExpanded] = useState({})
+  // 쌍방향 사전 점검 상태
+  const [pp_prechecking, setPpPrechecking] = useState(false)
+  const [pp_precheckResult, setPpPrecheckResult] = useState(null) // { ready, summary, questions }
+  const [pp_modalOpen, setPpModalOpen] = useState(false)
+  const [pp_answers, setPpAnswers] = useState({}) // { [questionIndex]: string }
   // 진행상황 표시용. 현재 실행 중인 run의 task별 상태와 단계.
   // pp_taskStatus: { [taskKey]: { status: 'pending'|'running'|'done'|'error', startedAt?: number, durationMs?: number } }
   const [pp_taskStatus, setPpTaskStatus] = useState({})
@@ -8121,7 +8126,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               return '\n\n[첨부 자료 목록]\n' + lines.join('\n')
             }
 
-            const runPlanner = async (overrideTasks = null) => {
+            const runPlanner = async (overrideTasks = null, extraContext = '') => {
               const tasks = overrideTasks || pp_enabledTasks
               if (!ready) {
                 setPpError('강사와 기수를 먼저 선택하세요.')
@@ -8159,7 +8164,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
               let firstSuccess = null
               try {
-                const fullContext = (pp_additionalContext.trim() + buildAttachmentSummary()).trim()
+                const fullContext = (
+                  pp_additionalContext.trim() +
+                  (extraContext && extraContext.trim() ? '\n\n' + extraContext.trim() : '') +
+                  buildAttachmentSummary()
+                ).trim()
                 const res = await fetch('/api/tools/project-planner', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -8225,7 +8234,78 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
             }
 
-            const handleGenerate = async () => { await runPlanner() }
+            // 사전 점검 → 모달 또는 본 생성
+            const handleGenerate = async () => {
+              if (!ready) { setPpError('강사와 기수를 먼저 선택하세요.'); return }
+              if (!pp_topic.trim() || pp_enabledTasks.length === 0) {
+                setPpError('주제와 최소 1개 항목이 필요합니다.')
+                return
+              }
+              // 전자책 사전 검증은 precheck 전에도 한 번 더 (서버 round-trip 절약)
+              if (pp_enabledTasks.includes('ebook')) {
+                const ebookCount = attachments.filter(a => a.file_role === 'ebook').length
+                if (ebookCount === 0) {
+                  alert('📚 무료 전자책 기획안을 만들려면 강사가 제공한 전자책 파일이 필요합니다.\n\n자료 영역의 [📚 전자책] 버튼으로 PDF나 텍스트 파일을 먼저 업로드해주세요.')
+                  return
+                }
+              }
+              setPpError('')
+              setPpPrechecking(true)
+              try {
+                const fullContext = (pp_additionalContext.trim() + buildAttachmentSummary()).trim()
+                const res = await fetch('/api/tools/project-planner/precheck', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  body: JSON.stringify({
+                    instructor: selectedInstructor,
+                    sessionName: currentSession?.session_name || '',
+                    sessionId: selectedSessionId,
+                    topic: pp_topic,
+                    additionalContext: fullContext,
+                    enabledTasks: pp_enabledTasks,
+                  }),
+                })
+                if (res.ok) {
+                  const data = await res.json()
+                  if (data.success && data.ready === false && Array.isArray(data.questions) && data.questions.length > 0) {
+                    setPpPrecheckResult(data)
+                    setPpAnswers({})
+                    setPpModalOpen(true)
+                    return
+                  }
+                  // ready=true → 그대로 본 생성으로 떨어짐
+                } else {
+                  // 점검 실패는 사용자 흐름 막지 않음 — 콘솔 경고 후 본 생성 진행
+                  console.warn('[precheck] HTTP', res.status)
+                }
+              } catch (e) {
+                console.warn('[precheck] 네트워크 오류:', e?.message)
+              } finally {
+                setPpPrechecking(false)
+              }
+              await runPlanner()
+            }
+
+            const handleModalContinue = async () => {
+              const qs = pp_precheckResult?.questions || []
+              const answeredLines = qs
+                .map((q, i) => {
+                  const a = (pp_answers[i] || '').trim()
+                  return a ? `Q. ${q}\nA. ${a}` : null
+                })
+                .filter(Boolean)
+              setPpModalOpen(false)
+              const extra = answeredLines.length > 0
+                ? `[강사 보충 답변]\n${answeredLines.join('\n\n')}`
+                : ''
+              await runPlanner(null, extra)
+            }
+
+            const handleModalSkip = async () => {
+              setPpModalOpen(false)
+              await runPlanner()
+            }
+
             const handleRegenerate = async (taskKey) => { await runPlanner([taskKey]) }
 
             // 봇별 결과 카드 렌더러. 새 봇 추가 시 분기 추가.
@@ -8710,18 +8790,20 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     </div>
                   </div>
 
-                  <button onClick={handleGenerate} disabled={pp_loading || !ready}
+                  <button onClick={handleGenerate} disabled={pp_loading || pp_prechecking || !ready}
                     style={{
                       width: '100%', padding: '14px',
-                      background: (pp_loading || !ready) ? 'rgba(99,102,241,0.20)' : 'var(--accent-grad)',
+                      background: (pp_loading || pp_prechecking || !ready) ? 'rgba(99,102,241,0.20)' : 'var(--accent-grad)',
                       border: 'none', borderRadius: '10px',
                       color: '#fff', fontSize: '15px', fontWeight: 700,
-                      cursor: pp_loading ? 'wait' : (ready ? 'pointer' : 'not-allowed'),
-                      boxShadow: (pp_loading || !ready) ? 'none' : '0 8px 18px rgba(99,102,241,0.30)',
+                      cursor: (pp_loading || pp_prechecking) ? 'wait' : (ready ? 'pointer' : 'not-allowed'),
+                      boxShadow: (pp_loading || pp_prechecking || !ready) ? 'none' : '0 8px 18px rgba(99,102,241,0.30)',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
                     }}>
                     <Wand2 size={16} />
-                    {pp_loading ? '생성 중…' : (ready ? `🪄 기획 생성 (${pp_enabledTasks.length}개 항목)` : '강사·기수 선택 필요')}
+                    {pp_prechecking ? '🔍 입력 점검 중… (3~5초)' :
+                     pp_loading ? '생성 중…' :
+                     (ready ? `🪄 기획 생성 (${pp_enabledTasks.length}개 항목)` : '강사·기수 선택 필요')}
                   </button>
 
                   {pp_error && (
@@ -8828,6 +8910,138 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     )
                   })()}
                 </div>
+
+                {/* ───── 사전 점검 모달 ───── */}
+                {pp_modalOpen && pp_precheckResult && (
+                  <div
+                    onClick={(e) => { if (e.target === e.currentTarget && !pp_loading) setPpModalOpen(false) }}
+                    style={{
+                      position: 'fixed', inset: 0,
+                      background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)',
+                      zIndex: 100, display: 'flex',
+                      alignItems: 'center', justifyContent: 'center',
+                      padding: '20px',
+                    }}>
+                    <div style={{
+                      background: '#0f172a',
+                      border: '1px solid var(--border)',
+                      borderRadius: '16px',
+                      maxWidth: '640px', width: '100%',
+                      maxHeight: '90vh', overflow: 'auto',
+                      padding: isMobile ? '20px' : '28px',
+                      boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '6px' }}>
+                        <div style={{ fontSize: '22px' }}>🔍</div>
+                        <div style={{ flex: 1 }}>
+                          <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', margin: 0, marginBottom: '4px' }}>
+                            시작 전에 확인이 필요해요
+                          </h3>
+                          <p style={{ fontSize: '12.5px', color: '#94a3b8', margin: 0, lineHeight: 1.55 }}>
+                            AI가 입력을 점검한 결과, 더 좋은 결과물을 위해 몇 가지가 추가로 필요합니다.
+                            {' '}답변하기 어려운 항목은 비워두셔도 되고, 전부 건너뛰셔도 됩니다.
+                          </p>
+                        </div>
+                      </div>
+
+                      {pp_precheckResult.summary && (
+                        <div style={{
+                          marginTop: '16px',
+                          padding: '10px 12px',
+                          background: 'rgba(99,102,241,0.08)',
+                          border: '1px solid rgba(99,102,241,0.25)',
+                          borderRadius: '8px',
+                          fontSize: '12.5px',
+                          color: '#c7d2fe',
+                          lineHeight: 1.5,
+                        }}>
+                          <span style={{ color: '#a5b4fc', fontWeight: 600 }}>AI 평가: </span>
+                          {pp_precheckResult.summary}
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        {pp_precheckResult.questions.map((q, i) => (
+                          <div key={i}>
+                            <label style={{
+                              display: 'block',
+                              fontSize: '13px',
+                              color: '#e2e8f0',
+                              fontWeight: 600,
+                              marginBottom: '6px',
+                              lineHeight: 1.5,
+                            }}>
+                              <span style={{ color: '#a5b4fc', marginRight: '6px' }}>Q{i + 1}.</span>
+                              {q}
+                            </label>
+                            <textarea
+                              value={pp_answers[i] || ''}
+                              onChange={(e) => setPpAnswers(prev => ({ ...prev, [i]: e.target.value }))}
+                              rows={2}
+                              placeholder="자유롭게 답변... (비워두면 이 질문은 건너뜁니다)"
+                              style={{
+                                width: '100%',
+                                padding: '10px 12px',
+                                background: 'rgba(0,0,0,0.4)',
+                                border: '1px solid var(--border)',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                fontSize: '13px',
+                                boxSizing: 'border-box',
+                                fontFamily: 'inherit',
+                                resize: 'vertical',
+                                lineHeight: 1.5,
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{
+                        display: 'flex',
+                        gap: '8px',
+                        marginTop: '22px',
+                        flexDirection: isMobile ? 'column-reverse' : 'row',
+                        justifyContent: 'flex-end',
+                      }}>
+                        <button
+                          onClick={handleModalSkip}
+                          disabled={pp_loading}
+                          style={{
+                            padding: '11px 18px',
+                            background: 'rgba(255,255,255,0.04)',
+                            border: '1px solid var(--border)',
+                            borderRadius: '9px',
+                            color: '#cbd5e1',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            cursor: pp_loading ? 'wait' : 'pointer',
+                          }}>
+                          건너뛰고 그냥 생성
+                        </button>
+                        <button
+                          onClick={handleModalContinue}
+                          disabled={pp_loading}
+                          style={{
+                            padding: '11px 22px',
+                            background: 'var(--accent-grad)',
+                            border: 'none',
+                            borderRadius: '9px',
+                            color: '#fff',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            cursor: pp_loading ? 'wait' : 'pointer',
+                            boxShadow: '0 6px 14px rgba(99,102,241,0.30)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}>
+                          답변 후 생성 →
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* ───── 결과 ───── */}
                 {pp_results && (
