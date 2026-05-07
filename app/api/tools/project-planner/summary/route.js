@@ -1,16 +1,30 @@
 // 정리봇 API.
-// GET  ?sessionId=X            → 해당 (강사,기수)의 기존 정리본 조회 (없으면 null)
-// POST { action: 'generate' }  → 자료/컨텍스트 기반 신규 정리본 생성 후 upsert
-// POST { action: 'revise', feedback: "..." } → 기존 정리본 + 피드백으로 수정 후 update
+// GET  ?sessionId=X            → 해당 (강사,기수)의 기존 정리본 조회 (없으면 null) — JSON
+// POST { action: 'generate' }  → SSE 스트림. 자료 추출 + 정리 + 저장 진행상황 실시간 푸시
+// POST { action: 'revise', feedback: "..." } → SSE 스트림. 기존 정리본 + 피드백으로 수정
+//
+// SSE 이벤트:
+//   start         { action }
+//   phase         { phase: 'extracting' | 'ai_writing' | 'saving' | 'done' }
+//   item_start    { kind: 'file' | 'notion', name }
+//   item_progress { kind, name, blocks?, chars? }
+//   item_done     { kind, name, charCount, durationMs }
+//   item_error    { kind, name, error }
+//   ai_start      {}
+//   ai_done       { durationMs }
+//   result        { summary }    ← 최종 저장된 row
+//   fatal         { message }
 
 import { createClient } from '@supabase/supabase-js'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { generateSummary, reviseSummary } from '@/lib/planners/summarize'
-import { extractEbookContents } from '@/lib/planners/_text'
+import { extractTextFromUrl } from '@/lib/planners/_text'
 import { isNotionUrl, fetchNotionPageAsMarkdown } from '@/lib/integrations/notion'
 
 export const runtime = 'nodejs'
-export const maxDuration = 120
+export const maxDuration = 300 // 5분 (Vercel hobby 한도). 진행상황 SSE 표시되므로 여유롭게.
+
+const PER_FILE_CHAR_LIMIT = 80000
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -33,30 +47,6 @@ function isExtractableFile(att) {
 function isNotionLink(att) {
   if (att.file_type !== 'link') return false
   return isNotionUrl(att.file_url)
-}
-
-// 노션 링크 배열 → extractEbookContents와 동일 형식으로 변환
-//   [{ name, text, error?, truncated? }]
-async function extractNotionContents(notionLinks) {
-  return await Promise.all(
-    notionLinks.map(async (a) => {
-      const entry = { name: a.file_name || a.file_url }
-      try {
-        const r = await fetchNotionPageAsMarkdown(a.file_url)
-        if (!r.markdown || !r.markdown.trim()) {
-          entry.text = ''
-          entry.error = '노션 페이지가 비어있습니다.'
-        } else {
-          entry.text = r.markdown
-          if (r.truncated) entry.truncated = true
-        }
-      } catch (e) {
-        entry.text = ''
-        entry.error = e?.message || String(e)
-      }
-      return entry
-    })
-  )
 }
 
 // instructor_id 조회 (sessionId로부터)
@@ -147,93 +137,150 @@ export async function POST(request) {
     currentSummary = existing
   }
 
-  // 첨부 자료 로드 + 본문 추출 — 'generate' 모드만 수행.
-  // 'revise'는 기존 정리본 텍스트만 보고 부분 편집하므로 무거운 추출(노션 fetch + Gemini OCR)
-  // 다시 돌리지 않는다 (이전 버전에서 60초+ 걸리는 버그 원인). 자료가 새로 추가됐다면
-  // 사용자가 [🔄 처음부터 다시]를 눌러서 generate를 새로 돌려야 함.
-  let attachments = []
-  let extractedTexts = []
-  if (action === 'generate') {
-    try {
-      attachments = await loadAttachments(instructorId, sessionId)
-      const extractableFiles = attachments.filter(isExtractableFile)
-      const notionLinks = attachments.filter(isNotionLink)
+  // SSE 스트림 시작
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    async start(controller) {
+      let closed = false
+      const send = (event, data) => {
+        if (closed) return
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data ?? {})}\n\n`))
+        } catch {}
+      }
 
-      const [fileTexts, notionTexts] = await Promise.all([
-        extractableFiles.length > 0 ? extractEbookContents(extractableFiles) : Promise.resolve([]),
-        notionLinks.length > 0 && process.env.NOTION_API_KEY
-          ? extractNotionContents(notionLinks)
-          : Promise.resolve(notionLinks.map((a) => ({
-              name: a.file_name || a.file_url,
-              text: '',
-              error: process.env.NOTION_API_KEY
-                ? '노션 링크 처리 비활성'
-                : 'NOTION_API_KEY 미설정 — Vercel/.env.local에 추가 후 재시작',
-            }))),
-      ])
-      extractedTexts = [...fileTexts, ...notionTexts]
-    } catch (e) {
-      console.error('[summary] 첨부/추출 실패:', e?.message || e)
-      // 추출 실패해도 정리는 시도 (메타라도 가지고)
-    }
-  }
+      try {
+        send('start', { action })
 
-  try {
-    let result
-    if (action === 'generate') {
-      result = await generateSummary({
-        instructor,
-        sessionName: sessionName || '',
-        additionalContext,
-        attachments,
-        extractedTexts,
-      })
-    } else {
-      result = await reviseSummary({
-        instructor,
-        sessionName: sessionName || '',
-        currentSummary: currentSummary.content_md,
-        userFeedback: feedback,
-        attachments,
-        extractedTexts,
-      })
-    }
+        // ───── 1. 첨부 추출 (generate만) ─────
+        let attachments = []
+        let extractedTexts = []
+        if (action === 'generate') {
+          send('phase', { phase: 'extracting' })
+          try {
+            attachments = await loadAttachments(instructorId, sessionId)
+          } catch (e) {
+            console.error('[summary] 첨부 로드 실패:', e?.message || e)
+          }
 
-    const newContent = result.content_md
-    const newVersion = action === 'revise' ? (currentSummary.version || 1) + 1 : 1
+          const extractableFiles = attachments.filter(isExtractableFile)
+          const notionLinks = attachments.filter(isNotionLink)
 
-    // upsert
-    const { data: upserted, error: upErr } = await supabase
-      .from('instructor_summaries')
-      .upsert({
-        instructor_id: instructorId,
-        session_id: sessionId,
-        content_md: newContent,
-        version: newVersion,
-        updated_by: auth.user?.username || 'unknown',
-      }, { onConflict: 'instructor_id,session_id' })
-      .select('id, content_md, version, updated_by, updated_at, created_at')
-      .single()
-    if (upErr) {
-      console.error('[summary] upsert 실패:', upErr)
-      return Response.json({ error: 'DB 저장 실패: ' + upErr.message }, { status: 500 })
-    }
+          // 1a. 파일 추출 (PDF/이미지/텍스트) — Gemini OCR 통과
+          for (const f of extractableFiles) {
+            const name = f.file_name
+            send('item_start', { kind: 'file', name })
+            const start = Date.now()
+            try {
+              let text = await extractTextFromUrl(f.file_url, f.mime_type, f.file_name)
+              if (!text) throw new Error('추출된 텍스트가 비어있습니다.')
+              let truncated = false
+              if (text.length > PER_FILE_CHAR_LIMIT) {
+                text = text.slice(0, PER_FILE_CHAR_LIMIT)
+                truncated = true
+              }
+              extractedTexts.push({ name, text, truncated })
+              send('item_done', { kind: 'file', name, charCount: text.length, durationMs: Date.now() - start, truncated })
+            } catch (e) {
+              const msg = e?.message || String(e)
+              extractedTexts.push({ name, text: '', error: msg })
+              send('item_error', { kind: 'file', name, error: msg })
+            }
+          }
 
-    return Response.json({
-      success: true,
-      summary: upserted,
-      action,
-      usage: result.usage,
-      model: result.model,
-      stopReason: result.stopReason,
-      attachmentSummary: {
-        total: attachments.length,
-        extracted: extractedTexts.filter((e) => e.text).length,
-        extractFailed: extractedTexts.filter((e) => e.error).length,
-      },
-    })
-  } catch (e) {
-    console.error('[summary] 생성 실패:', e)
-    return Response.json({ error: e?.message || String(e) }, { status: 500 })
-  }
+          // 1b. 노션 링크 추출 — 페이지 블록 카운트 실시간 푸시
+          for (const a of notionLinks) {
+            const name = a.file_name || a.file_url
+            send('item_start', { kind: 'notion', name })
+            const start = Date.now()
+            try {
+              if (!process.env.NOTION_API_KEY) {
+                throw new Error('NOTION_API_KEY 미설정 — .env.local 또는 Vercel env에 추가 후 재시작')
+              }
+              const r = await fetchNotionPageAsMarkdown(a.file_url, {
+                onProgress: ({ count }) => {
+                  send('item_progress', { kind: 'notion', name, blocks: count })
+                },
+              })
+              if (!r.markdown || !r.markdown.trim()) {
+                throw new Error('노션 페이지가 비어있거나 본문이 없습니다.')
+              }
+              let text = r.markdown
+              let truncated = r.truncated || false
+              if (text.length > PER_FILE_CHAR_LIMIT) {
+                text = text.slice(0, PER_FILE_CHAR_LIMIT)
+                truncated = true
+              }
+              extractedTexts.push({ name, text, truncated })
+              send('item_done', { kind: 'notion', name, charCount: text.length, blocks: r.blockCount, durationMs: Date.now() - start, truncated })
+            } catch (e) {
+              const msg = e?.message || String(e)
+              extractedTexts.push({ name, text: '', error: msg })
+              send('item_error', { kind: 'notion', name, error: msg })
+            }
+          }
+        }
+
+        // ───── 2. AI 정리/수정 ─────
+        send('phase', { phase: 'ai_writing' })
+        send('ai_start', {})
+        const aiStart = Date.now()
+        let result
+        if (action === 'generate') {
+          result = await generateSummary({
+            instructor,
+            sessionName: sessionName || '',
+            additionalContext,
+            attachments,
+            extractedTexts,
+          })
+        } else {
+          result = await reviseSummary({
+            instructor,
+            sessionName: sessionName || '',
+            currentSummary: currentSummary.content_md,
+            userFeedback: feedback,
+          })
+        }
+        send('ai_done', { durationMs: Date.now() - aiStart })
+
+        // ───── 3. DB 저장 ─────
+        send('phase', { phase: 'saving' })
+        const newContent = result.content_md
+        const newVersion = action === 'revise' ? (currentSummary.version || 1) + 1 : 1
+        const { data: upserted, error: upErr } = await supabase
+          .from('instructor_summaries')
+          .upsert({
+            instructor_id: instructorId,
+            session_id: sessionId,
+            content_md: newContent,
+            version: newVersion,
+            updated_by: auth.user?.username || 'unknown',
+          }, { onConflict: 'instructor_id,session_id' })
+          .select('id, content_md, version, updated_by, updated_at, created_at')
+          .single()
+        if (upErr) {
+          throw new Error('DB 저장 실패: ' + upErr.message)
+        }
+
+        send('phase', { phase: 'done' })
+        send('result', { summary: upserted })
+      } catch (e) {
+        console.error('[summary] 스트림 실패:', e)
+        send('fatal', { message: e?.message || String(e) })
+      } finally {
+        closed = true
+        try { controller.close() } catch {}
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  })
 }

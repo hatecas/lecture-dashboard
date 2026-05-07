@@ -602,6 +602,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_summaryFeedback, setPpSummaryFeedback] = useState('')
   const [pp_summaryError, setPpSummaryError] = useState('')
   const [pp_summaryStartedAt, setPpSummaryStartedAt] = useState(0) // elapsed 표시용
+  // SSE 진행상황 — 정리봇 작업 중에만 의미 있음
+  const [pp_summaryPhase, setPpSummaryPhase] = useState('') // 'extracting' | 'ai_writing' | 'saving' | 'done'
+  const [pp_summaryItems, setPpSummaryItems] = useState([]) // [{ kind, name, status, blocks?, charCount?, durationMs?, error? }]
+  const [pp_summaryAiStartedAt, setPpSummaryAiStartedAt] = useState(0) // AI 단계 시작 시각
   // 진행상황 표시용. 현재 실행 중인 run의 task별 상태와 단계.
   // pp_taskStatus: { [taskKey]: { status: 'pending'|'running'|'done'|'error', startedAt?: number, durationMs?: number } }
   const [pp_taskStatus, setPpTaskStatus] = useState({})
@@ -8984,64 +8988,107 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
                 {/* ───── 2.5. 정리봇 — 강사 자료 정리본 (다른 기획 봇들과 분리) ───── */}
                 {(() => {
-                  const generateSummaryHandler = async () => {
-                    if (!ready) { setPpSummaryError('강사·기수를 먼저 선택하세요.'); return }
+                  // SSE reader로 진행 상황 처리. 이벤트 핸들러가 state 업데이트.
+                  const runSummarySSE = async (action, payload) => {
                     setPpSummaryError('')
                     setPpSummaryStartedAt(Date.now())
-                    setPpSummaryGenerating(true)
+                    setPpSummaryAiStartedAt(0)
+                    setPpSummaryPhase(action === 'generate' ? 'extracting' : 'ai_writing')
+                    setPpSummaryItems([])
+
                     try {
                       const res = await fetch('/api/tools/project-planner/summary', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                        body: JSON.stringify({
-                          action: 'generate',
-                          sessionId: selectedSessionId,
-                          instructor: selectedInstructor,
-                          sessionName: currentSession?.session_name || '',
-                          additionalContext: pp_additionalContext || '',
-                        }),
+                        body: JSON.stringify(payload),
                       })
-                      const data = await res.json()
-                      if (!res.ok || !data.success) {
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({}))
                         setPpSummaryError(data.error || `요청 실패 (HTTP ${res.status})`)
                         return
                       }
-                      setPpSummary(data.summary)
+                      let gotResult = false
+                      await readPlannerSSE(res, (event, data) => {
+                        if (event === 'phase') {
+                          setPpSummaryPhase(data?.phase || '')
+                          if (data?.phase === 'ai_writing') setPpSummaryAiStartedAt(Date.now())
+                        } else if (event === 'item_start') {
+                          setPpSummaryItems((prev) => [
+                            ...prev.filter((it) => !(it.kind === data.kind && it.name === data.name)),
+                            { kind: data.kind, name: data.name, status: 'progress' },
+                          ])
+                        } else if (event === 'item_progress') {
+                          setPpSummaryItems((prev) => prev.map((it) =>
+                            (it.kind === data.kind && it.name === data.name)
+                              ? { ...it, blocks: data.blocks ?? it.blocks, chars: data.chars ?? it.chars }
+                              : it
+                          ))
+                        } else if (event === 'item_done') {
+                          setPpSummaryItems((prev) => prev.map((it) =>
+                            (it.kind === data.kind && it.name === data.name)
+                              ? { ...it, status: 'done', charCount: data.charCount, blocks: data.blocks ?? it.blocks, durationMs: data.durationMs, truncated: data.truncated }
+                              : it
+                          ))
+                        } else if (event === 'item_error') {
+                          setPpSummaryItems((prev) => prev.map((it) =>
+                            (it.kind === data.kind && it.name === data.name)
+                              ? { ...it, status: 'error', error: data.error }
+                              : it
+                          ))
+                        } else if (event === 'ai_start') {
+                          setPpSummaryAiStartedAt(Date.now())
+                        } else if (event === 'ai_done') {
+                          // ai_done 후 phase=saving 으로 곧 이어짐
+                        } else if (event === 'result') {
+                          if (data?.summary) {
+                            setPpSummary(data.summary)
+                            gotResult = true
+                          }
+                        } else if (event === 'fatal') {
+                          setPpSummaryError(data?.message || '서버 스트림 오류')
+                        }
+                      })
+                      if (!gotResult && !pp_summaryError) {
+                        // 스트림은 끝났는데 result 이벤트가 안 온 경우
+                        setPpSummaryError('정리본 생성이 완료되지 않았습니다. 다시 시도해주세요.')
+                      }
                     } catch (e) {
                       setPpSummaryError('네트워크 오류: ' + e.message)
+                    }
+                  }
+
+                  const generateSummaryHandler = async () => {
+                    if (!ready) { setPpSummaryError('강사·기수를 먼저 선택하세요.'); return }
+                    setPpSummaryGenerating(true)
+                    try {
+                      await runSummarySSE('generate', {
+                        action: 'generate',
+                        sessionId: selectedSessionId,
+                        instructor: selectedInstructor,
+                        sessionName: currentSession?.session_name || '',
+                        additionalContext: pp_additionalContext || '',
+                      })
                     } finally {
                       setPpSummaryGenerating(false)
+                      setPpSummaryPhase('')
                     }
                   }
                   const reviseSummaryHandler = async () => {
                     if (!pp_summary) return
                     if (!pp_summaryFeedback.trim()) { setPpSummaryError('수정 요청 내용을 입력하세요.'); return }
-                    setPpSummaryError('')
-                    setPpSummaryStartedAt(Date.now())
                     setPpSummaryRevising(true)
                     try {
-                      const res = await fetch('/api/tools/project-planner/summary', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                        body: JSON.stringify({
-                          action: 'revise',
-                          sessionId: selectedSessionId,
-                          instructor: selectedInstructor,
-                          sessionName: currentSession?.session_name || '',
-                          feedback: pp_summaryFeedback,
-                        }),
+                      await runSummarySSE('revise', {
+                        action: 'revise',
+                        sessionId: selectedSessionId,
+                        instructor: selectedInstructor,
+                        sessionName: currentSession?.session_name || '',
+                        feedback: pp_summaryFeedback,
                       })
-                      const data = await res.json()
-                      if (!res.ok || !data.success) {
-                        setPpSummaryError(data.error || `요청 실패 (HTTP ${res.status})`)
-                        return
-                      }
-                      setPpSummary(data.summary)
                       setPpSummaryFeedback('')
-                    } catch (e) {
-                      setPpSummaryError('네트워크 오류: ' + e.message)
                     } finally {
                       setPpSummaryRevising(false)
+                      setPpSummaryPhase('')
                     }
                   }
                   const busy = pp_summaryGenerating || pp_summaryRevising
@@ -9184,41 +9231,50 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         </>
                       )}
 
-                      {/* 정리봇 진행 패널 */}
+                      {/* 정리봇 진행 패널 — SSE 이벤트 기반 */}
                       {(pp_summaryGenerating || pp_summaryRevising) && (() => {
-                        void pp_tick // tick 의존성 (실시간 갱신)
+                        void pp_tick // 실시간 elapsed 갱신
                         const elapsed = pp_summaryStartedAt ? (Date.now() - pp_summaryStartedAt) : 0
-                        const elapsedSec = elapsed / 1000
+                        const aiElapsed = pp_summaryAiStartedAt ? (Date.now() - pp_summaryAiStartedAt) : 0
                         const isGen = pp_summaryGenerating
-                        // 단계별 추정: generate는 자료 추출(~5~15s) → 정리 작성(~10~20s).
-                        // revise는 단순 편집(~5~15s).
-                        const estTotal = isGen ? 30 : 12
-                        const pct = Math.min(95, Math.max(5, (elapsedSec / estTotal) * 100))
-                        const phase = isGen
-                          ? (elapsedSec < 8 ? '📋 자료 분석 중…'
-                              : elapsedSec < 25 ? '✏️ 정리 작성 중…'
-                              : elapsedSec < 60 ? '✏️ 마무리 중…'
-                              : elapsedSec < 75 ? '🐢 자료가 많은 페이지인 것 같습니다…'
-                              : '⚠️ 곧 타임아웃될 수 있습니다 (75초 한도)')
-                          : (elapsedSec < 5 ? '📖 정리본 읽는 중…'
-                              : elapsedSec < 20 ? '✏️ 수정 반영 중…'
-                              : '🐢 수정이 오래 걸리는 중… (취소하려면 새로고침)')
+
+                        const phaseLabel =
+                          pp_summaryPhase === 'extracting' ? '📋 첨부 자료 분석 중'
+                          : pp_summaryPhase === 'ai_writing' ? '✏️ AI가 정리 작성 중'
+                          : pp_summaryPhase === 'saving' ? '💾 저장 중'
+                          : pp_summaryPhase === 'done' ? '✅ 완료'
+                          : '⏳ 준비 중'
+
+                        // 진행률 추정: phase 가중치
+                        let pct = 5
+                        if (pp_summaryPhase === 'extracting') {
+                          // 아이템 진행도 비율
+                          const total = pp_summaryItems.length
+                          const done = pp_summaryItems.filter(it => it.status === 'done' || it.status === 'error').length
+                          pct = total > 0 ? 5 + Math.round((done / total) * 50) : 8
+                        } else if (pp_summaryPhase === 'ai_writing') pct = 60
+                        else if (pp_summaryPhase === 'saving') pct = 95
+                        else if (pp_summaryPhase === 'done') pct = 100
+
                         return (
                           <div style={{
                             marginTop: '14px',
-                            padding: '12px 14px',
+                            padding: '14px 16px',
                             background: 'rgba(34,197,94,0.06)',
                             border: '1px solid rgba(34,197,94,0.20)',
                             borderRadius: '10px',
                           }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
-                              <div style={{ fontSize: '12.5px', color: '#86efac', fontWeight: 600 }}>{phase}</div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px', flexWrap: 'wrap' }}>
+                              <div style={{ fontSize: '13px', color: '#86efac', fontWeight: 700 }}>{phaseLabel}</div>
                               <div style={{ fontSize: '11.5px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-                                {elapsedSec.toFixed(1)}s
+                                전체 {(elapsed / 1000).toFixed(1)}s
+                                {pp_summaryPhase === 'ai_writing' && aiElapsed > 0 && (
+                                  <span style={{ marginLeft: '8px' }}>· AI {(aiElapsed / 1000).toFixed(1)}s</span>
+                                )}
                               </div>
                             </div>
                             <div style={{
-                              height: '6px',
+                              height: '7px',
                               background: 'rgba(255,255,255,0.06)',
                               borderRadius: '999px',
                               overflow: 'hidden',
@@ -9227,14 +9283,65 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 height: '100%',
                                 width: pct + '%',
                                 background: 'linear-gradient(135deg, #10b981, #14b8a6)',
-                                transition: 'width 0.3s ease',
+                                transition: 'width 0.4s ease',
                                 borderRadius: '999px',
                               }} />
                             </div>
-                            <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
-                              {isGen
-                                ? '※ 노션 페이지·PDF 자료가 많으면 자료 분석에 30초 이상 걸릴 수 있습니다.'
-                                : '※ 수정 반영은 보통 5~15초.'}
+
+                            {/* 자료 추출 단계 — 아이템별 상태 라이브 표시 */}
+                            {pp_summaryItems.length > 0 && (
+                              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                {pp_summaryItems.map((it, i) => {
+                                  const icon =
+                                    it.status === 'done' ? '✅'
+                                    : it.status === 'error' ? '❌'
+                                    : it.status === 'progress' ? '⏳'
+                                    : '⏸'
+                                  const kindIcon = it.kind === 'notion' ? '📋' : '📄'
+                                  return (
+                                    <div key={i} style={{
+                                      fontSize: '11.5px',
+                                      color: it.status === 'error' ? '#fca5a5' : (it.status === 'done' ? '#cbd5e1' : '#c7d2fe'),
+                                      display: 'flex', alignItems: 'center', gap: '6px',
+                                      padding: '4px 8px',
+                                      background: it.status === 'progress' ? 'rgba(99,102,241,0.10)' : 'transparent',
+                                      borderRadius: '6px',
+                                    }}>
+                                      <span>{icon}</span>
+                                      <span>{kindIcon}</span>
+                                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {it.name}
+                                      </span>
+                                      {it.status === 'progress' && it.kind === 'notion' && it.blocks != null && (
+                                        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
+                                          {it.blocks}블록 가져옴
+                                        </span>
+                                      )}
+                                      {it.status === 'done' && (
+                                        <span style={{ fontVariantNumeric: 'tabular-nums', color: '#94a3b8' }}>
+                                          {it.kind === 'notion' && it.blocks ? `${it.blocks}블록 · ` : ''}
+                                          {it.charCount ? `${it.charCount.toLocaleString()}자` : ''}
+                                          {it.durationMs ? ` · ${(it.durationMs / 1000).toFixed(1)}s` : ''}
+                                          {it.truncated ? ' · ✂️일부' : ''}
+                                        </span>
+                                      )}
+                                      {it.status === 'error' && (
+                                        <span style={{ color: '#fca5a5', fontSize: '11px' }} title={it.error}>
+                                          실패
+                                        </span>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+
+                            {/* 단계별 안내 */}
+                            <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '10px', lineHeight: 1.5 }}>
+                              {pp_summaryPhase === 'extracting' && '※ 첨부된 노션 페이지·PDF가 많으면 분 단위로 걸릴 수 있습니다. 위 목록이 갱신되면 정상 작동 중입니다.'}
+                              {pp_summaryPhase === 'ai_writing' && '※ Claude가 자료 전체를 읽고 정리본을 작성하는 중입니다 (10~30초).'}
+                              {pp_summaryPhase === 'saving' && '※ 거의 다 됐습니다.'}
+                              {!pp_summaryPhase && (isGen ? '※ 곧 자료 분석을 시작합니다.' : '※ 곧 수정을 시작합니다.')}
                             </div>
                           </div>
                         )
