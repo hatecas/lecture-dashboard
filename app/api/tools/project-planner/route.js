@@ -84,11 +84,35 @@ export async function POST(request) {
     }, { status: 400 })
   }
 
+  // 정리봇 정리본을 컨텍스트에 자동 주입. 있으면 모든 봇이 참고.
+  let summaryMd = ''
+  if (sessionId) {
+    try {
+      const { data: sumRow } = await supabaseSelf
+        .from('instructor_summaries')
+        .select('content_md')
+        .eq('session_id', sessionId)
+        .maybeSingle()
+      if (sumRow?.content_md && sumRow.content_md.trim()) {
+        summaryMd = sumRow.content_md.trim()
+      }
+    } catch (e) {
+      console.warn('[planner] 정리본 조회 실패(무시):', e?.message)
+    }
+  }
+
+  const baseAdditional = (additionalContext || '').trim()
+  const mergedAdditional = summaryMd
+    ? (baseAdditional
+        ? `${baseAdditional}\n\n[강사 자료 정리본 — 정리봇 출력]\n${summaryMd}`
+        : `[강사 자료 정리본 — 정리봇 출력]\n${summaryMd}`)
+    : baseAdditional
+
   const context = {
     instructor: instructor.trim(),
     sessionName: (sessionName || '').trim(),
     topic: topic.trim(),
-    additionalContext: (additionalContext || '').trim(),
+    additionalContext: mergedAdditional,
   }
 
   const encoder = new TextEncoder()
@@ -107,7 +131,7 @@ export async function POST(request) {
       }
 
       try {
-        send('start', { tasks: validTasks, skipped })
+        send('start', { tasks: validTasks, skipped, hasSummary: !!summaryMd })
 
         // 전자책 입력이 필요한 task가 하나라도 있으면 첨부에서 텍스트 추출
         let ebookContents = []
