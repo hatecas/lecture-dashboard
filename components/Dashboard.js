@@ -8056,7 +8056,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             const PLANNER_META = {
               ebook:             { label: '무료 전자책 기획안',     icon: '📚', desc: '썸네일 카피 + 제목 + 도입 후크 + 본문 4섹션 + CTA', enabled: true },
               boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', desc: '단톡방/라이브 시작 직전 분위기 띄우는 멘트 3종',     enabled: true },
-              alimtalk:          { label: '알림톡 / 채널톡 멘트',    icon: '💬', desc: '슝 알림톡 변수에 그대로 꽂을 수 있는 멘트',          enabled: true },
+              alimtalk:          { label: '채널톡 멘트',              icon: '💬', desc: '인입/후속/리마인드 시나리오 3종 (알림톡은 템플릿 별도)',  enabled: true },
               viralQ:            { label: '바이럴 질문',            icon: '❓', desc: '단톡방 참여 유도 질문 10개',                       enabled: true },
               ppt:               { label: '강의 PPT outline',       icon: '📋', desc: '슬라이드별 outline + 발표 멘트 초안',             enabled: true },
               salesPage:         { label: '무료 상페 카피',          icon: '📄', desc: '무료강의 상세페이지 섹션별 카피',                  enabled: true },
@@ -8283,32 +8283,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 )
               }
 
-              if (taskKey === 'alimtalk') {
+              if (taskKey === 'alimtalk' && Array.isArray(plan?.messages)) {
                 return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <div style={_boxAccent}>
-                      <div style={_accent}>알림톡 본문</div>
-                      <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{plan.alimtalkBody}</div>
-                    </div>
-                    {Array.isArray(plan.variables) && plan.variables.length > 0 && (
-                      <div>
-                        <div style={_label}>사용 변수</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          {plan.variables.map((v, i) => (
-                            <div key={i} style={{ fontSize: '12.5px', color: '#cbd5e1' }}>
-                              <code style={{ background: 'rgba(99,102,241,0.15)', padding: '1px 6px', borderRadius: '4px', color: '#a5b4fc', marginRight: '6px' }}>{v.name}</code>
-                              {v.description}
-                            </div>
-                          ))}
-                        </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {plan.messages.map((m, i) => (
+                      <div key={i} style={_box}>
+                        <div style={_accent}>{m.scenario || `시나리오 ${i + 1}`}</div>
+                        <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{m.text}</div>
                       </div>
-                    )}
-                    {plan.channelFollowup && (
-                      <div style={{ padding: '12px 14px', background: 'rgba(34,197,94,0.10)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: '10px' }}>
-                        <div style={{ fontSize: '11px', color: '#86efac', fontWeight: 600, marginBottom: '4px' }}>채널톡 후속 멘트</div>
-                        <div style={{ fontSize: '13.5px', color: '#fff', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{plan.channelFollowup}</div>
-                      </div>
-                    )}
+                    ))}
                   </div>
                 )
               }
@@ -9754,7 +9737,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             const PLANNER_META = {
               ebook:             { label: '무료 전자책 기획안',     icon: '📚', enabled: true },
               boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', enabled: true },
-              alimtalk:          { label: '알림톡 / 채널톡 멘트',    icon: '💬', enabled: true },
+              alimtalk:          { label: '채널톡 멘트',              icon: '💬', enabled: true },
               viralQ:            { label: '바이럴 질문',            icon: '❓', enabled: true },
               ppt:               { label: '강의 PPT outline',       icon: '📋', enabled: true },
               salesPage:         { label: '무료 상페 카피',          icon: '📄', enabled: true },
