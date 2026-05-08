@@ -605,6 +605,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // 노션 페이지 자동 생성
   const [pp_notionCreating, setPpNotionCreating] = useState(false)
   const [pp_notionResult, setPpNotionResult] = useState(null) // { url, title, blockCount, ... }
+  // 무료 강의 주제 + 추가 컨텍스트 저장 상태
+  const [pp_inputsSavedAt, setPpInputsSavedAt] = useState(null) // 마지막 저장 시각 (Date | null)
+  const [pp_inputsSaving, setPpInputsSaving] = useState(false)
+  const [pp_inputsDirty, setPpInputsDirty] = useState(false) // 저장 후 수정됐는지
   const [pp_summaryError, setPpSummaryError] = useState('')
   const [pp_summaryStartedAt, setPpSummaryStartedAt] = useState(0) // elapsed 표시용
   // SSE 진행상황 — 정리봇 작업 중에만 의미 있음
@@ -1239,6 +1243,43 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     const id = setInterval(() => setPpTick((t) => t + 1), 250)
     return () => clearInterval(id)
   }, [pp_loading, pp_taskRetrying, pp_summaryGenerating, pp_summaryRevising])
+
+  // 강사·기수 변경 시 저장된 주제·컨텍스트 자동 로드 (없으면 빈 값)
+  useEffect(() => {
+    if (!selectedSessionId || currentTab !== 'project-planner') {
+      setPpTopic('')
+      setPpAdditionalContext('')
+      setPpInputsSavedAt(null)
+      setPpInputsDirty(false)
+      return
+    }
+    let cancelled = false
+    const run = async () => {
+      try {
+        const res = await fetch(`/api/tools/project-planner/inputs?sessionId=${selectedSessionId}`, {
+          headers: { ...getAuthHeaders() },
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        const inputs = data.inputs || {}
+        setPpTopic(inputs.topic || '')
+        setPpAdditionalContext(inputs.additional_context || '')
+        setPpInputsSavedAt(inputs.updated_at ? new Date(inputs.updated_at) : null)
+        setPpInputsDirty(false)
+      } catch (e) {
+        console.warn('[planner-inputs] 로드 실패:', e?.message)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [selectedSessionId, currentTab])
+
+  // pp_topic / pp_additionalContext 변경되면 dirty 마킹 (사용자가 입력 중)
+  useEffect(() => {
+    if (pp_inputsSavedAt !== null) setPpInputsDirty(true)
+    // 처음 로드 시점에는 dirty=false (초기 로드 useEffect에서 false로 명시 세팅)
+  }, [pp_topic, pp_additionalContext]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 강사·기수 변경 시 정리봇 정리본 자동 로드 (있으면 표시, 없으면 null)
   useEffect(() => {
@@ -8393,7 +8434,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               viralQ:            { label: '바이럴 질문',            icon: '❓', desc: '단톡방 참여 유도 질문 10개',                       enabled: true },
               ppt:               { label: '강의 PPT outline',       icon: '📋', desc: '슬라이드별 outline + 발표 멘트 초안',             enabled: true },
               salesPage:         { label: '무료 상페 카피',          icon: '📄', desc: '무료강의 상세페이지 섹션별 카피',                  enabled: true },
-              groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', desc: 'D-1 / D-day / D+1 시점별 공지',                  enabled: true },
+              groupAnnouncement: { label: '단톡방 입장시 필독 공지',  icon: '📢', desc: '신규 입장자가 처음 보는 공지 (N잡 표준 양식)',     enabled: true },
             }
 
             // 강사/기수는 전역 selectedInstructor + selectedSessionId 사용. 자료는 attachments 재사용.
@@ -8800,36 +8841,56 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 )
               }
 
-              if (taskKey === 'groupAnnouncement' && Array.isArray(plan?.announcements)) {
-                const timingColors = {
-                  'D-1': 'rgba(251,191,36,0.10)',
-                  'D-day': 'rgba(99,102,241,0.10)',
-                  'D+1': 'rgba(34,197,94,0.10)',
-                }
-                const timingBorders = {
-                  'D-1': 'rgba(251,191,36,0.30)',
-                  'D-day': 'rgba(99,102,241,0.30)',
-                  'D+1': 'rgba(34,197,94,0.30)',
-                }
+              if (taskKey === 'groupAnnouncement') {
+                // 신규 단일 입장시 필독 공지 — fullText 한 덩어리 + 메타 (instructorName/hooks 등)
+                const ft = plan?.fullText || ''
+                const placeholders = Array.isArray(plan?.placeholders) ? plan.placeholders : []
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {plan.announcements.map((a, i) => (
-                      <div key={i} style={{
-                        padding: '12px 14px',
-                        background: timingColors[a.timing] || 'rgba(255,255,255,0.03)',
-                        border: `1px solid ${timingBorders[a.timing] || 'var(--border)'}`,
-                        borderRadius: '10px',
-                      }}>
-                        <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 700, marginBottom: '4px' }}>{a.timing}</div>
-                        {a.title && <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>{a.title}</div>}
-                        <div style={{ fontSize: '13.5px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{a.body}</div>
-                        {a.callToAction && (
-                          <div style={{ marginTop: '8px', fontSize: '12px', color: '#94a3b8' }}>
-                            <b>다음 행동:</b> {a.callToAction}
-                          </div>
-                        )}
+                    {/* 메인: 단톡방에 그대로 붙여넣을 본문 */}
+                    <div style={_boxAccent}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={_accent}>📢 단톡방 입장시 필독 — 본문 (그대로 복붙)</div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard?.writeText(ft).then(() => {
+                              alert('본문이 클립보드에 복사됐습니다.')
+                            }).catch(() => alert('복사 실패. 수동으로 선택해주세요.'))
+                          }}
+                          style={{ padding: '5px 11px', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '7px', color: '#c7d2fe', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>
+                          📋 복사
+                        </button>
                       </div>
-                    ))}
+                      <div style={{ fontSize: '13px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap', padding: '8px 0' }}>{ft}</div>
+                    </div>
+
+                    {/* 채워지지 않은 자리표시자 안내 */}
+                    {placeholders.length > 0 && (
+                      <div style={{ padding: '10px 12px', background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.30)', borderRadius: '8px', fontSize: '12px', color: '#fbbf24' }}>
+                        ⚠️ 다음 자리표시자는 운영팀이 직접 채워야 합니다: {placeholders.map(p => <code key={p} style={{ background: 'rgba(0,0,0,0.30)', padding: '1px 6px', borderRadius: '4px', marginRight: '5px' }}>{p}</code>)}
+                      </div>
+                    )}
+
+                    {/* 메타데이터 (참고용) */}
+                    {(plan?.instructorName || plan?.freeClassDate || plan?.ebookHook) && (
+                      <details style={{ marginTop: '4px' }}>
+                        <summary style={{ cursor: 'pointer', fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>채워진 변수 보기</summary>
+                        <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#cbd5e1' }}>
+                          {plan.instructorName && <div><b style={{ color: '#a5b4fc' }}>강사명:</b> {plan.instructorName}</div>}
+                          {plan.freeClassDate && <div><b style={{ color: '#a5b4fc' }}>무료강의 일시:</b> {plan.freeClassDate}</div>}
+                          {plan.ebookHook && <div><b style={{ color: '#a5b4fc' }}>전자책 후킹:</b> {plan.ebookHook}</div>}
+                          {plan.instructorDescription && <div><b style={{ color: '#a5b4fc' }}>강사 설명:</b> {plan.instructorDescription}</div>}
+                          {Array.isArray(plan.hooks) && plan.hooks.length > 0 && (
+                            <div>
+                              <b style={{ color: '#a5b4fc' }}>강사 후킹:</b>
+                              <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
+                                {plan.hooks.map((h, i) => <li key={i}>{h}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )
               }
@@ -8966,6 +9027,92 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     </div>
                   </details>
                 </div>
+
+                {/* ───── 1.5. 무료 강의 주제 + 추가 컨텍스트 (저장 가능) ───── */}
+                {(() => {
+                  const saveInputs = async () => {
+                    if (!ready) { setPpError('강사·기수를 먼저 선택하세요.'); return }
+                    setPpInputsSaving(true)
+                    try {
+                      const res = await fetch('/api/tools/project-planner/inputs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({
+                          sessionId: selectedSessionId,
+                          topic: pp_topic,
+                          additionalContext: pp_additionalContext,
+                        }),
+                      })
+                      const data = await res.json()
+                      if (!res.ok || !data.success) {
+                        setPpError(data.error || `저장 실패 (HTTP ${res.status})`)
+                        return
+                      }
+                      setPpInputsSavedAt(new Date(data.inputs?.updated_at || Date.now()))
+                      setPpInputsDirty(false)
+                    } catch (e) {
+                      setPpError('네트워크 오류: ' + e.message)
+                    } finally {
+                      setPpInputsSaving(false)
+                    }
+                  }
+                  return (
+                    <div style={{
+                      background: 'rgba(255,255,255,0.04)',
+                      borderRadius: '14px',
+                      padding: '20px',
+                      border: '1px solid var(--border)',
+                      marginBottom: '16px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '15px' }}>🎯</span> 무료 강의 주제 · 추가 컨텍스트
+                          <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 저장하면 다음 접속 시 자동 복원</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {pp_inputsSavedAt && !pp_inputsDirty && (
+                            <span style={{ fontSize: '11px', color: '#86efac' }}>
+                              ✅ {new Date(pp_inputsSavedAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })} 저장됨
+                            </span>
+                          )}
+                          {pp_inputsDirty && (
+                            <span style={{ fontSize: '11px', color: '#fbbf24' }}>● 미저장 변경</span>
+                          )}
+                          <button onClick={saveInputs} disabled={!ready || pp_inputsSaving}
+                            style={{
+                              padding: '7px 14px',
+                              background: pp_inputsDirty ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(99,102,241,0.20)',
+                              border: 'none',
+                              borderRadius: '8px',
+                              color: '#fff',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              cursor: (!ready || pp_inputsSaving) ? 'not-allowed' : 'pointer',
+                              opacity: (!ready || pp_inputsSaving) ? 0.5 : 1,
+                              boxShadow: pp_inputsDirty ? '0 4px 10px rgba(99,102,241,0.30)' : 'none',
+                            }}>
+                            {pp_inputsSaving ? '저장 중…' : '💾 저장'}
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: '12px' }}>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
+                          무료 강의 주제 <span style={{ color: '#f87171' }}>*</span>
+                        </label>
+                        <input type="text" value={pp_topic} onChange={(e) => setPpTopic(e.target.value)} placeholder="예: AI 활용 유튜브 수익화 / 쿠팡 부업 / 숏폼 중개"
+                          style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
+                          추가 컨텍스트 (선택) <span style={{ color: '#64748b', fontSize: '11px', marginLeft: '6px' }}>· 첨부 자료/녹음에 안 들어간 정보를 자유 기재</span>
+                        </label>
+                        <textarea value={pp_additionalContext} onChange={(e) => setPpAdditionalContext(e.target.value)} rows={4}
+                          placeholder="예: 강사 본인이 월 2,500만원 수익화 경험. LUCY AI Studio 보유. 캐치프레이즈는 '설계가 답이다'."
+                          style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }} />
+                      </div>
+                    </div>
+                  )
+                })()}
 
                 {/* ───── 2. 자료 업로드 ───── */}
                 <div
@@ -9560,25 +9707,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   )
                 })()}
 
-                {/* ───── 3. 주제 / 추가 컨텍스트 / 항목 / 생성 ───── */}
+                {/* ───── 3. 생성할 항목 / 생성 (주제·컨텍스트는 섹션 1.5로 이동됨) ───── */}
                 <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '14px', padding: '20px', border: '1px solid var(--border)', marginBottom: '16px' }}>
-                  <div style={{ marginBottom: '14px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
-                      주제 <span style={{ color: '#f87171' }}>*</span>
-                    </label>
-                    <input type="text" value={pp_topic} onChange={(e) => setPpTopic(e.target.value)} placeholder="예: AI 활용 유튜브 수익화"
-                      style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }} />
-                  </div>
-
-                  <div style={{ marginBottom: '14px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '5px', fontWeight: 500 }}>
-                      추가 컨텍스트 (선택) <span style={{ color: '#64748b', fontSize: '11px', marginLeft: '6px' }}>· 위 첨부 자료에 더해 자유 기재</span>
-                    </label>
-                    <textarea value={pp_additionalContext} onChange={(e) => setPpAdditionalContext(e.target.value)} rows={4}
-                      placeholder="예: 강사 본인이 월 2,500만원 수익화 경험. LUCY AI Studio 보유. 캐치프레이즈는 '설계가 답이다'."
-                      style={{ width: '100%', padding: '10px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)', borderRadius: '8px', color: '#fff', fontSize: '13px', boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }} />
-                  </div>
-
                   <div style={{ marginBottom: '14px' }}>
                     <label style={{ display: 'block', fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: 500 }}>생성할 항목</label>
                     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '8px' }}>
@@ -10777,7 +10907,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               viralQ:            { label: '바이럴 질문',            icon: '❓', enabled: true },
               ppt:               { label: '강의 PPT outline',       icon: '📋', enabled: true },
               salesPage:         { label: '무료 상페 카피',          icon: '📄', enabled: true },
-              groupAnnouncement: { label: '단톡방 공지 시리즈',       icon: '📢', enabled: true },
+              groupAnnouncement: { label: '단톡방 입장시 필독 공지',  icon: '📢', enabled: true },
             }
 
             const pickFeature = (key) => {
