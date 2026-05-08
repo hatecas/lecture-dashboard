@@ -399,6 +399,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
   const ebookInputRef = useRef(null) // 전자책(file_role='ebook') 전용 업로드
+  // 정리본 레퍼런스 양식은 사이드바 [기획 봇 설정 → 강사 자료 정리봇] 에서 공용으로 관리.
+  // 자료 영역에 별도 업로드 버튼 X (이전 referenceInputRef는 제거됨).
 
   // 툴 관련 상태
   const [currentTool, setCurrentTool] = useState('crm') // crm, kakao, youtube (inflow는 권한 필요)
@@ -600,6 +602,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_summaryGenerating, setPpSummaryGenerating] = useState(false)
   const [pp_summaryRevising, setPpSummaryRevising] = useState(false)
   const [pp_summaryFeedback, setPpSummaryFeedback] = useState('')
+  // 노션 페이지 자동 생성
+  const [pp_notionCreating, setPpNotionCreating] = useState(false)
+  const [pp_notionResult, setPpNotionResult] = useState(null) // { url, title, blockCount, ... }
   const [pp_summaryError, setPpSummaryError] = useState('')
   const [pp_summaryStartedAt, setPpSummaryStartedAt] = useState(0) // elapsed 표시용
   // SSE 진행상황 — 정리봇 작업 중에만 의미 있음
@@ -8978,14 +8983,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '15px' }}>📎</span> 자료 (파일 / 링크 / 전자책)
-                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 강사·기수에 매칭되어 DB에 저장 · <b style={{ color: '#cbd5e1' }}>파일당 최대 200MB</b></span>
+                      <span style={{ fontSize: '15px' }}>📎</span> 자료 (데이터 소스)
+                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 강사·기수에 매칭되어 DB에 저장 · <b style={{ color: '#cbd5e1' }}>파일당 최대 200MB</b> · 공용 양식은 <b style={{ color: '#a5b4fc' }}>기획 봇 설정</b>에서 관리</span>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple style={{ display: 'none' }} />
                       <input type="file" ref={folderInputRef} onChange={handleFileUpload} webkitdirectory="" directory="" multiple style={{ display: 'none' }} />
                       <input type="file" ref={ebookInputRef} onChange={handleEbookUpload} accept=".pdf,.txt,.md,.markdown" multiple style={{ display: 'none' }} />
                       <button onClick={() => fileInputRef.current?.click()} disabled={!ready || fileUploading}
+                        title="녹음/메모 등 강사 데이터. 이 자료의 '내용'이 정리본에 들어감."
                         style={{ padding: '7px 12px', background: 'var(--accent-grad)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5 }}>
                         {fileUploading ? '업로드 중…' : '📁 파일'}
                       </button>
@@ -8994,11 +9000,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         📂 폴더
                       </button>
                       <button onClick={() => setShowFileModal(true)} disabled={!ready}
+                        title="노션/구글드라이브 등 외부 링크. 강사 자료의 '내용'으로 사용."
                         style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '12px', fontWeight: 600, cursor: ready ? 'pointer' : 'not-allowed', opacity: ready ? 1 : 0.5 }}>
                         🔗 링크
                       </button>
                       <button onClick={() => ebookInputRef.current?.click()} disabled={!ready || fileUploading}
-                        title="강사가 제공한 전자책 PDF/텍스트만 업로드. AI가 핵심 자료로 사용."
+                        title="강사가 제공한 전자책 PDF/텍스트. AI가 무료 전자책 기획안의 핵심 자료로 사용."
                         style={{ padding: '7px 12px', background: 'linear-gradient(135deg, #d97706, #f59e0b)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 700, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5, boxShadow: '0 4px 10px rgba(245,158,11,0.30)' }}>
                         📚 전자책
                       </button>
@@ -9032,18 +9039,25 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       <div style={{ background: 'rgba(0,0,0,0.20)', borderRadius: '8px', maxHeight: '260px', overflowY: 'auto' }}>
                         {attachments.map((file, idx) => {
                           const isEbook = file.file_role === 'ebook'
-                          const tagColor = isEbook ? '#fbbf24' : (file.session_id ? '#a5b4fc' : '#94a3b8')
-                          const tagBg = isEbook ? 'rgba(245,158,11,0.20)' : (file.session_id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)')
-                          const tagLabel = isEbook ? '📚 전자책' : (file.session_id ? '기수전용' : '강사공통')
+                          const isReference = file.file_role === 'summary_reference'
+                          const tagColor = isEbook ? '#fbbf24'
+                            : isReference ? '#5eead4'
+                            : (file.session_id ? '#a5b4fc' : '#94a3b8')
+                          const tagBg = isEbook ? 'rgba(245,158,11,0.20)'
+                            : isReference ? 'rgba(20,184,166,0.18)'
+                            : (file.session_id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)')
+                          const tagLabel = isEbook ? '📚 전자책'
+                            : isReference ? '🎯 레퍼런스'
+                            : (file.session_id ? '기수전용' : '강사공통')
                           return (
                             <div key={file.id} style={{
                               display: 'flex', alignItems: 'center',
                               padding: '8px 12px',
                               borderBottom: idx < attachments.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
                               gap: '8px',
-                              background: isEbook ? 'rgba(245,158,11,0.06)' : 'transparent',
+                              background: isEbook ? 'rgba(245,158,11,0.06)' : isReference ? 'rgba(20,184,166,0.06)' : 'transparent',
                             }}>
-                              <span style={{ fontSize: '14px' }}>{isEbook ? '📚' : getFileIcon(file.file_type)}</span>
+                              <span style={{ fontSize: '14px' }}>{isEbook ? '📚' : isReference ? '🎯' : getFileIcon(file.file_type)}</span>
                               <span style={{ fontSize: '10px', padding: '2px 6px', background: tagBg, color: tagColor, borderRadius: '4px', fontWeight: 700, whiteSpace: 'nowrap' }}>
                                 {tagLabel}
                               </span>
@@ -9184,7 +9198,31 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       setPpSummaryPhase('')
                     }
                   }
-                  const busy = pp_summaryGenerating || pp_summaryRevising
+                  // 노션 강사미팅 기록 DB에 새 페이지로 push
+                  const createNotionPageHandler = async () => {
+                    if (!pp_summary) return
+                    setPpSummaryError('')
+                    setPpNotionResult(null)
+                    setPpNotionCreating(true)
+                    try {
+                      const res = await fetch('/api/integrations/notion/create-meeting-report', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ sessionId: selectedSessionId }),
+                      })
+                      const data = await res.json()
+                      if (!res.ok || !data.success) {
+                        setPpSummaryError(data.error || `노션 페이지 생성 실패 (HTTP ${res.status})`)
+                        return
+                      }
+                      setPpNotionResult(data)
+                    } catch (e) {
+                      setPpSummaryError('네트워크 오류: ' + e.message)
+                    } finally {
+                      setPpNotionCreating(false)
+                    }
+                  }
+                  const busy = pp_summaryGenerating || pp_summaryRevising || pp_notionCreating
                   return (
                     <div style={{
                       background: 'rgba(34,197,94,0.04)',
@@ -9200,8 +9238,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             강사 자료 정리본 <span style={{ fontSize: '11px', fontWeight: 500, color: '#86efac', marginLeft: '6px', padding: '2px 8px', background: 'rgba(34,197,94,0.12)', borderRadius: '999px' }}>정리봇</span>
                           </div>
                           <div style={{ fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.5 }}>
-                            첨부 자료(PDF/이미지/텍스트) + 추가 컨텍스트를 정리봇이 한 페이지로 정리합니다.
-                            아래 기획 봇들이 본 생성 시 이 정리본을 자동으로 참고합니다.
+                            <b style={{ color: '#cbd5e1' }}>📁 데이터 소스</b>(녹음·노션·메모)에서 사실을 뽑아,
+                            <b style={{ color: '#5eead4' }}>공용 레퍼런스 양식</b> 그대로 정리합니다.
+                            레퍼런스 양식은 사이드바 <b style={{ color: '#a5b4fc' }}>🪄 기획 봇 설정 → 강사 자료 정리봇</b>에서 한 번만 등록.
+                            아래 기획 봇들이 이 정리본을 자동 참고합니다.
                           </div>
                         </div>
                       </div>
@@ -9277,6 +9317,55 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             overflowY: 'auto',
                           }}>
                             <MarkdownView content={pp_summary.content_md} />
+                          </div>
+
+                          {/* 노션에 페이지 만들기 */}
+                          <div style={{
+                            marginTop: '12px',
+                            display: 'flex',
+                            justifyContent: 'flex-end',
+                            gap: '8px',
+                            flexWrap: 'wrap',
+                            alignItems: 'center',
+                          }}>
+                            {pp_notionResult && (
+                              <a
+                                href={pp_notionResult.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  fontSize: '12px',
+                                  color: '#86efac',
+                                  textDecoration: 'none',
+                                  padding: '7px 12px',
+                                  background: 'rgba(34,197,94,0.10)',
+                                  border: '1px solid rgba(34,197,94,0.35)',
+                                  borderRadius: '8px',
+                                  fontWeight: 600,
+                                }}>
+                                ✅ {pp_notionResult.title} — 노션에서 열기 ↗
+                              </a>
+                            )}
+                            <button
+                              onClick={createNotionPageHandler}
+                              disabled={busy}
+                              title="현재 정리본을 노션의 강사미팅 기록 데이터베이스에 새 페이지로 등록합니다"
+                              style={{
+                                padding: '9px 16px',
+                                background: busy ? 'rgba(20,184,166,0.20)' : 'linear-gradient(135deg, #0891b2, #0d9488)',
+                                border: 'none',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                fontSize: '12.5px',
+                                fontWeight: 700,
+                                cursor: busy ? 'wait' : 'pointer',
+                                boxShadow: busy ? 'none' : '0 4px 10px rgba(13,148,136,0.30)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                              }}>
+                              {pp_notionCreating ? '📋 노션에 push 중… (10~30초)' : '📋 노션에 페이지 만들기'}
+                            </button>
                           </div>
 
                           {/* 수정 요청 박스 */}
@@ -9393,6 +9482,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                   const kindIcon =
                                     it.kind === 'notion' ? '📋'
                                     : it.kind === 'audio' ? '🎵'
+                                    : it.kind === 'reference-notion' ? '🎯📋'
+                                    : it.kind === 'reference-file' ? '🎯📄'
                                     : '📄'
                                   // 오디오의 progress 단계 라벨
                                   const audioStageLabel =
@@ -10679,6 +10770,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 project-planner 탭의 PLANNER_META에서 체크박스 활성화 여부가 결정됨. */}
           {currentTab === 'planner-config' && loginId === 'jinwoo' && (() => {
             const PLANNER_META = {
+              summarize:         { label: '강사 자료 정리봇',         icon: '🗂️', enabled: true },
               ebook:             { label: '무료 전자책 기획안',     icon: '📚', enabled: true },
               boomUp:            { label: '붐업 멘트 (스타일별)',    icon: '🎉', enabled: true },
               alimtalk:          { label: '채널톡 멘트',              icon: '💬', enabled: true },
@@ -11026,7 +11118,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 borderRadius: '7px', color: '#fff', fontSize: '13px', marginBottom: '8px', boxSizing: 'border-box'
                               }} />
                             <textarea value={pc_newRef.content} onChange={(e) => setPcNewRef(s => ({ ...s, content: e.target.value }))} rows={10}
-                              placeholder="모범 사례 본문 (직접 붙여넣기 또는 위 파일 업로드로 자동 입력)"
+                              placeholder={'본문 직접 붙여넣기 — 또는 노션 URL 한 줄만 적어도 자동으로 본문 펼쳐집니다.\n예) https://www.notion.so/...\n(노션 양식 수정하면 5분 후부터 다음 호출에 자동 반영)'}
                               style={{
                                 width: '100%', padding: '11px',
                                 background: 'rgba(0,0,0,0.40)',
