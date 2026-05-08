@@ -8732,15 +8732,31 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 )
               }
 
-              if (taskKey === 'alimtalk' && Array.isArray(plan?.messages)) {
+              if (taskKey === 'alimtalk') {
+                const ft = plan?.fullText || ''
+                const placeholders = Array.isArray(plan?.placeholders) ? plan.placeholders : []
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {plan.messages.map((m, i) => (
-                      <div key={i} style={_box}>
-                        <div style={_accent}>{m.scenario || `시나리오 ${i + 1}`}</div>
-                        <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{m.text}</div>
+                    <div style={_boxAccent}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={_accent}>💬 채널톡 멘트 — 본문 (그대로 복붙)</div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard?.writeText(ft).then(() => {
+                              alert('본문이 클립보드에 복사됐습니다.')
+                            }).catch(() => alert('복사 실패. 수동으로 선택해주세요.'))
+                          }}
+                          style={{ padding: '5px 11px', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '7px', color: '#c7d2fe', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>
+                          📋 복사
+                        </button>
                       </div>
-                    ))}
+                      <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap', padding: '8px 0' }}>{ft}</div>
+                    </div>
+                    {placeholders.length > 0 && (
+                      <div style={{ padding: '10px 12px', background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.30)', borderRadius: '8px', fontSize: '12px', color: '#fbbf24' }}>
+                        ⚠️ 다음 자리표시자는 운영팀이 직접 채워야 합니다: {placeholders.map(p => <code key={p} style={{ background: 'rgba(0,0,0,0.30)', padding: '1px 6px', borderRadius: '4px', marginRight: '5px' }}>{p}</code>)}
+                      </div>
+                    )}
                   </div>
                 )
               }
