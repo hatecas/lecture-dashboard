@@ -20,6 +20,7 @@ import { verifyApiAuth } from '@/lib/apiAuth'
 import { generateSummary, reviseSummary } from '@/lib/planners/summarize'
 import { extractTextFromUrl } from '@/lib/planners/_text'
 import { isNotionUrl, fetchNotionPageAsMarkdown } from '@/lib/integrations/notion'
+import { transcribeAudioFromUrl } from '@/lib/integrations/transcribe'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300 // 5분 (Vercel hobby 한도). 진행상황 SSE 표시되므로 여유롭게.
@@ -34,7 +35,7 @@ const supabase = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 )
 
-// 본문 추출 가능한 파일 첨부(PDF/이미지/텍스트)
+// 본문 추출 가능한 파일 첨부(PDF/이미지/텍스트). 오디오는 별도 분기.
 const EXTRACTABLE_MIME_PREFIXES = ['application/pdf', 'image/', 'text/']
 const EXTRACTABLE_MIME_INCLUDES = ['markdown', 'json', 'xml']
 function isExtractableFile(att) {
@@ -43,6 +44,19 @@ function isExtractableFile(att) {
   if (!mime) return false
   return EXTRACTABLE_MIME_PREFIXES.some((p) => mime.startsWith(p))
       || EXTRACTABLE_MIME_INCLUDES.some((s) => mime.includes(s))
+}
+
+// 오디오 첨부 (m4a/mp3/wav 등). MIME으로 우선 판정, 없으면 파일명 확장자로.
+const AUDIO_EXT_RE_FILE = /\.(mp3|m4a|mp4a|wav|aac|ogg|oga|flac|aiff?|opus|wma)$/i
+function isAudioFile(att) {
+  if (att.file_type === 'link') return false
+  const mime = (att.mime_type || '').toLowerCase()
+  if (mime.startsWith('audio/')) return true
+  // 일부 케이스는 audio/mp4 → m4a여서 mime이 'audio/'로 시작 안 할 수 있음
+  if (mime === 'video/mp4' && /\.m4a$/i.test(att.file_name || '')) return true
+  // mime 비어있는 경우 확장자 fallback
+  if (!mime && att.file_name && AUDIO_EXT_RE_FILE.test(att.file_name)) return true
+  return false
 }
 
 // 노션 링크 첨부 (file_type==='link' 이면서 URL 도메인이 notion.so/notion.site)
@@ -176,6 +190,7 @@ export async function POST(request) {
           // role별로 따로 처리: 소스는 sourceExtractedTexts에, 레퍼런스는 referenceExtractedTexts에 누적
           const processAttachmentGroup = async (atts, bucket, bucketName) => {
             const extractableFiles = atts.filter(isExtractableFile)
+            const audioFiles = atts.filter(isAudioFile)
             const notionLinks = atts.filter(isNotionLink)
 
             for (const f of extractableFiles) {
@@ -197,6 +212,47 @@ export async function POST(request) {
                 const msg = e?.message || String(e)
                 bucket.push({ name, text: '', error: msg })
                 send('item_error', { kind: itemKind, name, error: msg })
+              }
+            }
+
+            // 오디오 파일 (m4a/mp3 등) — Gemini로 받아쓰기
+            for (const f of audioFiles) {
+              const name = f.file_name
+              send('item_start', { kind: 'audio', name })
+              try {
+                if (!process.env.GEMINI_API_KEY) {
+                  throw new Error('GEMINI_API_KEY 미설정 — Vercel/.env.local에 추가 후 재시작 필요')
+                }
+                const r = await transcribeAudioFromUrl(f.file_url, {
+                  displayName: name,
+                  mimeType: f.mime_type,
+                  onStage: (stage, info) => {
+                    send('item_progress', {
+                      kind: 'audio', name,
+                      stage,
+                      bytes: info?.sizeBytes,
+                      mode: info?.mode,
+                    })
+                  },
+                })
+                let text = r.text
+                let truncated = false
+                if (text.length > PER_FILE_CHAR_LIMIT) {
+                  text = text.slice(0, PER_FILE_CHAR_LIMIT)
+                  truncated = true
+                }
+                bucket.push({ name: `🎵 ${name} (받아쓰기)`, text, truncated })
+                send('item_done', {
+                  kind: 'audio', name,
+                  charCount: text.length,
+                  durationMs: r.durationMs,
+                  mode: r.mode,
+                  truncated,
+                })
+              } catch (e) {
+                const msg = e?.message || String(e)
+                bucket.push({ name, text: '', error: msg })
+                send('item_error', { kind: 'audio', name, error: msg })
               }
             }
 
