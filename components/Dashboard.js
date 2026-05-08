@@ -10954,9 +10954,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               try {
                 const fd = new FormData()
                 fd.append('file', file)
+                // ⚠️ FormData 사용 시 Content-Type을 명시하면 boundary 자동 설정이 깨짐 →
+                // getAuthHeaders() 대신 Authorization 만 직접 세팅
+                const token = localStorage.getItem('authToken')
                 const res = await fetch('/api/admin/planner-config/extract-file', {
                   method: 'POST',
-                  headers: getAuthHeaders(),  // Content-Type은 FormData가 자동 설정
+                  headers: { 'Authorization': token ? `Bearer ${token}` : '' },
                   body: fd,
                 })
                 const data = await res.json()
