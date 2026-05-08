@@ -399,6 +399,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
   const ebookInputRef = useRef(null) // 전자책(file_role='ebook') 전용 업로드
+  const referenceInputRef = useRef(null) // 정리본 레퍼런스(file_role='summary_reference') 전용 업로드
 
   // 툴 관련 상태
   const [currentTool, setCurrentTool] = useState('crm') // crm, kakao, youtube (inflow는 권한 필요)
@@ -1927,6 +1928,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const handleEbookUpload = async (e) => {
     await uploadFiles(e.target.files, 'ebook')
     if (ebookInputRef.current) ebookInputRef.current.value = ''
+  }
+
+  // 정리본 레퍼런스: 잘 정리된 노션 페이지 등을 PDF/markdown으로 export 한 파일.
+  // 이 파일들은 정리봇의 "양식 참고용"으로만 사용됨 — 그 안의 내용을 정리본에 옮기지 않음.
+  const handleReferenceUpload = async (e) => {
+    await uploadFiles(e.target.files, 'summary_reference')
+    if (referenceInputRef.current) referenceInputRef.current.value = ''
   }
 
   // 드래그 앤 드롭 핸들러
@@ -8978,14 +8986,16 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '15px' }}>📎</span> 자료 (파일 / 링크 / 전자책)
+                      <span style={{ fontSize: '15px' }}>📎</span> 자료 (데이터 소스 · 레퍼런스 · 전자책)
                       <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 강사·기수에 매칭되어 DB에 저장 · <b style={{ color: '#cbd5e1' }}>파일당 최대 200MB</b></span>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple style={{ display: 'none' }} />
                       <input type="file" ref={folderInputRef} onChange={handleFileUpload} webkitdirectory="" directory="" multiple style={{ display: 'none' }} />
                       <input type="file" ref={ebookInputRef} onChange={handleEbookUpload} accept=".pdf,.txt,.md,.markdown" multiple style={{ display: 'none' }} />
+                      <input type="file" ref={referenceInputRef} onChange={handleReferenceUpload} accept=".pdf,.txt,.md,.markdown" multiple style={{ display: 'none' }} />
                       <button onClick={() => fileInputRef.current?.click()} disabled={!ready || fileUploading}
+                        title="녹음/메모 등 강사 데이터. 이 자료의 '내용'이 정리본에 들어감."
                         style={{ padding: '7px 12px', background: 'var(--accent-grad)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5 }}>
                         {fileUploading ? '업로드 중…' : '📁 파일'}
                       </button>
@@ -8994,11 +9004,17 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         📂 폴더
                       </button>
                       <button onClick={() => setShowFileModal(true)} disabled={!ready}
+                        title="노션/구글드라이브 등 외부 링크. 강사 자료의 '내용'으로 사용."
                         style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '12px', fontWeight: 600, cursor: ready ? 'pointer' : 'not-allowed', opacity: ready ? 1 : 0.5 }}>
                         🔗 링크
                       </button>
+                      <button onClick={() => referenceInputRef.current?.click()} disabled={!ready || fileUploading}
+                        title="잘 정리된 강사 정리본 노션을 PDF/텍스트로 export한 파일. 정리봇이 '양식·구조·톤'만 모방하고 안의 내용은 가져오지 않음."
+                        style={{ padding: '7px 12px', background: 'linear-gradient(135deg, #06b6d4, #14b8a6)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 700, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5, boxShadow: '0 4px 10px rgba(20,184,166,0.30)' }}>
+                        🎯 레퍼런스
+                      </button>
                       <button onClick={() => ebookInputRef.current?.click()} disabled={!ready || fileUploading}
-                        title="강사가 제공한 전자책 PDF/텍스트만 업로드. AI가 핵심 자료로 사용."
+                        title="강사가 제공한 전자책 PDF/텍스트. AI가 무료 전자책 기획안의 핵심 자료로 사용."
                         style={{ padding: '7px 12px', background: 'linear-gradient(135deg, #d97706, #f59e0b)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 700, cursor: ready && !fileUploading ? 'pointer' : 'not-allowed', opacity: ready && !fileUploading ? 1 : 0.5, boxShadow: '0 4px 10px rgba(245,158,11,0.30)' }}>
                         📚 전자책
                       </button>
@@ -9032,18 +9048,25 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       <div style={{ background: 'rgba(0,0,0,0.20)', borderRadius: '8px', maxHeight: '260px', overflowY: 'auto' }}>
                         {attachments.map((file, idx) => {
                           const isEbook = file.file_role === 'ebook'
-                          const tagColor = isEbook ? '#fbbf24' : (file.session_id ? '#a5b4fc' : '#94a3b8')
-                          const tagBg = isEbook ? 'rgba(245,158,11,0.20)' : (file.session_id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)')
-                          const tagLabel = isEbook ? '📚 전자책' : (file.session_id ? '기수전용' : '강사공통')
+                          const isReference = file.file_role === 'summary_reference'
+                          const tagColor = isEbook ? '#fbbf24'
+                            : isReference ? '#5eead4'
+                            : (file.session_id ? '#a5b4fc' : '#94a3b8')
+                          const tagBg = isEbook ? 'rgba(245,158,11,0.20)'
+                            : isReference ? 'rgba(20,184,166,0.18)'
+                            : (file.session_id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)')
+                          const tagLabel = isEbook ? '📚 전자책'
+                            : isReference ? '🎯 레퍼런스'
+                            : (file.session_id ? '기수전용' : '강사공통')
                           return (
                             <div key={file.id} style={{
                               display: 'flex', alignItems: 'center',
                               padding: '8px 12px',
                               borderBottom: idx < attachments.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
                               gap: '8px',
-                              background: isEbook ? 'rgba(245,158,11,0.06)' : 'transparent',
+                              background: isEbook ? 'rgba(245,158,11,0.06)' : isReference ? 'rgba(20,184,166,0.06)' : 'transparent',
                             }}>
-                              <span style={{ fontSize: '14px' }}>{isEbook ? '📚' : getFileIcon(file.file_type)}</span>
+                              <span style={{ fontSize: '14px' }}>{isEbook ? '📚' : isReference ? '🎯' : getFileIcon(file.file_type)}</span>
                               <span style={{ fontSize: '10px', padding: '2px 6px', background: tagBg, color: tagColor, borderRadius: '4px', fontWeight: 700, whiteSpace: 'nowrap' }}>
                                 {tagLabel}
                               </span>
@@ -9200,8 +9223,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             강사 자료 정리본 <span style={{ fontSize: '11px', fontWeight: 500, color: '#86efac', marginLeft: '6px', padding: '2px 8px', background: 'rgba(34,197,94,0.12)', borderRadius: '999px' }}>정리봇</span>
                           </div>
                           <div style={{ fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.5 }}>
-                            첨부 자료(PDF/이미지/텍스트) + 추가 컨텍스트를 정리봇이 한 페이지로 정리합니다.
-                            아래 기획 봇들이 본 생성 시 이 정리본을 자동으로 참고합니다.
+                            <b style={{ color: '#cbd5e1' }}>📁 데이터 소스</b>(녹음·노션·메모)에서 사실을 뽑아,
+                            <b style={{ color: '#5eead4' }}> 🎯 레퍼런스</b> 양식 그대로 정리합니다.
+                            레퍼런스가 없으면 기본 양식 사용. 아래 기획 봇들이 이 정리본을 자동 참고합니다.
                           </div>
                         </div>
                       </div>
@@ -9393,6 +9417,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                   const kindIcon =
                                     it.kind === 'notion' ? '📋'
                                     : it.kind === 'audio' ? '🎵'
+                                    : it.kind === 'reference-notion' ? '🎯📋'
+                                    : it.kind === 'reference-file' ? '🎯📄'
                                     : '📄'
                                   // 오디오의 progress 단계 라벨
                                   const audioStageLabel =

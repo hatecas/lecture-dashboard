@@ -155,8 +155,13 @@ export async function POST(request) {
         send('start', { action })
 
         // ───── 1. 첨부 추출 (generate만) ─────
+        // 자료를 두 카테고리로 분리:
+        //  - source: 데이터 소스 (file_role !== 'summary_reference') — 새 정리본의 사실/내용 출처
+        //  - reference: 정리본 양식 레퍼런스 (file_role === 'summary_reference') — 양식·구조만 모방
+        // (file_role === 'ebook'은 다른 봇용, 정리봇에선 source로 취급)
         let attachments = []
-        let extractedTexts = []
+        let sourceExtractedTexts = []
+        let referenceExtractedTexts = []
         if (action === 'generate') {
           send('phase', { phase: 'extracting' })
           try {
@@ -165,96 +170,85 @@ export async function POST(request) {
             console.error('[summary] 첨부 로드 실패:', e?.message || e)
           }
 
-          const extractableFiles = attachments.filter(isExtractableFile)
-          const notionLinks = attachments.filter(isNotionLink)
+          const referenceAttachments = attachments.filter((a) => a.file_role === 'summary_reference')
+          const sourceAttachments = attachments.filter((a) => a.file_role !== 'summary_reference')
 
-          // 1a. 파일 추출 (PDF/이미지/텍스트) — Gemini OCR 통과
-          for (const f of extractableFiles) {
-            const name = f.file_name
-            send('item_start', { kind: 'file', name })
-            const start = Date.now()
-            try {
-              let text = await extractTextFromUrl(f.file_url, f.mime_type, f.file_name)
-              if (!text) throw new Error('추출된 텍스트가 비어있습니다.')
-              let truncated = false
-              if (text.length > PER_FILE_CHAR_LIMIT) {
-                text = text.slice(0, PER_FILE_CHAR_LIMIT)
-                truncated = true
+          // role별로 따로 처리: 소스는 sourceExtractedTexts에, 레퍼런스는 referenceExtractedTexts에 누적
+          const processAttachmentGroup = async (atts, bucket, bucketName) => {
+            const extractableFiles = atts.filter(isExtractableFile)
+            const notionLinks = atts.filter(isNotionLink)
+
+            for (const f of extractableFiles) {
+              const name = f.file_name
+              const itemKind = bucketName === 'reference' ? 'reference-file' : 'file'
+              send('item_start', { kind: itemKind, name })
+              const start = Date.now()
+              try {
+                let text = await extractTextFromUrl(f.file_url, f.mime_type, f.file_name)
+                if (!text) throw new Error('추출된 텍스트가 비어있습니다.')
+                let truncated = false
+                if (text.length > PER_FILE_CHAR_LIMIT) {
+                  text = text.slice(0, PER_FILE_CHAR_LIMIT)
+                  truncated = true
+                }
+                bucket.push({ name, text, truncated })
+                send('item_done', { kind: itemKind, name, charCount: text.length, durationMs: Date.now() - start, truncated })
+              } catch (e) {
+                const msg = e?.message || String(e)
+                bucket.push({ name, text: '', error: msg })
+                send('item_error', { kind: itemKind, name, error: msg })
               }
-              extractedTexts.push({ name, text, truncated })
-              send('item_done', { kind: 'file', name, charCount: text.length, durationMs: Date.now() - start, truncated })
-            } catch (e) {
-              const msg = e?.message || String(e)
-              extractedTexts.push({ name, text: '', error: msg })
-              send('item_error', { kind: 'file', name, error: msg })
+            }
+
+            for (const a of notionLinks) {
+              const name = a.file_name || a.file_url
+              const itemKind = bucketName === 'reference' ? 'reference-notion' : 'notion'
+              send('item_start', { kind: itemKind, name })
+              const start = Date.now()
+              try {
+                if (!process.env.NOTION_API_KEY) {
+                  throw new Error('NOTION_API_KEY 미설정 — .env.local 또는 Vercel env에 추가 후 재시작')
+                }
+                const r = await fetchNotionPageAsMarkdown(a.file_url, {
+                  onProgress: ({ count }) => send('item_progress', { kind: itemKind, name, blocks: count }),
+                  onAudioProgress: (info) => {
+                    const audioName = `🎵 ${info.name} (in ${name})`
+                    if (info.status === 'start') send('item_start', { kind: 'audio', name: audioName })
+                    else if (info.status === 'progress') send('item_progress', { kind: 'audio', name: audioName, stage: info.stage, bytes: info.bytes, mode: info.mode })
+                    else if (info.status === 'done') send('item_done', { kind: 'audio', name: audioName, charCount: info.charCount, durationMs: info.durationMs, mode: info.mode })
+                    else if (info.status === 'error') send('item_error', { kind: 'audio', name: audioName, error: info.error })
+                  },
+                })
+                if (!r.markdown || !r.markdown.trim()) {
+                  throw new Error('노션 페이지가 비어있거나 본문이 없습니다.')
+                }
+                let text = r.markdown
+                let truncated = r.truncated || false
+                if (text.length > PER_FILE_CHAR_LIMIT) {
+                  text = text.slice(0, PER_FILE_CHAR_LIMIT)
+                  truncated = true
+                }
+                bucket.push({ name, text, truncated })
+                send('item_done', {
+                  kind: itemKind, name,
+                  charCount: text.length,
+                  blocks: r.blockCount,
+                  durationMs: Date.now() - start,
+                  truncated,
+                  audioCount: r.audioCount || 0,
+                  audioOk: r.audioOk || 0,
+                })
+              } catch (e) {
+                const msg = e?.message || String(e)
+                bucket.push({ name, text: '', error: msg })
+                send('item_error', { kind: itemKind, name, error: msg })
+              }
             }
           }
 
-          // 1b. 노션 링크 추출 — 페이지 블록 카운트 + 안의 오디오 받아쓰기 진행 실시간 푸시
-          for (const a of notionLinks) {
-            const name = a.file_name || a.file_url
-            send('item_start', { kind: 'notion', name })
-            const start = Date.now()
-            try {
-              if (!process.env.NOTION_API_KEY) {
-                throw new Error('NOTION_API_KEY 미설정 — .env.local 또는 Vercel env에 추가 후 재시작')
-              }
-              const r = await fetchNotionPageAsMarkdown(a.file_url, {
-                onProgress: ({ count }) => {
-                  send('item_progress', { kind: 'notion', name, blocks: count })
-                },
-                // 오디오 블록 받아쓰기는 별도 item으로 푸시 (kind='audio', parent=notion 페이지명)
-                onAudioProgress: (info) => {
-                  const audioName = `🎵 ${info.name} (in ${name})`
-                  if (info.status === 'start') {
-                    send('item_start', { kind: 'audio', name: audioName })
-                  } else if (info.status === 'progress') {
-                    send('item_progress', {
-                      kind: 'audio',
-                      name: audioName,
-                      stage: info.stage,
-                      bytes: info.bytes,
-                      mode: info.mode,
-                    })
-                  } else if (info.status === 'done') {
-                    send('item_done', {
-                      kind: 'audio',
-                      name: audioName,
-                      charCount: info.charCount,
-                      durationMs: info.durationMs,
-                      mode: info.mode,
-                    })
-                  } else if (info.status === 'error') {
-                    send('item_error', { kind: 'audio', name: audioName, error: info.error })
-                  }
-                },
-              })
-              if (!r.markdown || !r.markdown.trim()) {
-                throw new Error('노션 페이지가 비어있거나 본문이 없습니다.')
-              }
-              let text = r.markdown
-              let truncated = r.truncated || false
-              if (text.length > PER_FILE_CHAR_LIMIT) {
-                text = text.slice(0, PER_FILE_CHAR_LIMIT)
-                truncated = true
-              }
-              extractedTexts.push({ name, text, truncated })
-              send('item_done', {
-                kind: 'notion',
-                name,
-                charCount: text.length,
-                blocks: r.blockCount,
-                durationMs: Date.now() - start,
-                truncated,
-                audioCount: r.audioCount || 0,
-                audioOk: r.audioOk || 0,
-              })
-            } catch (e) {
-              const msg = e?.message || String(e)
-              extractedTexts.push({ name, text: '', error: msg })
-              send('item_error', { kind: 'notion', name, error: msg })
-            }
-          }
+          // 소스 먼저 (시간 더 걸리는 무거운 자료) → 그 다음 레퍼런스
+          await processAttachmentGroup(sourceAttachments, sourceExtractedTexts, 'source')
+          await processAttachmentGroup(referenceAttachments, referenceExtractedTexts, 'reference')
         }
 
         // ───── 2. AI 정리/수정 ─────
@@ -263,12 +257,16 @@ export async function POST(request) {
         const aiStart = Date.now()
         let result
         if (action === 'generate') {
+          const sourceAttachmentsForAI = attachments.filter((a) => a.file_role !== 'summary_reference')
+          const referenceAttachmentsForAI = attachments.filter((a) => a.file_role === 'summary_reference')
           result = await generateSummary({
             instructor,
             sessionName: sessionName || '',
             additionalContext,
-            attachments,
-            extractedTexts,
+            sourceAttachments: sourceAttachmentsForAI,
+            sourceExtractedTexts,
+            referenceAttachments: referenceAttachmentsForAI,
+            referenceExtractedTexts,
           })
         } else {
           result = await reviseSummary({
