@@ -11042,7 +11042,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 borderRadius: '7px', color: '#fff', fontSize: '13px', marginBottom: '8px', boxSizing: 'border-box'
                               }} />
                             <textarea value={pc_newRef.content} onChange={(e) => setPcNewRef(s => ({ ...s, content: e.target.value }))} rows={10}
-                              placeholder="모범 사례 본문 (직접 붙여넣기 또는 위 파일 업로드로 자동 입력)"
+                              placeholder={'본문 직접 붙여넣기 — 또는 노션 URL 한 줄만 적어도 자동으로 본문 펼쳐집니다.\n예) https://www.notion.so/...\n(노션 양식 수정하면 5분 후부터 다음 호출에 자동 반영)'}
                               style={{
                                 width: '100%', padding: '11px',
                                 background: 'rgba(0,0,0,0.40)',
