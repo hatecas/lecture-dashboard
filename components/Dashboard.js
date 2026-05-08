@@ -602,6 +602,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_summaryGenerating, setPpSummaryGenerating] = useState(false)
   const [pp_summaryRevising, setPpSummaryRevising] = useState(false)
   const [pp_summaryFeedback, setPpSummaryFeedback] = useState('')
+  // 노션 페이지 자동 생성
+  const [pp_notionCreating, setPpNotionCreating] = useState(false)
+  const [pp_notionResult, setPpNotionResult] = useState(null) // { url, title, blockCount, ... }
   const [pp_summaryError, setPpSummaryError] = useState('')
   const [pp_summaryStartedAt, setPpSummaryStartedAt] = useState(0) // elapsed 표시용
   // SSE 진행상황 — 정리봇 작업 중에만 의미 있음
@@ -9195,7 +9198,31 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       setPpSummaryPhase('')
                     }
                   }
-                  const busy = pp_summaryGenerating || pp_summaryRevising
+                  // 노션 강사미팅 기록 DB에 새 페이지로 push
+                  const createNotionPageHandler = async () => {
+                    if (!pp_summary) return
+                    setPpSummaryError('')
+                    setPpNotionResult(null)
+                    setPpNotionCreating(true)
+                    try {
+                      const res = await fetch('/api/integrations/notion/create-meeting-report', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ sessionId: selectedSessionId }),
+                      })
+                      const data = await res.json()
+                      if (!res.ok || !data.success) {
+                        setPpSummaryError(data.error || `노션 페이지 생성 실패 (HTTP ${res.status})`)
+                        return
+                      }
+                      setPpNotionResult(data)
+                    } catch (e) {
+                      setPpSummaryError('네트워크 오류: ' + e.message)
+                    } finally {
+                      setPpNotionCreating(false)
+                    }
+                  }
+                  const busy = pp_summaryGenerating || pp_summaryRevising || pp_notionCreating
                   return (
                     <div style={{
                       background: 'rgba(34,197,94,0.04)',
@@ -9290,6 +9317,55 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             overflowY: 'auto',
                           }}>
                             <MarkdownView content={pp_summary.content_md} />
+                          </div>
+
+                          {/* 노션에 페이지 만들기 */}
+                          <div style={{
+                            marginTop: '12px',
+                            display: 'flex',
+                            justifyContent: 'flex-end',
+                            gap: '8px',
+                            flexWrap: 'wrap',
+                            alignItems: 'center',
+                          }}>
+                            {pp_notionResult && (
+                              <a
+                                href={pp_notionResult.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  fontSize: '12px',
+                                  color: '#86efac',
+                                  textDecoration: 'none',
+                                  padding: '7px 12px',
+                                  background: 'rgba(34,197,94,0.10)',
+                                  border: '1px solid rgba(34,197,94,0.35)',
+                                  borderRadius: '8px',
+                                  fontWeight: 600,
+                                }}>
+                                ✅ {pp_notionResult.title} — 노션에서 열기 ↗
+                              </a>
+                            )}
+                            <button
+                              onClick={createNotionPageHandler}
+                              disabled={busy}
+                              title="현재 정리본을 노션의 강사미팅 기록 데이터베이스에 새 페이지로 등록합니다"
+                              style={{
+                                padding: '9px 16px',
+                                background: busy ? 'rgba(20,184,166,0.20)' : 'linear-gradient(135deg, #0891b2, #0d9488)',
+                                border: 'none',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                fontSize: '12.5px',
+                                fontWeight: 700,
+                                cursor: busy ? 'wait' : 'pointer',
+                                boxShadow: busy ? 'none' : '0 4px 10px rgba(13,148,136,0.30)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                              }}>
+                              {pp_notionCreating ? '📋 노션에 push 중… (10~30초)' : '📋 노션에 페이지 만들기'}
+                            </button>
                           </div>
 
                           {/* 수정 요청 박스 */}
