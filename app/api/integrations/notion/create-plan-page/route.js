@@ -17,7 +17,9 @@ import { verifyApiAuth } from '@/lib/apiAuth'
 import { createMeetingReportPage, parseNotionDatabaseId } from '@/lib/integrations/notion-write'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// PPT outline 250장은 노션 블록 1000+ 개로 변환되고 노션 API 100개씩 다회 호출이라
+// 30초~2분 걸림. 5분 한도면 안전.
+export const maxDuration = 300
 
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
@@ -56,6 +58,10 @@ export async function POST(request) {
   if (!title) return Response.json({ error: 'title 필수' }, { status: 400 })
   if (!markdown) return Response.json({ error: 'markdown 필수' }, { status: 400 })
 
+  // 진단 로그 — PPT outline은 큰 마크다운(15만+ 자)이라 노션 push 시간 확인용
+  const t0 = Date.now()
+  console.log(`[notion/create-plan-page] start title="${title.slice(0, 60)}" mdLength=${markdown.length}`)
+
   try {
     const result = await createMeetingReportPage({
       databaseId,
@@ -64,16 +70,23 @@ export async function POST(request) {
       extraProperties: {},
     })
 
+    const elapsed = Date.now() - t0
+    console.log(`[notion/create-plan-page] done blockCount=${result.blockCount} truncated=${result.truncated} elapsed=${elapsed}ms url=${result.url}`)
+
     return Response.json({
       success: true,
       url: result.url,
       pageId: result.pageId,
       blockCount: result.blockCount,
       truncated: result.truncated,
+      elapsedMs: elapsed,
     })
   } catch (e) {
+    const elapsed = Date.now() - t0
+    console.error(`[notion/create-plan-page] FAILED after ${elapsed}ms:`, e?.message || e)
     return Response.json({
       error: e?.message || String(e),
+      elapsedMs: elapsed,
     }, { status: 500 })
   }
 }
