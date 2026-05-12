@@ -8813,17 +8813,20 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
 
               if (taskKey === 'ppt') {
-                // 슬라이드 종류별 색상 뱃지 — 정보·아이스브레이킹·썰·전환·CTA 등을 한눈에.
+                // 슬라이드 종류별 색상 뱃지 — N잡연구소 실제 PPT 3종 분석 기반 11종.
+                // (씨오 252장 + 옆집CEO 256장 + 에어 292장 = 평균 267장)
                 const KIND_LABEL = {
-                  intro: { label: '🎬 인트로', bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
-                  icebreaker: { label: '👋 아이스브레이킹', bg: 'rgba(251,191,36,0.18)', color: '#fbbf24' },
-                  story: { label: '📖 강사 썰', bg: 'rgba(217,70,239,0.18)', color: '#f0abfc' },
-                  info: { label: '📊 정보', bg: 'rgba(99,102,241,0.18)', color: '#a5b4fc' },
-                  transition: { label: '↪️ 전환', bg: 'rgba(148,163,184,0.10)', color: '#94a3b8' },
-                  warmup: { label: '🔥 워밍업', bg: 'rgba(249,115,22,0.18)', color: '#fdba74' },
-                  empathy: { label: '🤝 공감대', bg: 'rgba(244,114,182,0.18)', color: '#f9a8d4' },
-                  cta: { label: '🎯 모집', bg: 'rgba(239,68,68,0.18)', color: '#fca5a5' },
-                  outro: { label: '🎤 마무리', bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
+                  hook:        { label: '🪝 후크',       bg: 'rgba(239,68,68,0.18)',   color: '#fca5a5' },
+                  intro:       { label: '🎬 강사 소개',  bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
+                  proof:       { label: '💰 성과 증명',  bg: 'rgba(16,185,129,0.18)',  color: '#6ee7b7' },
+                  journey:     { label: '📖 일대기',     bg: 'rgba(217,70,239,0.18)',  color: '#f0abfc' },
+                  myth:        { label: '💥 통념 깨기',  bg: 'rgba(249,115,22,0.18)',  color: '#fdba74' },
+                  info:        { label: '📊 본론',       bg: 'rgba(99,102,241,0.18)',  color: '#a5b4fc' },
+                  empty:       { label: '🎞️ 빈/이미지',  bg: 'rgba(148,163,184,0.10)', color: '#94a3b8' },
+                  qna:         { label: '❓ Q&A',        bg: 'rgba(14,165,233,0.18)',  color: '#7dd3fc' },
+                  testimonial: { label: '💬 후기',       bg: 'rgba(244,114,182,0.18)', color: '#f9a8d4' },
+                  cta:         { label: '🎯 모집',       bg: 'rgba(168,85,247,0.20)',  color: '#d8b4fe' },
+                  outro:       { label: '🎤 마무리',     bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
                 }
                 // 종류별 카운트 (총합 옆에 분포 표시)
                 const kindCounts = {}
