@@ -609,6 +609,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_exportBusy, setPpExportBusy] = useState({}) // {[taskKey]: 'pptx'|'notion'|null}
   // 봇 결과 노션 페이지 생성 결과: { [taskKey]: { url, title } | null }
   const [pp_planNotionResult, setPpPlanNotionResult] = useState({})
+  // 생성된 기획안 자동 저장/조회 (사이드바 '🗃️ 생성된 기획안' 탭)
+  const [savedPlans, setSavedPlans] = useState([])
+  const [savedPlansLoading, setSavedPlansLoading] = useState(false)
+  const [savedPlansFilter, setSavedPlansFilter] = useState({ taskKey: '', instructorName: '' })
+  const [savedPlansDirty, setSavedPlansDirty] = useState(false) // 새 결과 저장됨 → 다음 진입 시 새로고침
+  const [savedPlanDetail, setSavedPlanDetail] = useState(null) // { id, plan, task_key, ... }
+  const [savedPlanDetailLoading, setSavedPlanDetailLoading] = useState(false)
+  const [savedPlanDeleting, setSavedPlanDeleting] = useState(null) // 삭제 중인 id
   // 무료 강의 주제 + 추가 컨텍스트 저장 상태
   const [pp_inputsSavedAt, setPpInputsSavedAt] = useState(null) // 마지막 저장 시각 (Date | null)
   const [pp_inputsSaving, setPpInputsSaving] = useState(false)
@@ -1330,6 +1338,29 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     }, 1500)
     return () => clearTimeout(timeoutId)
   }, [pp_inputsDirty, pp_topic, pp_additionalContext, selectedSessionId, currentTab]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 생성된 기획안 탭 진입 시 목록 자동 로드. 필터 변경 시도 자동 재조회.
+  // savedPlansDirty가 true이면 (새 기획안 저장 직후) 강제 재조회.
+  useEffect(() => {
+    if (currentTab !== 'saved-plans') return
+    let cancelled = false
+    setSavedPlansLoading(true)
+    const params = new URLSearchParams()
+    if (savedPlansFilter.taskKey) params.set('taskKey', savedPlansFilter.taskKey)
+    if (savedPlansFilter.instructorName) params.set('instructorName', savedPlansFilter.instructorName)
+    fetch(`/api/tools/project-planner/saved-plans?${params.toString()}`, {
+      headers: { ...getAuthHeaders() },
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return
+        if (Array.isArray(data?.plans)) setSavedPlans(data.plans)
+        setSavedPlansDirty(false)
+      })
+      .catch(e => console.warn('[saved-plans] 로드 실패:', e?.message))
+      .finally(() => { if (!cancelled) setSavedPlansLoading(false) })
+    return () => { cancelled = true }
+  }, [currentTab, savedPlansFilter.taskKey, savedPlansFilter.instructorName, savedPlansDirty]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 강사·기수 변경 시 정리봇 정리본 자동 로드 (있으면 표시, 없으면 null)
   useEffect(() => {
@@ -2704,6 +2735,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   active={currentTab === 'project-planner'}
                   collapsed={sidebarCollapsed && !isMobile}
                   onClick={() => { setCurrentTab('project-planner'); if(isMobile) setMobileMenuOpen(false) }} />
+              )}
+              {hasFeature('project-planner') && (
+                <SidebarItem icon={FolderOpen} label="생성된 기획안" shortLabel="기획안"
+                  active={currentTab === 'saved-plans'}
+                  collapsed={sidebarCollapsed && !isMobile}
+                  onClick={() => { setCurrentTab('saved-plans'); if(isMobile) setMobileMenuOpen(false) }} />
               )}
             </>
           )}
@@ -8637,6 +8674,32 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       firstSuccess = data.task
                       setPpExpanded(prev => ({ ...prev, [data.task]: true }))
                     }
+                    // ★ 성공 결과 자동 저장 (계정별, 사이드바 '🗃️ 생성된 기획안' 탭에서 조회 가능)
+                    if (r.ok && r.plan) {
+                      fetch('/api/tools/project-planner/saved-plans', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({
+                          taskKey: data.task,
+                          sessionId: selectedSessionId,
+                          instructorName: selectedInstructor,
+                          sessionName: currentSession?.session_name || null,
+                          topic: pp_topic,
+                          plan: r.plan,
+                          usage: r.usage,
+                          model: r.model,
+                        }),
+                      }).then(res => res.json()).then(saved => {
+                        if (saved?.success) {
+                          // 다음에 조회 탭 열 때 새로고침되도록 dirty 마킹
+                          setSavedPlansDirty(true)
+                        } else {
+                          console.warn('[saved-plans] 저장 실패:', saved?.error)
+                        }
+                      }).catch(e => {
+                        console.warn('[saved-plans] 저장 네트워크 오류:', e?.message)
+                      })
+                    }
                   } else if (event === 'done') {
                     setPpPhase('done')
                   } else if (event === 'fatal') {
@@ -11203,6 +11266,201 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               </div>
             </div>
           )}
+
+          {/* 🗃️ 생성된 기획안 탭 — 봇 결과 자동 저장 후 다시 열람/내보내기/삭제.
+              계정별 분리 (owner_username 토큰으로). 본인 것만 보이고 본인 것만 삭제. */}
+          {currentTab === 'saved-plans' && (() => {
+            const PLANNER_META_LOCAL = {
+              summarize:         { label: '강사 자료 정리봇',         icon: '🗂️' },
+              ebook:             { label: '무료 전자책 기획안',     icon: '📚' },
+              boomUp:            { label: '붐업 멘트',                icon: '🎉' },
+              alimtalk:          { label: '채널톡 멘트',              icon: '💬' },
+              viralQ:            { label: '바이럴 질문',            icon: '❓' },
+              ppt:               { label: '강의 PPT outline',       icon: '📋' },
+              salesPage:         { label: '무료 상페 카피',          icon: '📄' },
+              groupAnnouncement: { label: '단톡방 필독 공지',         icon: '📢' },
+            }
+
+            const openDetail = async (id) => {
+              setSavedPlanDetail(null)
+              setSavedPlanDetailLoading(true)
+              try {
+                const res = await fetch(`/api/tools/project-planner/saved-plans?id=${id}`, {
+                  headers: { ...getAuthHeaders() },
+                })
+                const data = await res.json()
+                if (res.ok && data?.plan) {
+                  setSavedPlanDetail(data.plan)
+                } else {
+                  alert(data?.error || `상세 불러오기 실패 (HTTP ${res.status})`)
+                }
+              } catch (e) {
+                alert('네트워크 오류: ' + e.message)
+              } finally {
+                setSavedPlanDetailLoading(false)
+              }
+            }
+
+            const deleteOne = async (id) => {
+              if (!confirm('이 기획안을 삭제할까요? 복구 불가.')) return
+              setSavedPlanDeleting(id)
+              try {
+                const res = await fetch(`/api/tools/project-planner/saved-plans?id=${id}`, {
+                  method: 'DELETE',
+                  headers: { ...getAuthHeaders() },
+                })
+                const data = await res.json()
+                if (res.ok && data?.success) {
+                  setSavedPlans(prev => prev.filter(p => p.id !== id))
+                  if (savedPlanDetail?.id === id) setSavedPlanDetail(null)
+                } else {
+                  alert(data?.error || `삭제 실패 (HTTP ${res.status})`)
+                }
+              } catch (e) {
+                alert('네트워크 오류: ' + e.message)
+              } finally {
+                setSavedPlanDeleting(null)
+              }
+            }
+
+            // 강사 목록 추출 (필터 옵션용 — 본인이 저장한 강사들만)
+            const instructorOptions = Array.from(new Set(savedPlans.map(p => p.instructor_name))).filter(Boolean).sort()
+
+            return (
+              <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1400px', margin: '0 auto' }}>
+                <div style={{ marginBottom: '20px' }}>
+                  <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--accent-grad)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(99,102,241,0.30), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
+                      <FolderOpen size={18} color="#fff" strokeWidth={2.2} />
+                    </span>
+                    생성된 기획안
+                  </h2>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.55 }}>
+                    프로젝트 기획에서 생성된 결과가 자동 저장됩니다. <b style={{ color: '#cbd5e1' }}>본인 계정 ({loginId})</b>이 만든 것만 표시.
+                  </p>
+                </div>
+
+                {/* 필터 */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>필터:</span>
+                  <select value={savedPlansFilter.taskKey}
+                    onChange={(e) => setSavedPlansFilter(prev => ({ ...prev, taskKey: e.target.value }))}
+                    style={{ padding: '7px 10px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '12px' }}>
+                    <option value="">전체 봇</option>
+                    {Object.entries(PLANNER_META_LOCAL).map(([k, m]) => (
+                      <option key={k} value={k}>{m.icon} {m.label}</option>
+                    ))}
+                  </select>
+                  <select value={savedPlansFilter.instructorName}
+                    onChange={(e) => setSavedPlansFilter(prev => ({ ...prev, instructorName: e.target.value }))}
+                    style={{ padding: '7px 10px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '12px' }}>
+                    <option value="">전체 강사</option>
+                    {instructorOptions.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  {savedPlansLoading && <span style={{ fontSize: '11px', color: '#94a3b8' }}>불러오는 중…</span>}
+                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: 'auto' }}>{savedPlans.length}건</span>
+                </div>
+
+                {/* 좌측 목록 + 우측 상세 */}
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '380px 1fr', gap: '14px' }}>
+                  {/* 좌측: 목록 */}
+                  <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '10px', border: '1px solid var(--border)', maxHeight: '70vh', overflowY: 'auto' }}>
+                    {savedPlans.length === 0 && !savedPlansLoading && (
+                      <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '12.5px' }}>
+                        저장된 기획안이 없습니다. <br/>
+                        프로젝트 기획 탭에서 봇을 실행하면 자동 저장됩니다.
+                      </div>
+                    )}
+                    {savedPlans.map(p => {
+                      const meta = PLANNER_META_LOCAL[p.task_key]
+                      const isOpen = savedPlanDetail?.id === p.id
+                      return (
+                        <div key={p.id} onClick={() => openDetail(p.id)}
+                          style={{
+                            padding: '12px 14px',
+                            marginBottom: '6px',
+                            background: isOpen ? 'var(--accent-grad-soft)' : 'rgba(255,255,255,0.03)',
+                            border: '1px solid ' + (isOpen ? 'rgba(129,140,248,0.45)' : 'var(--border)'),
+                            borderRadius: '10px',
+                            cursor: 'pointer',
+                          }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
+                            <span style={{ fontSize: '13px' }}>{meta?.icon || '🪄'}</span>
+                            <span style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>{meta?.label || p.task_key}</span>
+                            <span style={{ marginLeft: 'auto', fontSize: '10.5px', color: '#94a3b8' }}>
+                              {new Date(p.created_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '12.5px', color: '#cbd5e1', marginBottom: '2px' }}>
+                            <b style={{ color: '#a5b4fc' }}>{p.instructor_name}</b>
+                            {p.session_name ? <span style={{ marginLeft: '4px', color: '#94a3b8' }}>· {p.session_name}</span> : null}
+                          </div>
+                          {p.topic && (
+                            <div style={{ fontSize: '11.5px', color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              주제: {p.topic}
+                            </div>
+                          )}
+                          <button onClick={(e) => { e.stopPropagation(); deleteOne(p.id) }} disabled={savedPlanDeleting === p.id}
+                            style={{ marginTop: '6px', padding: '4px 8px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '6px', color: '#f87171', fontSize: '10.5px', cursor: savedPlanDeleting === p.id ? 'wait' : 'pointer' }}>
+                            {savedPlanDeleting === p.id ? '삭제 중…' : '🗑️ 삭제'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* 우측: 상세 */}
+                  <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '20px', border: '1px solid var(--border)', minHeight: '300px' }}>
+                    {savedPlanDetailLoading && (
+                      <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>상세 불러오는 중…</div>
+                    )}
+                    {!savedPlanDetailLoading && !savedPlanDetail && (
+                      <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                        왼쪽에서 항목을 선택하면 상세 내용이 표시됩니다.
+                      </div>
+                    )}
+                    {savedPlanDetail && (
+                      <div>
+                        <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                            <span style={{ fontSize: '20px' }}>{PLANNER_META_LOCAL[savedPlanDetail.task_key]?.icon || '🪄'}</span>
+                            <span style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
+                              {PLANNER_META_LOCAL[savedPlanDetail.task_key]?.label || savedPlanDetail.task_key}
+                            </span>
+                            <span style={{ fontSize: '11px', color: '#94a3b8', marginLeft: 'auto' }}>
+                              {new Date(savedPlanDetail.created_at).toLocaleString('ko-KR')}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                            <b style={{ color: '#a5b4fc' }}>{savedPlanDetail.instructor_name}</b>
+                            {savedPlanDetail.session_name && <span style={{ color: '#94a3b8' }}> · {savedPlanDetail.session_name}</span>}
+                          </div>
+                          {savedPlanDetail.topic && (
+                            <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '4px' }}>주제: {savedPlanDetail.topic}</div>
+                          )}
+                        </div>
+                        {/* plan JSON 그대로 표시 — 향후 봇별 렌더러로 확장 가능 */}
+                        <pre style={{
+                          padding: '12px',
+                          background: 'rgba(0,0,0,0.40)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '8px',
+                          color: '#cbd5e1',
+                          fontSize: '12px',
+                          lineHeight: 1.6,
+                          maxHeight: '60vh',
+                          overflow: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          margin: 0,
+                        }}>{JSON.stringify(savedPlanDetail.plan, null, 2)}</pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* 🛠️ 기획 봇 설정 탭 (jinwoo 전용)
               ※ 여기서는 모든 봇을 enabled=true로 풀어 지침/레퍼런스 사전 작성 가능.
