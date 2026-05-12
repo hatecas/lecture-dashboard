@@ -605,6 +605,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // 노션 페이지 자동 생성
   const [pp_notionCreating, setPpNotionCreating] = useState(false)
   const [pp_notionResult, setPpNotionResult] = useState(null) // { url, title, blockCount, ... }
+  // 봇 결과 내보내기 상태: { taskKey: 'pptx' | 'notion' | null } 식으로 어느 작업 진행 중인지
+  const [pp_exportBusy, setPpExportBusy] = useState({}) // {[taskKey]: 'pptx'|'notion'|null}
+  // 봇 결과 노션 페이지 생성 결과: { [taskKey]: { url, title } | null }
+  const [pp_planNotionResult, setPpPlanNotionResult] = useState({})
   // 무료 강의 주제 + 추가 컨텍스트 저장 상태
   const [pp_inputsSavedAt, setPpInputsSavedAt] = useState(null) // 마지막 저장 시각 (Date | null)
   const [pp_inputsSaving, setPpInputsSaving] = useState(false)
@@ -8839,6 +8843,157 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   cta:         { label: '🎯 모집',       bg: 'rgba(168,85,247,0.20)',  color: '#d8b4fe' },
                   outro:       { label: '🎤 마무리',     bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
                 }
+
+                // ===== 결과 추출 헬퍼 =====
+                // 1) 마크다운 변환 — 노션/워드에 그대로 붙여넣으면 형식 살아남
+                const toMarkdown = () => {
+                  const lines = []
+                  lines.push(`# ${plan.title || '강의 PPT outline'}`)
+                  lines.push('')
+                  lines.push(`총 ${plan.totalSlides || plan.slides?.length || 0}장`)
+                  lines.push('')
+                  lines.push('---')
+                  lines.push('')
+                  for (const s of (plan.slides || [])) {
+                    const kindLabel = KIND_LABEL[s.kind]?.label || ''
+                    lines.push(`## 슬라이드 ${s.slideNumber || '?'}${kindLabel ? ` · ${kindLabel}` : ''}`)
+                    lines.push('')
+                    if (s.title) {
+                      lines.push(`### ${s.title}`)
+                      lines.push('')
+                    }
+                    if (Array.isArray(s.bullets) && s.bullets.length) {
+                      for (const b of s.bullets) lines.push(`- ${b}`)
+                      lines.push('')
+                    }
+                    if (s.speakerNotes) {
+                      // 노트는 인용 블록으로 (노션에서도 회색 박스로 보임)
+                      lines.push(`> 🎤 **발표 멘트:** ${s.speakerNotes.replace(/\n/g, ' ')}`)
+                      lines.push('')
+                    }
+                    lines.push('---')
+                    lines.push('')
+                  }
+                  return lines.join('\n')
+                }
+
+                // 파일명 안전 처리 (Windows/macOS 모두 금지 문자 제거)
+                const safeFileName = (() => {
+                  const base = (plan.title || 'ppt-outline').replace(/[\\/:*?"<>|]/g, '_').trim()
+                  return base.slice(0, 80) || 'ppt-outline'
+                })()
+
+                // 2) 마크다운 복사
+                const copyMarkdown = async () => {
+                  try {
+                    await navigator.clipboard.writeText(toMarkdown())
+                    alert('마크다운으로 복사 완료. 노션/워드/메모장에 그대로 붙여넣으면 형식 살아남.')
+                  } catch (e) {
+                    alert('복사 실패. 수동으로 선택 복사해주세요.\n' + (e?.message || ''))
+                  }
+                }
+
+                // 3) .md 파일 다운로드
+                const downloadMarkdown = () => {
+                  const blob = new Blob([toMarkdown()], { type: 'text/markdown;charset=utf-8' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `${safeFileName}.md`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  setTimeout(() => URL.revokeObjectURL(url), 1000)
+                }
+
+                // 4) .pptx 파일 다운로드 — pptxgenjs로 실제 PowerPoint 파일 생성.
+                //    슬라이드별 1페이지, 제목 + 불릿 + 발표 멘트(노트). 강사가 PowerPoint에서
+                //    열어 디자인만 입히면 됨. 클라이언트 측 처리(서버 X).
+                const exportBusyKind = pp_exportBusy[taskKey] || null
+                const downloadPptx = async () => {
+                  setPpExportBusy(prev => ({ ...prev, [taskKey]: 'pptx' }))
+                  try {
+                    const { default: PptxGenJS } = await import('pptxgenjs')
+                    const pptx = new PptxGenJS()
+                    pptx.title = plan.title || '강의 PPT outline'
+                    pptx.layout = 'LAYOUT_WIDE' // 16:9
+
+                    for (const s of (plan.slides || [])) {
+                      const slide = pptx.addSlide()
+                      const kindLabel = KIND_LABEL[s.kind]?.label || ''
+
+                      // 좌상단 메타 (슬라이드 번호 · 종류)
+                      slide.addText(`#${s.slideNumber || '?'}${kindLabel ? `  ·  ${kindLabel}` : ''}`, {
+                        x: 0.3, y: 0.2, w: 5, h: 0.4,
+                        fontSize: 11, color: '888888',
+                      })
+
+                      // 제목 (큰 글씨)
+                      if (s.title) {
+                        slide.addText(s.title, {
+                          x: 0.5, y: 0.8, w: 12, h: 1.2,
+                          fontSize: 32, bold: true, color: '111111',
+                          fontFace: 'Malgun Gothic',
+                          valign: 'top',
+                        })
+                      }
+
+                      // 본문 불릿
+                      if (Array.isArray(s.bullets) && s.bullets.length) {
+                        slide.addText(
+                          s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })),
+                          {
+                            x: 0.6, y: 2.2, w: 12, h: 4.5,
+                            fontSize: 20, color: '333333',
+                            fontFace: 'Malgun Gothic',
+                            paraSpaceAfter: 8,
+                          }
+                        )
+                      }
+
+                      // 발표 멘트는 슬라이드 노트로 (PowerPoint에서 [발표자 노트] 영역에 표시)
+                      if (s.speakerNotes) {
+                        slide.addNotes(s.speakerNotes)
+                      }
+                    }
+
+                    await pptx.writeFile({ fileName: `${safeFileName}.pptx` })
+                  } catch (e) {
+                    alert('.pptx 생성 실패: ' + (e?.message || e))
+                  } finally {
+                    setPpExportBusy(prev => ({ ...prev, [taskKey]: null }))
+                  }
+                }
+
+                // 5) 노션에 페이지 만들기 — 마크다운을 노션 API로 새 페이지 생성.
+                //    /api/integrations/notion/create-plan-page (정리본용 라우트와 별도, generic)
+                const createNotionPlanPage = async () => {
+                  setPpExportBusy(prev => ({ ...prev, [taskKey]: 'notion' }))
+                  try {
+                    const pageTitle = `[${selectedInstructor || '미상'}${currentSession?.session_name ? ' ' + currentSession.session_name : ''}] 강의 PPT outline`
+                    const res = await fetch('/api/integrations/notion/create-plan-page', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                      body: JSON.stringify({
+                        title: pageTitle,
+                        markdown: toMarkdown(),
+                      }),
+                    })
+                    const data = await res.json().catch(() => ({}))
+                    if (!res.ok || !data.success) {
+                      throw new Error(data.error || `HTTP ${res.status}`)
+                    }
+                    setPpPlanNotionResult(prev => ({
+                      ...prev,
+                      [taskKey]: { url: data.url, title: pageTitle },
+                    }))
+                  } catch (e) {
+                    alert('노션 페이지 생성 실패: ' + (e?.message || e))
+                  } finally {
+                    setPpExportBusy(prev => ({ ...prev, [taskKey]: null }))
+                  }
+                }
+                const notionResultForTask = pp_planNotionResult[taskKey] || null
                 // 종류별 카운트 (총합 옆에 분포 표시)
                 const kindCounts = {}
                 if (Array.isArray(plan.slides)) {
@@ -8863,6 +9018,56 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         </div>
                       )}
                     </div>
+
+                    {/* ===== 결과 추출 버튼 영역 (마크다운 복사 / .md / .pptx / 노션) ===== */}
+                    <div style={{
+                      display: 'flex', flexWrap: 'wrap', gap: '6px',
+                      padding: '12px',
+                      background: 'rgba(99,102,241,0.06)',
+                      border: '1px solid rgba(99,102,241,0.20)',
+                      borderRadius: '10px',
+                    }}>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', alignSelf: 'center', marginRight: '4px' }}>📤 내보내기:</div>
+                      <button onClick={copyMarkdown}
+                        style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', borderRadius: '7px', color: '#e2e8f0', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                        title="노션/워드/메모장에 그대로 붙여넣으면 형식이 살아남습니다">
+                        📋 마크다운 복사
+                      </button>
+                      <button onClick={downloadMarkdown}
+                        style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', borderRadius: '7px', color: '#e2e8f0', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                        title=".md 파일로 다운로드 — 어디서든 열 수 있는 텍스트 형식">
+                        📄 .md 다운로드
+                      </button>
+                      <button onClick={downloadPptx} disabled={exportBusyKind === 'pptx'}
+                        style={{
+                          padding: '7px 12px',
+                          background: exportBusyKind === 'pptx' ? 'rgba(99,102,241,0.20)' : 'linear-gradient(135deg, rgba(99,102,241,0.30), rgba(168,85,247,0.30))',
+                          border: '1px solid rgba(99,102,241,0.45)', borderRadius: '7px',
+                          color: '#fff', fontSize: '12px', fontWeight: 700,
+                          cursor: exportBusyKind === 'pptx' ? 'wait' : 'pointer',
+                        }}
+                        title="실제 PowerPoint 파일(.pptx) 생성 — 슬라이드별 제목·불릿·발표자 노트 포함">
+                        {exportBusyKind === 'pptx' ? '⏳ .pptx 생성 중…' : '📊 .pptx 다운로드'}
+                      </button>
+                      <button onClick={createNotionPlanPage} disabled={exportBusyKind === 'notion'}
+                        style={{
+                          padding: '7px 12px',
+                          background: exportBusyKind === 'notion' ? 'rgba(16,185,129,0.20)' : 'linear-gradient(135deg, #10b981, #14b8a6)',
+                          border: 'none', borderRadius: '7px',
+                          color: '#fff', fontSize: '12px', fontWeight: 700,
+                          cursor: exportBusyKind === 'notion' ? 'wait' : 'pointer',
+                        }}
+                        title="강사미팅 기록 노션 DB에 새 페이지로 push">
+                        {exportBusyKind === 'notion' ? '⏳ 노션 push 중…' : '📋 노션에 페이지 만들기'}
+                      </button>
+                      {notionResultForTask?.url && (
+                        <a href={notionResultForTask.url} target="_blank" rel="noopener noreferrer"
+                          style={{ alignSelf: 'center', fontSize: '11px', color: '#86efac', textDecoration: 'underline', marginLeft: '4px' }}>
+                          ✅ 노션 페이지 열기 →
+                        </a>
+                      )}
+                    </div>
+
                     {Array.isArray(plan.slides) && plan.slides.map((s, i) => {
                       const kindMeta = KIND_LABEL[s.kind] || null
                       return (
