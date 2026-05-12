@@ -620,6 +620,39 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [errorLogsStats, setErrorLogsStats] = useState({}) // { [code]: count 최근 24시간 }
   const [errorLogDetail, setErrorLogDetail] = useState(null) // 클릭 시 상세
 
+  // PPT outline 구조 설정 (사용자가 직접 단계 순서 변경 + ON/OFF).
+  // 11개 kind 중 사용할 것만 + 원하는 순서로 배열. localStorage에 사용자별 저장.
+  // 기본값: outro 제외 9단계 (사용자 요청 — "마지막으로 드리고싶은말~동기부여~마지막부분" 제외)
+  const DEFAULT_PPT_STRUCTURE = ['hook', 'intro', 'proof', 'journey', 'myth', 'info', 'qna', 'testimonial', 'cta']
+  const [pp_pptStructure, setPpPptStructure] = useState(DEFAULT_PPT_STRUCTURE)
+  const [pp_structureModalOpen, setPpStructureModalOpen] = useState(false)
+
+  // 마운트 시 localStorage에서 사용자별 구조 복원 (없으면 default 유지)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !loginId) return
+    try {
+      const raw = localStorage.getItem(`pp_pptStructure:${loginId}`)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setPpPptStructure(parsed)
+        }
+      }
+    } catch (e) {
+      console.warn('[pptStructure] localStorage 복원 실패:', e?.message)
+    }
+  }, [loginId])
+
+  // 구조 변경 시 localStorage 저장
+  const updatePptStructure = (newOrder) => {
+    setPpPptStructure(newOrder)
+    if (typeof window !== 'undefined' && loginId) {
+      try {
+        localStorage.setItem(`pp_pptStructure:${loginId}`, JSON.stringify(newOrder))
+      } catch {}
+    }
+  }
+
   // 생성된 기획안 자동 저장/조회 (사이드바 '🗃️ 생성된 기획안' 탭)
   const [savedPlans, setSavedPlans] = useState([])
   const [savedPlansLoading, setSavedPlansLoading] = useState(false)
@@ -8686,6 +8719,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     topic: pp_topic,
                     additionalContext: fullContext,
                     enabledTasks: tasks,
+                    // 봇별 옵션 — PPT 봇이 사용자 지정 구조 순서를 받음
+                    taskOptions: {
+                      ppt: { structureOrder: pp_pptStructure },
+                    },
                   })
                 })
                 if (!res.ok) {
@@ -10159,10 +10196,18 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             <input type="checkbox" checked={checked} disabled={dis} onChange={() => toggleTask(key)}
                               style={{ marginTop: '2px', width: '16px', height: '16px', accentColor: '#8b5cf6', cursor: dis ? 'not-allowed' : 'pointer' }} />
                             <div style={{ flex: 1 }}>
-                              <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 <span>{meta.icon}</span>
                                 <span>{meta.label}</span>
                                 {dis && <span style={{ fontSize: '10px', padding: '1px 7px', background: 'rgba(255,255,255,0.06)', color: '#94a3b8', borderRadius: '999px', marginLeft: '4px' }}>준비 중</span>}
+                                {/* PPT 봇에만 "구조 설정" 버튼 */}
+                                {key === 'ppt' && checked && !dis && (
+                                  <button type="button"
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPpStructureModalOpen(true) }}
+                                    style={{ marginLeft: 'auto', padding: '3px 10px', background: 'rgba(168,85,247,0.18)', border: '1px solid rgba(168,85,247,0.40)', borderRadius: '7px', color: '#d8b4fe', fontSize: '10.5px', fontWeight: 700, cursor: 'pointer' }}>
+                                    🔧 구조 설정 ({pp_pptStructure.length}단계)
+                                  </button>
+                                )}
                               </div>
                               <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px', lineHeight: 1.45 }}>{meta.desc}</div>
                             </div>
@@ -10312,6 +10357,132 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     )
                   })()}
                 </div>
+
+                {/* ───── PPT 구조 설정 모달 ─────
+                    11개 kind 중 사용할 것만 + 원하는 순서로. 위/아래 화살표로 순서 변경, ON/OFF 토글.
+                    저장 후 localStorage에 사용자별 보존. */}
+                {pp_structureModalOpen && (() => {
+                  const ALL_KINDS = [
+                    { key: 'hook',        icon: '🪝', label: '후크',            desc: '도발적 한 줄·충격적 수치 (5~15장)' },
+                    { key: 'intro',       icon: '🎬', label: '강사 소개',       desc: '환영·자기소개·라포 (5~10장)' },
+                    { key: 'proof',       icon: '💰', label: '성과 증명',       desc: '매출·순익·연소득 스크린샷 (10~20장)' },
+                    { key: 'journey',     icon: '📖', label: '일대기/시행착오', desc: '연도별 타임라인 (20~50장, 핵심 분량)' },
+                    { key: 'myth',        icon: '💥', label: '통념 깨기',       desc: '"다들 ~한다고 알지만…" (10~20장)' },
+                    { key: 'info',        icon: '📊', label: '본론 챕터',       desc: 'CHAPTER 01~07 노하우 (80~150장, 최대 분량)' },
+                    { key: 'empty',       icon: '🎞️', label: '빈/이미지',       desc: '영상·이미지 띄우는 슬라이드 (전체 산재)' },
+                    { key: 'qna',         icon: '❓', label: 'Q&A 시뮬레이션',  desc: '예상 질문 미리 답변 (10~20장)' },
+                    { key: 'testimonial', icon: '💬', label: '수강생 후기',     desc: '★ 3단 구조: 상황 → 코칭 → 결과 (10~20장)' },
+                    { key: 'cta',         icon: '🎯', label: '정규 강의 모집',  desc: '회차·혜택·가격·마감일 (20~40장)' },
+                    { key: 'outro',       icon: '🎤', label: '마무리 (호소)',    desc: '⚠️ 동기부여 멘트 류. 기본은 OFF (사용자 요청)' },
+                  ]
+                  const KIND_MAP = Object.fromEntries(ALL_KINDS.map(k => [k.key, k]))
+                  const orderedItems = pp_pptStructure.map(k => KIND_MAP[k]).filter(Boolean)
+                  const unusedItems = ALL_KINDS.filter(k => !pp_pptStructure.includes(k.key))
+
+                  const moveUp = (idx) => {
+                    if (idx === 0) return
+                    const arr = [...pp_pptStructure]
+                    ;[arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]]
+                    updatePptStructure(arr)
+                  }
+                  const moveDown = (idx) => {
+                    if (idx === pp_pptStructure.length - 1) return
+                    const arr = [...pp_pptStructure]
+                    ;[arr[idx + 1], arr[idx]] = [arr[idx], arr[idx + 1]]
+                    updatePptStructure(arr)
+                  }
+                  const removeItem = (idx) => {
+                    const arr = pp_pptStructure.filter((_, i) => i !== idx)
+                    updatePptStructure(arr)
+                  }
+                  const addItem = (key) => {
+                    if (pp_pptStructure.includes(key)) return
+                    updatePptStructure([...pp_pptStructure, key])
+                  }
+                  const resetToDefault = () => {
+                    if (confirm('기본 9단계 순서로 되돌립니다. 진행할까요?')) {
+                      updatePptStructure(DEFAULT_PPT_STRUCTURE)
+                    }
+                  }
+
+                  return (
+                    <div onClick={(e) => { if (e.target === e.currentTarget) setPpStructureModalOpen(false) }}
+                      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+                      <div style={{ background: '#0f0f15', borderRadius: '14px', padding: '24px', maxWidth: '720px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                          <span style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'linear-gradient(135deg, #a855f7, #ec4899)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span style={{ fontSize: '16px' }}>🔧</span>
+                          </span>
+                          <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', margin: 0 }}>PPT 구조 설정</h3>
+                          <button onClick={() => setPpStructureModalOpen(false)} style={{ marginLeft: 'auto', padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>닫기</button>
+                        </div>
+                        <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.55, marginBottom: '16px' }}>
+                          사용자가 직접 슬라이드 단계 순서를 변경할 수 있습니다. <b style={{ color: '#cbd5e1' }}>위/아래 화살표</b>로 순서 변경, <b style={{ color: '#fca5a5' }}>✕</b>로 제거, 아래 풀에서 추가. 변경은 자동으로 본인 계정에 저장됩니다.
+                        </p>
+
+                        <div style={{ marginBottom: '14px' }}>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '8px', letterSpacing: '0.08em' }}>📑 사용할 단계 ({orderedItems.length})</div>
+                          {orderedItems.length === 0 && (
+                            <div style={{ padding: '14px', textAlign: 'center', color: '#64748b', fontSize: '12px', background: 'rgba(0,0,0,0.30)', borderRadius: '9px', border: '1px dashed var(--border)' }}>
+                              빈 구조. 아래 풀에서 추가하세요.
+                            </div>
+                          )}
+                          {orderedItems.map((item, idx) => (
+                            <div key={item.key} style={{
+                              display: 'flex', alignItems: 'center', gap: '8px',
+                              padding: '10px 12px',
+                              marginBottom: '5px',
+                              background: 'rgba(99,102,241,0.08)',
+                              border: '1px solid rgba(99,102,241,0.25)',
+                              borderRadius: '9px',
+                            }}>
+                              <span style={{ fontSize: '11px', color: '#94a3b8', minWidth: '20px', fontWeight: 700 }}>{idx + 1}.</span>
+                              <span style={{ fontSize: '17px' }}>{item.icon}</span>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>{item.label}</div>
+                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '1px' }}>{item.desc}</div>
+                              </div>
+                              <button onClick={() => moveUp(idx)} disabled={idx === 0}
+                                style={{ padding: '5px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '6px', color: idx === 0 ? '#475569' : '#cbd5e1', fontSize: '12px', cursor: idx === 0 ? 'not-allowed' : 'pointer' }}>↑</button>
+                              <button onClick={() => moveDown(idx)} disabled={idx === orderedItems.length - 1}
+                                style={{ padding: '5px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '6px', color: idx === orderedItems.length - 1 ? '#475569' : '#cbd5e1', fontSize: '12px', cursor: idx === orderedItems.length - 1 ? 'not-allowed' : 'pointer' }}>↓</button>
+                              <button onClick={() => removeItem(idx)}
+                                style={{ padding: '5px 9px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '6px', color: '#f87171', fontSize: '12px', cursor: 'pointer' }}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+
+                        {unusedItems.length > 0 && (
+                          <div style={{ marginBottom: '14px' }}>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '8px', letterSpacing: '0.08em' }}>➕ 추가 가능한 단계 (풀)</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                              {unusedItems.map(item => (
+                                <button key={item.key} onClick={() => addItem(item.key)}
+                                  title={item.desc}
+                                  style={{ padding: '6px 11px', background: 'rgba(255,255,255,0.03)', border: '1px dashed var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '12px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                  <span>{item.icon}</span>
+                                  <span>{item.label}</span>
+                                  <span style={{ color: '#86efac', fontWeight: 700 }}>+</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
+                          <button onClick={resetToDefault}
+                            style={{ padding: '8px 14px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '8px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>
+                            🔄 기본값으로
+                          </button>
+                          <button onClick={() => setPpStructureModalOpen(false)}
+                            style={{ padding: '9px 18px', background: 'var(--accent-grad)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                            ✅ 적용
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
 
                 {/* ───── 사전 점검 모달 ───── */}
                 {pp_modalOpen && pp_precheckResult && (

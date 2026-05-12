@@ -54,6 +54,9 @@ export async function POST(request) {
     topic,
     additionalContext,
     enabledTasks = [],
+    // 봇별 옵션 — { ppt: { structureOrder: ['hook', 'intro', ...] } } 식.
+    // PPT 봇이 사용자 지정 순서로 슬라이드 구조를 만들도록.
+    taskOptions = {},
   } = body
 
   if (!instructor || typeof instructor !== 'string') {
@@ -197,6 +200,10 @@ export async function POST(request) {
                   throw new Error(ebookFailureReason || '전자책 원문이 필요합니다.')
                 }
                 taskContext.ebookContents = ebookContents
+              }
+              // 봇별 옵션 주입 (예: ppt의 structureOrder)
+              if (taskOptions && typeof taskOptions === 'object' && taskOptions[taskKey]) {
+                Object.assign(taskContext, taskOptions[taskKey])
               }
               const { plan, usage, model } = await planners[taskKey](taskContext)
               send('task_done', {
