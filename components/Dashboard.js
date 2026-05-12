@@ -743,6 +743,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const DEFAULT_PPT_STRUCTURE = ['hook', 'intro', 'proof', 'journey', 'myth', 'info', 'qna', 'testimonial', 'cta']
   const [pp_pptStructure, setPpPptStructure] = useState(DEFAULT_PPT_STRUCTURE)
   const [pp_structureModalOpen, setPpStructureModalOpen] = useState(false)
+  // 드래그앤드롭 상태 (구조 설정 모달용)
+  const [pp_dragIndex, setPpDragIndex] = useState(null)        // 잡은 카드 idx
+  const [pp_dragOverIndex, setPpDragOverIndex] = useState(null) // hover 중인 drop target idx
 
   // 마운트 시 localStorage에서 사용자별 구조 복원 (없으면 default 유지)
   useEffect(() => {
@@ -3023,6 +3026,83 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
             <span style={{ fontSize: '11px', color: '#64748b', flexShrink: 0 }}>클릭하여 확인</span>
           </div>
         )}
+
+        {/* 🪄 프로젝트 기획 진행 중 — 하단 고정 진행 바 (다른 탭으로 이동해도 표시).
+            클릭 시 project-planner 탭으로 복귀해서 이어볼 수 있게.
+            void pp_tick: useEffect interval로 elapsed가 매 250ms 갱신되게 */}
+        {(pp_loading || !!pp_taskRetrying) && currentTab !== 'project-planner' && (() => {
+          void pp_tick
+          const totalTasks = pp_runTasks.length
+          const completedCount = pp_runTasks.filter(t => {
+            const s = pp_taskStatus[t]?.status
+            return s === 'done' || s === 'error'
+          }).length
+          const elapsed = pp_startedAt ? Math.round((Date.now() - pp_startedAt) / 1000) : 0
+          // 단계별 의미를 살린 progress %
+          let progressPercent = 0
+          if (pp_phase === 'starting') progressPercent = 3
+          else if (pp_phase === 'ebook_extracting') progressPercent = 8
+          else if (pp_phase === 'planning' || pp_phase === 'done') {
+            const ratio = totalTasks > 0 ? completedCount / totalTasks : 0
+            progressPercent = Math.round(10 + ratio * 90)
+          }
+          if (pp_phase === 'done') progressPercent = 100
+          const phaseLabel =
+            pp_phase === 'ebook_extracting' ? '전자책 추출 중' :
+            pp_phase === 'planning' ? '기획 생성 중' :
+            pp_phase === 'done' ? '마무리 중' : '준비 중'
+          return (
+            <div
+              onClick={() => setCurrentTab('project-planner')}
+              style={{
+                position: 'fixed',
+                left: 0, right: 0, bottom: 0,
+                zIndex: 99,
+                background: 'rgba(168,85,247,0.18)',
+                backdropFilter: 'blur(14px)',
+                WebkitBackdropFilter: 'blur(14px)',
+                borderTop: '1px solid rgba(168,85,247,0.40)',
+                padding: '12px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                cursor: 'pointer',
+                boxShadow: '0 -4px 20px rgba(0,0,0,0.40)',
+              }}
+              title="클릭하여 프로젝트 기획 탭으로 돌아가기">
+              <span style={{
+                width: '8px', height: '8px', borderRadius: '50%',
+                background: '#d8b4fe',
+                animation: 'laPulse 1.5s ease-in-out infinite',
+                flexShrink: 0,
+              }} />
+              <span style={{ fontSize: '13px', color: '#e9d5ff', fontWeight: 700, flexShrink: 0 }}>
+                🪄 기획 생성 중
+              </span>
+              <span style={{ fontSize: '11.5px', color: '#c4b5fd', fontWeight: 500, flexShrink: 0 }}>
+                · {phaseLabel} ({completedCount}/{totalTasks})
+              </span>
+              <div style={{ flex: 1, height: '5px', background: 'rgba(255,255,255,0.10)', borderRadius: '3px', overflow: 'hidden', minWidth: '80px' }}>
+                <div style={{
+                  width: `${progressPercent}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #a855f7, #ec4899)',
+                  borderRadius: '3px',
+                  transition: 'width 0.4s ease',
+                }} />
+              </div>
+              <span style={{ fontSize: '12px', color: '#c4b5fd', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                {progressPercent}%
+              </span>
+              <span style={{ fontSize: '11px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                {elapsed}s
+              </span>
+              <span style={{ fontSize: '11px', color: '#86efac', fontWeight: 600, flexShrink: 0 }}>
+                ← 클릭해서 돌아가기
+              </span>
+            </div>
+          )
+        })()}
 
         {/* 모바일 헤더 */}
         {isMobile && (
@@ -10432,16 +10512,16 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     저장 후 localStorage에 사용자별 보존. */}
                 {pp_structureModalOpen && (() => {
                   const ALL_KINDS = [
-                    { key: 'hook',        icon: '🪝', label: '후크',            desc: '도발적 한 줄·충격적 수치 (5~15장)' },
-                    { key: 'intro',       icon: '🎬', label: '강사 소개',       desc: '환영·자기소개·라포 (5~10장)' },
-                    { key: 'proof',       icon: '💰', label: '성과 증명',       desc: '매출·순익·연소득 스크린샷 (10~20장)' },
-                    { key: 'journey',     icon: '📖', label: '일대기/시행착오', desc: '연도별 타임라인 (20~50장, 핵심 분량)' },
-                    { key: 'myth',        icon: '💥', label: '통념 깨기',       desc: '"다들 ~한다고 알지만…" (10~20장)' },
-                    { key: 'info',        icon: '📊', label: '본론 챕터',       desc: 'CHAPTER 01~07 노하우 (80~150장, 최대 분량)' },
+                    { key: 'hook',        icon: '🪝', label: '후크',            desc: '도발적 한 줄·충격적 수치 (3~8장)' },
+                    { key: 'intro',       icon: '🎬', label: '강사 소개',       desc: '환영·자기소개·라포 (3~5장)' },
+                    { key: 'proof',       icon: '💰', label: '성과 증명',       desc: '매출·순익·연소득 스크린샷 (5~10장)' },
+                    { key: 'journey',     icon: '📖', label: '일대기/시행착오', desc: '연도별 타임라인 (10~25장, 핵심 분량)' },
+                    { key: 'myth',        icon: '💥', label: '통념 깨기',       desc: '"다들 ~한다고 알지만…" (5~10장)' },
+                    { key: 'info',        icon: '📊', label: '본론 챕터',       desc: 'CHAPTER 01~05 노하우 (40~75장, 최대 분량)' },
                     { key: 'empty',       icon: '🎞️', label: '빈/이미지',       desc: '영상·이미지 띄우는 슬라이드 (전체 산재)' },
-                    { key: 'qna',         icon: '❓', label: 'Q&A 시뮬레이션',  desc: '예상 질문 미리 답변 (10~20장)' },
-                    { key: 'testimonial', icon: '💬', label: '수강생 후기',     desc: '★ 3단 구조: 상황 → 코칭 → 결과 (10~20장)' },
-                    { key: 'cta',         icon: '🎯', label: '정규 강의 모집',  desc: '회차·혜택·가격·마감일 (20~40장)' },
+                    { key: 'qna',         icon: '❓', label: 'Q&A 시뮬레이션',  desc: '예상 질문 미리 답변 (5~10장)' },
+                    { key: 'testimonial', icon: '💬', label: '수강생 후기',     desc: '★ 3단 구조: 상황 → 코칭 → 결과 (5~10장)' },
+                    { key: 'cta',         icon: '🎯', label: '정규 강의 모집',  desc: '회차·혜택·가격·마감일 (10~20장)' },
                     { key: 'outro',       icon: '🎤', label: '마무리 (호소)',    desc: '⚠️ 동기부여 멘트 류. 기본은 OFF (사용자 요청)' },
                   ]
                   const KIND_MAP = Object.fromEntries(ALL_KINDS.map(k => [k.key, k]))
@@ -10474,6 +10554,38 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     }
                   }
 
+                  // 드래그앤드롭 — 카드 왼쪽 그립을 잡아 드래그하면 순서 변경.
+                  // HTML5 native API 사용 (라이브러리 X). pp_dragIndex로 현재 잡은 인덱스 추적.
+                  const handleDragStart = (e, idx) => {
+                    setPpDragIndex(idx)
+                    e.dataTransfer.effectAllowed = 'move'
+                    // Firefox 호환: 빈 데이터라도 setData 필요
+                    try { e.dataTransfer.setData('text/plain', String(idx)) } catch {}
+                  }
+                  const handleDragOver = (e, idx) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    if (pp_dragOverIndex !== idx) setPpDragOverIndex(idx)
+                  }
+                  const handleDragLeave = () => {
+                    // 카드 사이 이동 시 깜빡임 방지를 위해 즉시 클리어 X (drop 또는 dragend에서 처리)
+                  }
+                  const handleDrop = (e, idx) => {
+                    e.preventDefault()
+                    const from = pp_dragIndex
+                    setPpDragIndex(null)
+                    setPpDragOverIndex(null)
+                    if (from == null || from === idx) return
+                    const arr = [...pp_pptStructure]
+                    const [moved] = arr.splice(from, 1)
+                    arr.splice(idx, 0, moved)
+                    updatePptStructure(arr)
+                  }
+                  const handleDragEnd = () => {
+                    setPpDragIndex(null)
+                    setPpDragOverIndex(null)
+                  }
+
                   return (
                     <div onClick={(e) => { if (e.target === e.currentTarget) setPpStructureModalOpen(false) }}
                       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
@@ -10486,7 +10598,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           <button onClick={() => setPpStructureModalOpen(false)} style={{ marginLeft: 'auto', padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '7px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>닫기</button>
                         </div>
                         <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.55, marginBottom: '16px' }}>
-                          사용자가 직접 슬라이드 단계 순서를 변경할 수 있습니다. <b style={{ color: '#cbd5e1' }}>위/아래 화살표</b>로 순서 변경, <b style={{ color: '#fca5a5' }}>✕</b>로 제거, 아래 풀에서 추가. 변경은 자동으로 본인 계정에 저장됩니다.
+                          사용자가 직접 슬라이드 단계 순서를 변경할 수 있습니다. <b style={{ color: '#cbd5e1' }}>왼쪽 ⋮⋮ 잡고 드래그</b>하거나 <b style={{ color: '#cbd5e1' }}>↑↓ 버튼</b>으로 순서 변경, <b style={{ color: '#fca5a5' }}>✕</b>로 제거, 아래 풀에서 추가. 변경은 자동으로 본인 계정에 저장됩니다.
                         </p>
 
                         <div style={{ marginBottom: '14px' }}>
@@ -10496,29 +10608,51 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               빈 구조. 아래 풀에서 추가하세요.
                             </div>
                           )}
-                          {orderedItems.map((item, idx) => (
-                            <div key={item.key} style={{
-                              display: 'flex', alignItems: 'center', gap: '8px',
-                              padding: '10px 12px',
-                              marginBottom: '5px',
-                              background: 'rgba(99,102,241,0.08)',
-                              border: '1px solid rgba(99,102,241,0.25)',
-                              borderRadius: '9px',
-                            }}>
-                              <span style={{ fontSize: '11px', color: '#94a3b8', minWidth: '20px', fontWeight: 700 }}>{idx + 1}.</span>
-                              <span style={{ fontSize: '17px' }}>{item.icon}</span>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>{item.label}</div>
-                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '1px' }}>{item.desc}</div>
+                          {orderedItems.map((item, idx) => {
+                            const isDragging = pp_dragIndex === idx
+                            const isDropTarget = pp_dragOverIndex === idx && pp_dragIndex !== null && pp_dragIndex !== idx
+                            return (
+                              <div key={item.key}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, idx)}
+                                onDragOver={(e) => handleDragOver(e, idx)}
+                                onDragLeave={handleDragLeave}
+                                onDrop={(e) => handleDrop(e, idx)}
+                                onDragEnd={handleDragEnd}
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: '8px',
+                                  padding: '10px 12px',
+                                  marginBottom: '5px',
+                                  background: isDropTarget ? 'rgba(99,102,241,0.22)' : 'rgba(99,102,241,0.08)',
+                                  border: '1px solid ' + (isDropTarget ? 'rgba(129,140,248,0.65)' : 'rgba(99,102,241,0.25)'),
+                                  borderRadius: '9px',
+                                  opacity: isDragging ? 0.4 : 1,
+                                  transition: 'background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease',
+                                  cursor: 'grab',
+                                }}>
+                                {/* 드래그 핸들 (≡) — 시각적으로 "여기 잡을 수 있음" 표시. 실제로는 카드 전체가 draggable */}
+                                <span title="드래그해서 순서 변경" style={{
+                                  fontSize: '18px', color: '#64748b',
+                                  lineHeight: 1,
+                                  userSelect: 'none',
+                                  padding: '2px 4px',
+                                  cursor: 'grab',
+                                }}>⋮⋮</span>
+                                <span style={{ fontSize: '11px', color: '#94a3b8', minWidth: '20px', fontWeight: 700 }}>{idx + 1}.</span>
+                                <span style={{ fontSize: '17px' }}>{item.icon}</span>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>{item.label}</div>
+                                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '1px' }}>{item.desc}</div>
+                                </div>
+                                <button onClick={() => moveUp(idx)} disabled={idx === 0}
+                                  style={{ padding: '5px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '6px', color: idx === 0 ? '#475569' : '#cbd5e1', fontSize: '12px', cursor: idx === 0 ? 'not-allowed' : 'pointer' }}>↑</button>
+                                <button onClick={() => moveDown(idx)} disabled={idx === orderedItems.length - 1}
+                                  style={{ padding: '5px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '6px', color: idx === orderedItems.length - 1 ? '#475569' : '#cbd5e1', fontSize: '12px', cursor: idx === orderedItems.length - 1 ? 'not-allowed' : 'pointer' }}>↓</button>
+                                <button onClick={() => removeItem(idx)}
+                                  style={{ padding: '5px 9px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '6px', color: '#f87171', fontSize: '12px', cursor: 'pointer' }}>✕</button>
                               </div>
-                              <button onClick={() => moveUp(idx)} disabled={idx === 0}
-                                style={{ padding: '5px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '6px', color: idx === 0 ? '#475569' : '#cbd5e1', fontSize: '12px', cursor: idx === 0 ? 'not-allowed' : 'pointer' }}>↑</button>
-                              <button onClick={() => moveDown(idx)} disabled={idx === orderedItems.length - 1}
-                                style={{ padding: '5px 9px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '6px', color: idx === orderedItems.length - 1 ? '#475569' : '#cbd5e1', fontSize: '12px', cursor: idx === orderedItems.length - 1 ? 'not-allowed' : 'pointer' }}>↓</button>
-                              <button onClick={() => removeItem(idx)}
-                                style={{ padding: '5px 9px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '6px', color: '#f87171', fontSize: '12px', cursor: 'pointer' }}>✕</button>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
 
                         {unusedItems.length > 0 && (
