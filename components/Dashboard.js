@@ -10961,13 +10961,120 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
             }
 
-            // 파일(PDF/이미지/텍스트)을 Gemini로 텍스트 추출 → 새 레퍼런스 폼 자동 채움.
+            // PPTX는 ZIP+XML 구조 → 브라우저에서 JSZip으로 풀어서 텍스트만 추출.
+            // 서버 업로드 X (200~800MB 파일도 OK). 모든 텍스트박스/도형/SmartArt의 <a:t> 노드를
+            // 슬라이드 순서대로 추출. 발표자 노트도 포함. 개요 보기에 안 잡히는 디자인 텍스트박스도
+            // 다 잡힘.
+            //
+            // 한도: PER_FILE_CHAR_LIMIT(8만자)에서 절단 — 슬라이드 200~300장이면 보통 5~10만자 수준.
+            const extractPptxClientSide = async (file) => {
+              const PER_FILE_CHAR_LIMIT = 80000
+              const { default: JSZip } = await import('jszip')
+
+              setPcMessage(`⏳ "${file.name}" 압축 해제 중… (${(file.size / 1024 / 1024).toFixed(1)}MB)`)
+              const zip = await JSZip.loadAsync(file)
+
+              // 슬라이드 / 발표자 노트 파일 목록 수집
+              const slideEntries = []   // { idx, entry }
+              const noteEntries = {}    // idx -> entry
+              zip.forEach((path, entry) => {
+                let m
+                if ((m = path.match(/^ppt\/slides\/slide(\d+)\.xml$/))) {
+                  slideEntries.push({ idx: Number(m[1]), entry })
+                } else if ((m = path.match(/^ppt\/notesSlides\/notesSlide(\d+)\.xml$/))) {
+                  noteEntries[Number(m[1])] = entry
+                }
+              })
+              if (slideEntries.length === 0) {
+                throw new Error('PPTX 안에 슬라이드(ppt/slides/slideN.xml)를 찾을 수 없습니다. 손상된 파일이거나 .pptx 형식이 아닙니다.')
+              }
+              slideEntries.sort((a, b) => a.idx - b.idx)
+
+              const parser = new DOMParser()
+              const DRAWING_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+
+              // XML 한 덩어리에서 단락별 텍스트 추출. <a:p> 단위로 묶어서 텍스트박스 단락 구조 보존.
+              const extractTextFromXml = (xmlString) => {
+                const doc = parser.parseFromString(xmlString, 'application/xml')
+                const paragraphs = doc.getElementsByTagNameNS(DRAWING_NS, 'p')
+                const lines = []
+                for (let i = 0; i < paragraphs.length; i++) {
+                  const tNodes = paragraphs[i].getElementsByTagNameNS(DRAWING_NS, 't')
+                  let line = ''
+                  for (let j = 0; j < tNodes.length; j++) {
+                    line += tNodes[j].textContent || ''
+                  }
+                  line = line.trim()
+                  if (line) lines.push(line)
+                }
+                return lines
+              }
+
+              const outLines = []
+              let total = slideEntries.length
+              for (let i = 0; i < slideEntries.length; i++) {
+                const { idx, entry } = slideEntries[i]
+                // 10장마다 진행 상황 업데이트 (300장 추출 시 30회 정도)
+                if (i % 10 === 0) {
+                  setPcMessage(`⏳ 슬라이드 추출 중… ${i + 1}/${total}`)
+                  // 메인 스레드 양보 (UI 멈춤 방지)
+                  await new Promise(r => setTimeout(r, 0))
+                }
+                const xml = await entry.async('string')
+                const lines = extractTextFromXml(xml)
+
+                let noteText = ''
+                if (noteEntries[idx]) {
+                  const noteXml = await noteEntries[idx].async('string')
+                  noteText = extractTextFromXml(noteXml).join(' ').trim()
+                }
+
+                if (lines.length === 0 && !noteText) continue  // 빈 슬라이드 스킵
+                outLines.push(`## 슬라이드 ${idx}`)
+                if (lines.length) outLines.push(lines.join('\n'))
+                if (noteText) outLines.push(`[발표자 노트] ${noteText}`)
+                outLines.push('')
+              }
+
+              let text = outLines.join('\n').trim()
+              const originalLen = text.length
+              let truncated = false
+              if (text.length > PER_FILE_CHAR_LIMIT) {
+                text = text.slice(0, PER_FILE_CHAR_LIMIT)
+                truncated = true
+              }
+              return { text, charCount: text.length, originalLen, truncated, slideCount: slideEntries.length }
+            }
+
+            // 파일(PDF/이미지/텍스트/PPTX)을 텍스트로 추출 → 새 레퍼런스 폼 자동 채움.
+            // - PPTX: 브라우저에서 직접 처리(서버 업로드 X). 큰 파일 OK.
+            // - 나머지: 서버 라우트(Gemini OCR/PDF)로 위임.
             // 제목은 이미 입력되어 있으면 보존, 비어있으면 파일명에서 확장자 떼고 채움.
             const extractFromFile = async (file) => {
               if (!file) return
               setPcExtracting(true)
               setPcMessage('')
               try {
+                const lowerName = (file.name || '').toLowerCase()
+                const isPptx = lowerName.endsWith('.pptx') ||
+                               file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+                const isLegacyPpt = lowerName.endsWith('.ppt') && !isPptx
+                if (isLegacyPpt) {
+                  throw new Error('구버전 .ppt는 미지원. PowerPoint에서 "다른 이름으로 저장 → .pptx"로 변환해주세요.')
+                }
+
+                if (isPptx) {
+                  // 클라이언트 측 추출 — 200~800MB도 OK
+                  const result = await extractPptxClientSide(file)
+                  setPcNewRef(prev => ({
+                    title: prev.title || (file.name || '').replace(/\.[^.]+$/, ''),
+                    content: result.text || '',
+                  }))
+                  setPcMessage(`✅ "${file.name}" 슬라이드 ${result.slideCount}장에서 ${result.charCount.toLocaleString()}자 추출${result.truncated ? ` (원본 ${result.originalLen.toLocaleString()}자에서 8만자로 절단)` : ''}. 검토 후 추가 버튼을 눌러주세요.`)
+                  return
+                }
+
+                // PDF / 이미지 / 텍스트 → 서버(Gemini) 경로
                 const fd = new FormData()
                 fd.append('file', file)
                 // ⚠️ FormData 사용 시 Content-Type을 명시하면 boundary 자동 설정이 깨짐 →
@@ -11240,7 +11347,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 lineHeight: 1.5,
                               }}>
                               <input type="file"
-                                accept=".pdf,.txt,.md,.json,.xml,image/*,application/pdf"
+                                accept=".pdf,.txt,.md,.json,.xml,.pptx,image/*,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
                                 disabled={pc_extracting}
                                 onChange={(e) => {
                                   const f = e.target.files?.[0]
@@ -11249,11 +11356,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 }}
                                 style={{ display: 'none' }} />
                               {pc_extracting ? (
-                                <span>⏳ Gemini로 텍스트 추출 중… (PDF는 30~60초 걸릴 수 있음)</span>
+                                <span>{pc_message && pc_message.startsWith('⏳') ? pc_message : '⏳ 텍스트 추출 중…'}</span>
                               ) : (
                                 <span>
-                                  📎 <b>파일 업로드</b> (PDF · 이미지 · 텍스트) — 클릭하거나 여기로 드래그<br/>
-                                  <span style={{ fontSize: '11px', color: '#64748b' }}>Gemini가 OCR/텍스트 추출 후 본문에 자동 입력됩니다.</span>
+                                  📎 <b>파일 업로드</b> (PDF · 이미지 · 텍스트 · PPTX) — 클릭하거나 여기로 드래그<br/>
+                                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                                    PDF/이미지는 Gemini OCR, <b>PPTX는 브라우저에서 직접 처리</b>(파일 크기 무관·외부 업로드 없음).<br/>
+                                    슬라이드 200~300장도 OK. 모든 텍스트박스·도형·SmartArt 추출 + 발표자 노트.
+                                  </span>
                                 </span>
                               )}
                             </label>
