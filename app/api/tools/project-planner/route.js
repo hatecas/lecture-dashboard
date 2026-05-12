@@ -2,9 +2,12 @@ import { createClient } from '@supabase/supabase-js'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { planners, PLANNER_META } from '@/lib/planners'
 import { extractEbookContents } from '@/lib/planners/_text'
+import { logError, classifyAnthropicError } from '@/lib/errorLog'
 
 export const runtime = 'nodejs'
-export const maxDuration = 120
+// 267장 PPT outline 같은 큰 출력은 Anthropic 호출만 5분+ 걸림.
+// Vercel Pro 한도(800초) 최대치 사용. Hobby plan은 300초가 한계라 그쪽이면 자동으로 잘림.
+export const maxDuration = 800
 
 const supabaseSelf = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -51,6 +54,9 @@ export async function POST(request) {
     topic,
     additionalContext,
     enabledTasks = [],
+    // 봇별 옵션 — { ppt: { structureOrder: ['hook', 'intro', ...] } } 식.
+    // PPT 봇이 사용자 지정 순서로 슬라이드 구조를 만들도록.
+    taskOptions = {},
   } = body
 
   if (!instructor || typeof instructor !== 'string') {
@@ -130,6 +136,18 @@ export async function POST(request) {
         }
       }
 
+      // SSE heartbeat — task_start 이후 task_done까지 5분+ 걸리는 PPT 봇 같은 경우
+      // 미들웨어/브라우저가 idle로 판단해 connection을 끊을 위험이 있음.
+      // SSE comment(`:`로 시작) 라인은 클라이언트가 무시하므로 안전한 keep-alive.
+      const heartbeatTimer = setInterval(() => {
+        if (closed) return
+        try {
+          controller.enqueue(encoder.encode(`: heartbeat ${Date.now()}\n\n`))
+        } catch {
+          // 닫힌 경우 무시. finally에서 clearInterval 됨.
+        }
+      }, 25000)
+
       try {
         send('start', { tasks: validTasks, skipped, hasSummary: !!summaryMd })
 
@@ -183,6 +201,10 @@ export async function POST(request) {
                 }
                 taskContext.ebookContents = ebookContents
               }
+              // 봇별 옵션 주입 (예: ppt의 structureOrder)
+              if (taskOptions && typeof taskOptions === 'object' && taskOptions[taskKey]) {
+                Object.assign(taskContext, taskOptions[taskKey])
+              }
               const { plan, usage, model } = await planners[taskKey](taskContext)
               send('task_done', {
                 task: taskKey,
@@ -195,11 +217,29 @@ export async function POST(request) {
                 },
               })
             } catch (err) {
+              // 에러 로그 DB에 저장 (분류 자동). 사용자에겐 친절한 메시지로 변환.
+              const errorCode = classifyAnthropicError(err)
+              const logged = await logError({
+                request,
+                error: err,
+                route: '/api/tools/project-planner',
+                method: 'POST',
+                username: auth.user?.username,
+                errorCode,
+                context: {
+                  taskKey,
+                  instructor: context.instructor,
+                  sessionName: context.sessionName,
+                  topic: (context.topic || '').slice(0, 200),
+                  model: PLANNER_META[taskKey]?.label,
+                },
+              })
               send('task_done', {
                 task: taskKey,
                 result: {
                   ok: false,
-                  error: err?.message || String(err),
+                  error: logged.userMessage,    // 사용자 친화 메시지
+                  errorId: logged.id,            // 추적용 ID (개발자 문의 시)
                   durationMs: Date.now() - start,
                 },
               })
@@ -218,10 +258,20 @@ export async function POST(request) {
           } : null,
         })
       } catch (e) {
-        console.error('project-planner stream error:', e)
-        send('fatal', { message: e?.message || String(e) })
+        // 스트림 자체 fatal — DB에 기록 + 사용자에겐 친절한 메시지.
+        const logged = await logError({
+          request,
+          error: e,
+          route: '/api/tools/project-planner',
+          method: 'POST',
+          username: auth.user?.username,
+          errorCode: 'INTERNAL',
+          context: { phase: 'stream', validTasks, instructor: context.instructor },
+        })
+        send('fatal', { message: logged.userMessage, errorId: logged.id })
       } finally {
         closed = true
+        clearInterval(heartbeatTimer)
         try { controller.close() } catch {}
       }
     },
