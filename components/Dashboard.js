@@ -1284,6 +1284,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // 사용자가 입력 멈춘 후 1.5초 뒤 자동 저장 (디바운스).
   // 수동 💾 저장 버튼은 여전히 즉시 저장용으로 유지.
   // 예전에는 저장 버튼을 안 누르고 페이지 나가면 입력값이 날아가는 사고가 있어서 자동 저장 도입.
+  // 실패 시 (예: RLS 차단·네트워크 끊김) UI에 명확히 표시해서 사용자가 "저장됐다"고 착각하지 않게.
   useEffect(() => {
     if (!pp_inputsDirty) return
     if (!selectedSessionId) return
@@ -1304,11 +1305,21 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         if (res.ok && data.success) {
           setPpInputsSavedAt(new Date(data.inputs?.updated_at || Date.now()))
           setPpInputsDirty(false)
+          setPpError('')
         } else {
-          console.warn('[planner-inputs] 자동 저장 실패:', data.error || res.status)
+          const msg = data.error || `HTTP ${res.status}`
+          console.warn('[planner-inputs] 자동 저장 실패:', msg)
+          // RLS 정책 위반 같은 DB 에러는 사용자에게 명확히 알림.
+          // 사용자는 데이터가 저장됐다고 오해하지 않게 dirty 플래그 유지.
+          if (msg.includes('row-level security') || msg.includes('42501')) {
+            setPpError('자동 저장 실패: DB의 session_planner_inputs 테이블 RLS 정책이 막고 있습니다. Supabase SQL Editor에서 `ALTER TABLE session_planner_inputs DISABLE ROW LEVEL SECURITY;` 한 줄 실행해주세요. (또는 supabase/fix_session_planner_inputs_rls.sql)')
+          } else {
+            setPpError(`자동 저장 실패: ${msg}`)
+          }
         }
       } catch (e) {
         console.warn('[planner-inputs] 자동 저장 네트워크 오류:', e?.message)
+        setPpError(`자동 저장 네트워크 오류: ${e?.message}`)
       } finally {
         setPpInputsSaving(false)
       }
