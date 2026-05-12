@@ -4,7 +4,9 @@ import { planners, PLANNER_META } from '@/lib/planners'
 import { extractEbookContents } from '@/lib/planners/_text'
 
 export const runtime = 'nodejs'
-export const maxDuration = 120
+// 267장 PPT outline 같은 큰 출력은 Anthropic 호출만 5분+ 걸림.
+// Vercel Pro 한도(800초) 최대치 사용. Hobby plan은 300초가 한계라 그쪽이면 자동으로 잘림.
+export const maxDuration = 800
 
 const supabaseSelf = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -130,6 +132,18 @@ export async function POST(request) {
         }
       }
 
+      // SSE heartbeat — task_start 이후 task_done까지 5분+ 걸리는 PPT 봇 같은 경우
+      // 미들웨어/브라우저가 idle로 판단해 connection을 끊을 위험이 있음.
+      // SSE comment(`:`로 시작) 라인은 클라이언트가 무시하므로 안전한 keep-alive.
+      const heartbeatTimer = setInterval(() => {
+        if (closed) return
+        try {
+          controller.enqueue(encoder.encode(`: heartbeat ${Date.now()}\n\n`))
+        } catch {
+          // 닫힌 경우 무시. finally에서 clearInterval 됨.
+        }
+      }, 25000)
+
       try {
         send('start', { tasks: validTasks, skipped, hasSummary: !!summaryMd })
 
@@ -222,6 +236,7 @@ export async function POST(request) {
         send('fatal', { message: e?.message || String(e) })
       } finally {
         closed = true
+        clearInterval(heartbeatTimer)
         try { controller.close() } catch {}
       }
     },
