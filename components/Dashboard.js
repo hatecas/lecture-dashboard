@@ -1281,6 +1281,41 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     // 처음 로드 시점에는 dirty=false (초기 로드 useEffect에서 false로 명시 세팅)
   }, [pp_topic, pp_additionalContext]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 사용자가 입력 멈춘 후 1.5초 뒤 자동 저장 (디바운스).
+  // 수동 💾 저장 버튼은 여전히 즉시 저장용으로 유지.
+  // 예전에는 저장 버튼을 안 누르고 페이지 나가면 입력값이 날아가는 사고가 있어서 자동 저장 도입.
+  useEffect(() => {
+    if (!pp_inputsDirty) return
+    if (!selectedSessionId) return
+    if (currentTab !== 'project-planner') return
+    const timeoutId = setTimeout(async () => {
+      try {
+        setPpInputsSaving(true)
+        const res = await fetch('/api/tools/project-planner/inputs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({
+            sessionId: selectedSessionId,
+            topic: pp_topic,
+            additionalContext: pp_additionalContext,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.ok && data.success) {
+          setPpInputsSavedAt(new Date(data.inputs?.updated_at || Date.now()))
+          setPpInputsDirty(false)
+        } else {
+          console.warn('[planner-inputs] 자동 저장 실패:', data.error || res.status)
+        }
+      } catch (e) {
+        console.warn('[planner-inputs] 자동 저장 네트워크 오류:', e?.message)
+      } finally {
+        setPpInputsSaving(false)
+      }
+    }, 1500)
+    return () => clearTimeout(timeoutId)
+  }, [pp_inputsDirty, pp_topic, pp_additionalContext, selectedSessionId, currentTab]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // 강사·기수 변경 시 정리봇 정리본 자동 로드 (있으면 표시, 없으면 null)
   useEffect(() => {
     if (!selectedSessionId || currentTab !== 'project-planner') {
@@ -8778,29 +8813,69 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
 
               if (taskKey === 'ppt') {
+                // 슬라이드 종류별 색상 뱃지 — 정보·아이스브레이킹·썰·전환·CTA 등을 한눈에.
+                const KIND_LABEL = {
+                  intro: { label: '🎬 인트로', bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
+                  icebreaker: { label: '👋 아이스브레이킹', bg: 'rgba(251,191,36,0.18)', color: '#fbbf24' },
+                  story: { label: '📖 강사 썰', bg: 'rgba(217,70,239,0.18)', color: '#f0abfc' },
+                  info: { label: '📊 정보', bg: 'rgba(99,102,241,0.18)', color: '#a5b4fc' },
+                  transition: { label: '↪️ 전환', bg: 'rgba(148,163,184,0.10)', color: '#94a3b8' },
+                  warmup: { label: '🔥 워밍업', bg: 'rgba(249,115,22,0.18)', color: '#fdba74' },
+                  empathy: { label: '🤝 공감대', bg: 'rgba(244,114,182,0.18)', color: '#f9a8d4' },
+                  cta: { label: '🎯 모집', bg: 'rgba(239,68,68,0.18)', color: '#fca5a5' },
+                  outro: { label: '🎤 마무리', bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
+                }
+                // 종류별 카운트 (총합 옆에 분포 표시)
+                const kindCounts = {}
+                if (Array.isArray(plan.slides)) {
+                  for (const s of plan.slides) {
+                    const k = s.kind || 'info'
+                    kindCounts[k] = (kindCounts[k] || 0) + 1
+                  }
+                }
+                const distroEntries = Object.entries(kindCounts).filter(([k]) => KIND_LABEL[k])
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <div style={_boxAccent}>
                       <div style={_accent}>강의 제목 · 총 {plan.totalSlides || (plan.slides?.length ?? 0)}장</div>
-                      <div style={{ fontSize: '17px', fontWeight: 700, color: '#fff' }}>{plan.title}</div>
+                      <div style={{ fontSize: '17px', fontWeight: 700, color: '#fff', marginBottom: distroEntries.length ? '8px' : 0 }}>{plan.title}</div>
+                      {distroEntries.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {distroEntries.map(([k, n]) => (
+                            <span key={k} style={{ fontSize: '10.5px', padding: '2px 7px', borderRadius: '999px', background: KIND_LABEL[k].bg, color: KIND_LABEL[k].color, fontWeight: 600 }}>
+                              {KIND_LABEL[k].label} {n}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    {Array.isArray(plan.slides) && plan.slides.map((s, i) => (
-                      <div key={i} style={_box}>
-                        <div style={_accent}>슬라이드 {s.slideNumber || i + 1}</div>
-                        <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>{s.title}</div>
-                        {Array.isArray(s.bullets) && s.bullets.length > 0 && (
-                          <ul style={{ margin: '4px 0 8px 18px', padding: 0, fontSize: '13px', color: '#cbd5e1', lineHeight: 1.65 }}>
-                            {s.bullets.map((b, j) => <li key={j}>{b}</li>)}
-                          </ul>
-                        )}
-                        {s.speakerNotes && (
-                          <div style={{ marginTop: '6px', padding: '8px 10px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', borderLeft: '2px solid rgba(99,102,241,0.5)' }}>
-                            <div style={{ fontSize: '10.5px', color: '#94a3b8', marginBottom: '2px' }}>🎤 발표 멘트</div>
-                            <div style={{ fontSize: '12.5px', color: '#cbd5e1', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{s.speakerNotes}</div>
+                    {Array.isArray(plan.slides) && plan.slides.map((s, i) => {
+                      const kindMeta = KIND_LABEL[s.kind] || null
+                      return (
+                        <div key={i} style={_box}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <div style={_accent}>슬라이드 {s.slideNumber || i + 1}</div>
+                            {kindMeta && (
+                              <span style={{ fontSize: '10.5px', padding: '2px 7px', borderRadius: '999px', background: kindMeta.bg, color: kindMeta.color, fontWeight: 600 }}>
+                                {kindMeta.label}
+                              </span>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#fff', marginBottom: '6px', marginTop: '4px' }}>{s.title}</div>
+                          {Array.isArray(s.bullets) && s.bullets.length > 0 && (
+                            <ul style={{ margin: '4px 0 8px 18px', padding: 0, fontSize: '13px', color: '#cbd5e1', lineHeight: 1.65 }}>
+                              {s.bullets.map((b, j) => <li key={j}>{b}</li>)}
+                            </ul>
+                          )}
+                          {s.speakerNotes && (
+                            <div style={{ marginTop: '6px', padding: '8px 10px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', borderLeft: '2px solid rgba(99,102,241,0.5)' }}>
+                              <div style={{ fontSize: '10.5px', color: '#94a3b8', marginBottom: '2px' }}>🎤 발표 멘트</div>
+                              <div style={{ fontSize: '12.5px', color: '#cbd5e1', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{s.speakerNotes}</div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               }
@@ -9083,7 +9158,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
                         <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontSize: '15px' }}>🎯</span> 무료 강의 주제 · 추가 컨텍스트
-                          <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 저장하면 다음 접속 시 자동 복원</span>
+                          <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 1.5초 뒤 자동 저장 (수동 💾도 가능)</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           {pp_inputsSavedAt && !pp_inputsDirty && (
