@@ -5,9 +5,9 @@ import { extractEbookContents } from '@/lib/planners/_text'
 import { logError, classifyAnthropicError } from '@/lib/errorLog'
 
 export const runtime = 'nodejs'
-// 267장 PPT outline 같은 큰 출력은 Anthropic 호출만 5분+ 걸림.
-// Vercel Pro 한도(800초) 최대치 사용. Hobby plan은 300초가 한계라 그쪽이면 자동으로 잘림.
-export const maxDuration = 800
+// Vercel Hobby plan 한도가 300초. (Pro는 800초까지 가능하지만 현재 Hobby라 300이 max.)
+// PPT 봇 분량을 절반(110~150장)으로 줄였기 때문에 2~3분이면 끝나서 300초로 충분.
+export const maxDuration = 300
 
 const supabaseSelf = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
