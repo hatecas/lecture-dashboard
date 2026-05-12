@@ -9081,6 +9081,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
                 // 5) 노션에 페이지 만들기 — 마크다운을 노션 API로 새 페이지 생성.
                 //    /api/integrations/notion/create-plan-page (정리본용 라우트와 별도, generic)
+                //    PPT outline 250장 = 노션 블록 1000+개 = API 100개씩 다회 호출 → 1~3분 정상.
                 const createNotionPlanPage = async () => {
                   setPpExportBusy(prev => ({ ...prev, [taskKey]: 'notion' }))
                   try {
@@ -9172,7 +9173,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           cursor: exportBusyKind === 'notion' ? 'wait' : 'pointer',
                         }}
                         title="강사미팅 기록 노션 DB에 새 페이지로 push">
-                        {exportBusyKind === 'notion' ? '⏳ 노션 push 중…' : '📋 노션에 페이지 만들기'}
+                        {exportBusyKind === 'notion' ? '⏳ 노션 push 중… (1~3분 정상)' : '📋 노션에 페이지 만들기'}
                       </button>
                       {notionResultForTask?.url && (
                         <a href={notionResultForTask.url} target="_blank" rel="noopener noreferrer"
@@ -9181,6 +9182,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         </a>
                       )}
                     </div>
+                    {/* 노션 push 중일 때 안내 — 사용자가 렉 걸린 줄 오해하지 않게 */}
+                    {exportBusyKind === 'notion' && (
+                      <div style={{ padding: '10px 12px', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.20)', borderRadius: '8px', fontSize: '11.5px', color: '#86efac', lineHeight: 1.5 }}>
+                        💡 PPT outline 250장 = 노션 블록 1000+ 개. 노션 API 한 번에 100개 한도라 13~15번 나눠 보냅니다. <b>1~3분 정도 정상 소요</b> — 페이지는 만들어지는 중이에요.
+                      </div>
+                    )}
 
                     {Array.isArray(plan.slides) && plan.slides.map((s, i) => {
                       const kindMeta = KIND_LABEL[s.kind] || null
@@ -10257,6 +10264,17 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               s.status === 'error' ? { bg: 'rgba(239,68,68,0.12)', fg: '#fca5a5', icon: '❌' } :
                               s.status === 'running' ? { bg: 'rgba(99,102,241,0.18)', fg: '#c7d2fe', icon: '⏳' } :
                               { bg: 'rgba(255,255,255,0.05)', fg: '#94a3b8', icon: '⏸' }
+                            // 봇별 예상 시간 (실측 기반)
+                            const ETA = {
+                              ppt:               '4~7분',
+                              ebook:             '1~2분',
+                              boomUp:            '20~40초',
+                              alimtalk:          '20~40초',
+                              viralQ:            '20~40초',
+                              salesPage:         '1~2분',
+                              groupAnnouncement: '20~40초',
+                              summarize:         '30~90초',
+                            }
                             return (
                               <div key={k} style={{
                                 fontSize: '11.5px',
@@ -10274,6 +10292,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 {taskElapsed && (
                                   <span style={{ opacity: 0.75, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{taskElapsed}s</span>
                                 )}
+                                {!taskElapsed && !dur && s.status !== 'done' && s.status !== 'error' && ETA[k] && (
+                                  <span style={{ opacity: 0.65, fontWeight: 500, fontSize: '10.5px' }}>~{ETA[k]}</span>
+                                )}
                                 {dur && (
                                   <span style={{ opacity: 0.75, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{dur}s</span>
                                 )}
@@ -10281,6 +10302,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             )
                           })}
                         </div>
+                        {/* PPT 봇이 포함된 run에 대해서 시간 안내 — 사용자 답답함 해소 */}
+                        {pp_runTasks.includes('ppt') && (
+                          <div style={{ marginTop: '10px', padding: '8px 10px', background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.12)', borderRadius: '8px', fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.5 }}>
+                            💡 <b style={{ color: '#cbd5e1' }}>PPT outline은 슬라이드 250~300장이라 4~7분 소요</b>됩니다. 렉 아니에요. 한 번 만든 결과는 <b style={{ color: '#a5b4fc' }}>🗃️ 생성된 기획안</b> 탭에 자동 저장돼서 다시 만들 필요 없습니다.
+                          </div>
+                        )}
                       </div>
                     )
                   })()}
