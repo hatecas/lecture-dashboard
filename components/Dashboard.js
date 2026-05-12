@@ -28,6 +28,123 @@ import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
 import * as XLSX from 'xlsx'
 
+// PPT outline kind별 시각화 메타 — 프로젝트 기획 탭과 생성된 기획안 탭 양쪽에서 공유.
+// 변경하려면 한 곳만.
+const PPT_KIND_META = {
+  hook:        { label: '🪝 후크',       bg: 'rgba(239,68,68,0.18)',   color: '#fca5a5' },
+  intro:       { label: '🎬 강사 소개',  bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
+  proof:       { label: '💰 성과 증명',  bg: 'rgba(16,185,129,0.18)',  color: '#6ee7b7' },
+  journey:     { label: '📖 일대기',     bg: 'rgba(217,70,239,0.18)',  color: '#f0abfc' },
+  myth:        { label: '💥 통념 깨기',  bg: 'rgba(249,115,22,0.18)',  color: '#fdba74' },
+  info:        { label: '📊 본론',       bg: 'rgba(99,102,241,0.18)',  color: '#a5b4fc' },
+  empty:       { label: '🎞️ 빈/이미지',  bg: 'rgba(148,163,184,0.10)', color: '#94a3b8' },
+  qna:         { label: '❓ Q&A',        bg: 'rgba(14,165,233,0.18)',  color: '#7dd3fc' },
+  testimonial: { label: '💬 후기',       bg: 'rgba(244,114,182,0.18)', color: '#f9a8d4' },
+  cta:         { label: '🎯 모집',       bg: 'rgba(168,85,247,0.20)',  color: '#d8b4fe' },
+  outro:       { label: '🎤 마무리',     bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
+}
+
+// 봇별 메타 (생성된 기획안 탭에서 사용)
+const PLANNER_TASK_META = {
+  summarize:         { label: '강사 자료 정리봇',     icon: '🗂️' },
+  ebook:             { label: '무료 전자책 기획안', icon: '📚' },
+  boomUp:            { label: '붐업 멘트',            icon: '🎉' },
+  alimtalk:          { label: '채널톡 멘트',          icon: '💬' },
+  viralQ:            { label: '바이럴 질문',         icon: '❓' },
+  ppt:               { label: '강의 PPT outline',   icon: '📋' },
+  salesPage:         { label: '무료 상페 카피',       icon: '📄' },
+  groupAnnouncement: { label: '단톡방 필독 공지',     icon: '📢' },
+}
+
+// PPT plan → 마크다운 (노션/워드/메모장 호환).
+// 컴포넌트 외부에 두어 어디서든 호출 가능.
+function pptPlanToMarkdown(plan) {
+  if (!plan) return ''
+  const lines = []
+  lines.push(`# ${plan.title || '강의 PPT outline'}`)
+  lines.push('')
+  lines.push(`총 ${plan.totalSlides || plan.slides?.length || 0}장`)
+  lines.push('')
+  lines.push('---')
+  lines.push('')
+  for (const s of (plan.slides || [])) {
+    const kindLabel = PPT_KIND_META[s.kind]?.label || ''
+    lines.push(`## 슬라이드 ${s.slideNumber || '?'}${kindLabel ? ` · ${kindLabel}` : ''}`)
+    lines.push('')
+    if (s.title) {
+      lines.push(`### ${s.title}`)
+      lines.push('')
+    }
+    if (Array.isArray(s.bullets) && s.bullets.length) {
+      for (const b of s.bullets) lines.push(`- ${b}`)
+      lines.push('')
+    }
+    if (s.speakerNotes) {
+      lines.push(`> 🎤 **발표 멘트:** ${s.speakerNotes.replace(/\n/g, ' ')}`)
+      lines.push('')
+    }
+    lines.push('---')
+    lines.push('')
+  }
+  return lines.join('\n')
+}
+
+// 봇별 generic 마크다운 변환 — PPT 외 봇 결과를 노션/문서로 옮기기 위한 fallback.
+// 키 깊이 2~3까지 펼침. 깊은 객체는 JSON.
+function genericPlanToMarkdown(taskKey, plan) {
+  if (!plan) return ''
+  const meta = PLANNER_TASK_META[taskKey] || { label: taskKey, icon: '🪄' }
+  const lines = []
+  lines.push(`# ${meta.icon} ${meta.label}`)
+  lines.push('')
+  const walk = (obj, depth = 0) => {
+    if (obj == null) return
+    if (typeof obj === 'string' || typeof obj === 'number' || typeof obj === 'boolean') {
+      lines.push(String(obj))
+      lines.push('')
+      return
+    }
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        if (typeof item === 'string') {
+          lines.push(`- ${item}`)
+        } else if (item && typeof item === 'object') {
+          // 객체 배열은 각 항목을 ### 로
+          lines.push('')
+          for (const [k, v] of Object.entries(item)) {
+            if (typeof v === 'string' || typeof v === 'number') {
+              lines.push(`**${k}:** ${v}`)
+              lines.push('')
+            } else if (Array.isArray(v)) {
+              lines.push(`**${k}:**`)
+              for (const it of v) lines.push(`- ${typeof it === 'string' ? it : JSON.stringify(it)}`)
+              lines.push('')
+            }
+          }
+          lines.push('---')
+        }
+      }
+      lines.push('')
+      return
+    }
+    // object
+    for (const [k, v] of Object.entries(obj)) {
+      const heading = '#'.repeat(Math.min(depth + 2, 4))
+      lines.push(`${heading} ${k}`)
+      lines.push('')
+      walk(v, depth + 1)
+    }
+  }
+  walk(plan)
+  return lines.join('\n')
+}
+
+// 파일명 안전 처리 (Windows/macOS 모두 금지 문자 제거)
+function makeSafeFileName(base, fallback = 'plan') {
+  const s = (base || fallback).replace(/[\\/:*?"<>|]/g, '_').trim()
+  return s.slice(0, 80) || fallback
+}
+
 // 정리봇 markdown 렌더러 (의존성 없는 경량 구현).
 // 지원: ## / ### 헤더, - 불릿, 1. 번호, | ... | 표(GFM), > 인용, --- 구분선,
 //       **굵게**, *기울임*, _기울임_, `코드`, 단락.
@@ -8979,60 +9096,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
 
               if (taskKey === 'ppt') {
-                // 슬라이드 종류별 색상 뱃지 — N잡연구소 실제 PPT 3종 분석 기반 11종.
-                // (씨오 252장 + 옆집CEO 256장 + 에어 292장 = 평균 267장)
-                const KIND_LABEL = {
-                  hook:        { label: '🪝 후크',       bg: 'rgba(239,68,68,0.18)',   color: '#fca5a5' },
-                  intro:       { label: '🎬 강사 소개',  bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
-                  proof:       { label: '💰 성과 증명',  bg: 'rgba(16,185,129,0.18)',  color: '#6ee7b7' },
-                  journey:     { label: '📖 일대기',     bg: 'rgba(217,70,239,0.18)',  color: '#f0abfc' },
-                  myth:        { label: '💥 통념 깨기',  bg: 'rgba(249,115,22,0.18)',  color: '#fdba74' },
-                  info:        { label: '📊 본론',       bg: 'rgba(99,102,241,0.18)',  color: '#a5b4fc' },
-                  empty:       { label: '🎞️ 빈/이미지',  bg: 'rgba(148,163,184,0.10)', color: '#94a3b8' },
-                  qna:         { label: '❓ Q&A',        bg: 'rgba(14,165,233,0.18)',  color: '#7dd3fc' },
-                  testimonial: { label: '💬 후기',       bg: 'rgba(244,114,182,0.18)', color: '#f9a8d4' },
-                  cta:         { label: '🎯 모집',       bg: 'rgba(168,85,247,0.20)',  color: '#d8b4fe' },
-                  outro:       { label: '🎤 마무리',     bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
-                }
+                // 공통 메타 사용 (Dashboard.js 파일 최상단 PPT_KIND_META)
+                const KIND_LABEL = PPT_KIND_META
 
                 // ===== 결과 추출 헬퍼 =====
-                // 1) 마크다운 변환 — 노션/워드에 그대로 붙여넣으면 형식 살아남
-                const toMarkdown = () => {
-                  const lines = []
-                  lines.push(`# ${plan.title || '강의 PPT outline'}`)
-                  lines.push('')
-                  lines.push(`총 ${plan.totalSlides || plan.slides?.length || 0}장`)
-                  lines.push('')
-                  lines.push('---')
-                  lines.push('')
-                  for (const s of (plan.slides || [])) {
-                    const kindLabel = KIND_LABEL[s.kind]?.label || ''
-                    lines.push(`## 슬라이드 ${s.slideNumber || '?'}${kindLabel ? ` · ${kindLabel}` : ''}`)
-                    lines.push('')
-                    if (s.title) {
-                      lines.push(`### ${s.title}`)
-                      lines.push('')
-                    }
-                    if (Array.isArray(s.bullets) && s.bullets.length) {
-                      for (const b of s.bullets) lines.push(`- ${b}`)
-                      lines.push('')
-                    }
-                    if (s.speakerNotes) {
-                      // 노트는 인용 블록으로 (노션에서도 회색 박스로 보임)
-                      lines.push(`> 🎤 **발표 멘트:** ${s.speakerNotes.replace(/\n/g, ' ')}`)
-                      lines.push('')
-                    }
-                    lines.push('---')
-                    lines.push('')
-                  }
-                  return lines.join('\n')
-                }
-
-                // 파일명 안전 처리 (Windows/macOS 모두 금지 문자 제거)
-                const safeFileName = (() => {
-                  const base = (plan.title || 'ppt-outline').replace(/[\\/:*?"<>|]/g, '_').trim()
-                  return base.slice(0, 80) || 'ppt-outline'
-                })()
+                const toMarkdown = () => pptPlanToMarkdown(plan)
+                const safeFileName = makeSafeFileName(plan.title, 'ppt-outline')
 
                 // 2) 마크다운 복사
                 const copyMarkdown = async () => {
@@ -11519,16 +11588,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           {/* 🗃️ 생성된 기획안 탭 — 봇 결과 자동 저장 후 다시 열람/내보내기/삭제.
               계정별 분리 (owner_username 토큰으로). 본인 것만 보이고 본인 것만 삭제. */}
           {currentTab === 'saved-plans' && (() => {
-            const PLANNER_META_LOCAL = {
-              summarize:         { label: '강사 자료 정리봇',         icon: '🗂️' },
-              ebook:             { label: '무료 전자책 기획안',     icon: '📚' },
-              boomUp:            { label: '붐업 멘트',                icon: '🎉' },
-              alimtalk:          { label: '채널톡 멘트',              icon: '💬' },
-              viralQ:            { label: '바이럴 질문',            icon: '❓' },
-              ppt:               { label: '강의 PPT outline',       icon: '📋' },
-              salesPage:         { label: '무료 상페 카피',          icon: '📄' },
-              groupAnnouncement: { label: '단톡방 필독 공지',         icon: '📢' },
-            }
+            const PLANNER_META_LOCAL = PLANNER_TASK_META
 
             const openDetail = async (id) => {
               setSavedPlanDetail(null)
@@ -11668,43 +11728,225 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         왼쪽에서 항목을 선택하면 상세 내용이 표시됩니다.
                       </div>
                     )}
-                    {savedPlanDetail && (
-                      <div>
-                        <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
-                            <span style={{ fontSize: '20px' }}>{PLANNER_META_LOCAL[savedPlanDetail.task_key]?.icon || '🪄'}</span>
-                            <span style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
-                              {PLANNER_META_LOCAL[savedPlanDetail.task_key]?.label || savedPlanDetail.task_key}
-                            </span>
-                            <span style={{ fontSize: '11px', color: '#94a3b8', marginLeft: 'auto' }}>
-                              {new Date(savedPlanDetail.created_at).toLocaleString('ko-KR')}
-                            </span>
+                    {savedPlanDetail && (() => {
+                      const plan = savedPlanDetail.plan || {}
+                      const taskKey = savedPlanDetail.task_key
+                      const isPpt = taskKey === 'ppt'
+                      const safeTitle = makeSafeFileName(
+                        plan.title || `${savedPlanDetail.instructor_name}_${PLANNER_META_LOCAL[taskKey]?.label || taskKey}`,
+                        'plan'
+                      )
+                      const markdown = isPpt ? pptPlanToMarkdown(plan) : genericPlanToMarkdown(taskKey, plan)
+                      const exportBusy = pp_exportBusy[`saved:${savedPlanDetail.id}`] || null
+
+                      // 1) 마크다운 복사
+                      const copyMd = async () => {
+                        try {
+                          await navigator.clipboard.writeText(markdown)
+                          alert('마크다운으로 복사 완료.')
+                        } catch (e) { alert('복사 실패. 수동으로 선택해주세요.') }
+                      }
+                      // 2) .md 다운로드
+                      const downloadMd = () => {
+                        const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url; a.download = `${safeTitle}.md`
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a)
+                        setTimeout(() => URL.revokeObjectURL(url), 1000)
+                      }
+                      // 3) .pptx 다운로드 — PPT만
+                      const downloadPptxSaved = async () => {
+                        if (!isPpt) return
+                        setPpExportBusy(prev => ({ ...prev, [`saved:${savedPlanDetail.id}`]: 'pptx' }))
+                        try {
+                          const { default: PptxGenJS } = await import('pptxgenjs')
+                          const pptx = new PptxGenJS()
+                          pptx.title = plan.title || '강의 PPT outline'
+                          pptx.layout = 'LAYOUT_WIDE'
+                          for (const s of (plan.slides || [])) {
+                            const slide = pptx.addSlide()
+                            const kindLabel = PPT_KIND_META[s.kind]?.label || ''
+                            slide.addText(`#${s.slideNumber || '?'}${kindLabel ? `  ·  ${kindLabel}` : ''}`, {
+                              x: 0.3, y: 0.2, w: 5, h: 0.4, fontSize: 11, color: '888888',
+                            })
+                            if (s.title) {
+                              slide.addText(s.title, {
+                                x: 0.5, y: 0.8, w: 12, h: 1.2,
+                                fontSize: 32, bold: true, color: '111111',
+                                fontFace: 'Malgun Gothic', valign: 'top',
+                              })
+                            }
+                            if (Array.isArray(s.bullets) && s.bullets.length) {
+                              slide.addText(
+                                s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })),
+                                { x: 0.6, y: 2.2, w: 12, h: 4.5, fontSize: 20, color: '333333', fontFace: 'Malgun Gothic', paraSpaceAfter: 8 }
+                              )
+                            }
+                            if (s.speakerNotes) slide.addNotes(s.speakerNotes)
+                          }
+                          await pptx.writeFile({ fileName: `${safeTitle}.pptx` })
+                        } catch (e) {
+                          alert('.pptx 생성 실패: ' + (e?.message || e))
+                        } finally {
+                          setPpExportBusy(prev => ({ ...prev, [`saved:${savedPlanDetail.id}`]: null }))
+                        }
+                      }
+                      // 4) 노션 페이지 만들기
+                      const createNotionSaved = async () => {
+                        setPpExportBusy(prev => ({ ...prev, [`saved:${savedPlanDetail.id}`]: 'notion' }))
+                        try {
+                          const pageTitle = `[${savedPlanDetail.instructor_name}${savedPlanDetail.session_name ? ' ' + savedPlanDetail.session_name : ''}] ${PLANNER_META_LOCAL[taskKey]?.label || taskKey}`
+                          const res = await fetch('/api/integrations/notion/create-plan-page', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ title: pageTitle, markdown }),
+                          })
+                          const data = await res.json().catch(() => ({}))
+                          if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`)
+                          setPpPlanNotionResult(prev => ({ ...prev, [`saved:${savedPlanDetail.id}`]: { url: data.url, title: pageTitle } }))
+                        } catch (e) {
+                          alert('노션 페이지 생성 실패: ' + (e?.message || e))
+                        } finally {
+                          setPpExportBusy(prev => ({ ...prev, [`saved:${savedPlanDetail.id}`]: null }))
+                        }
+                      }
+                      const notionRes = pp_planNotionResult[`saved:${savedPlanDetail.id}`]
+
+                      // PPT plan의 종류별 카운트 (분포 표시)
+                      let distroEntries = []
+                      if (isPpt && Array.isArray(plan.slides)) {
+                        const counts = {}
+                        for (const s of plan.slides) { const k = s.kind || 'info'; counts[k] = (counts[k] || 0) + 1 }
+                        distroEntries = Object.entries(counts).filter(([k]) => PPT_KIND_META[k])
+                      }
+
+                      return (
+                        <div>
+                          {/* 헤더 */}
+                          <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                              <span style={{ fontSize: '20px' }}>{PLANNER_META_LOCAL[taskKey]?.icon || '🪄'}</span>
+                              <span style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
+                                {PLANNER_META_LOCAL[taskKey]?.label || taskKey}
+                              </span>
+                              <span style={{ fontSize: '11px', color: '#94a3b8', marginLeft: 'auto' }}>
+                                {new Date(savedPlanDetail.created_at).toLocaleString('ko-KR')}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                              <b style={{ color: '#a5b4fc' }}>{savedPlanDetail.instructor_name}</b>
+                              {savedPlanDetail.session_name && <span style={{ color: '#94a3b8' }}> · {savedPlanDetail.session_name}</span>}
+                            </div>
+                            {savedPlanDetail.topic && (
+                              <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '4px' }}>주제: {savedPlanDetail.topic}</div>
+                            )}
                           </div>
-                          <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
-                            <b style={{ color: '#a5b4fc' }}>{savedPlanDetail.instructor_name}</b>
-                            {savedPlanDetail.session_name && <span style={{ color: '#94a3b8' }}> · {savedPlanDetail.session_name}</span>}
+
+                          {/* 내보내기 버튼 4종 */}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px', padding: '12px', background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.20)', borderRadius: '10px' }}>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', alignSelf: 'center', marginRight: '4px' }}>📤 내보내기:</div>
+                            <button onClick={copyMd}
+                              style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', borderRadius: '7px', color: '#e2e8f0', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                              📋 마크다운 복사
+                            </button>
+                            <button onClick={downloadMd}
+                              style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', borderRadius: '7px', color: '#e2e8f0', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                              📄 .md 다운로드
+                            </button>
+                            {isPpt && (
+                              <button onClick={downloadPptxSaved} disabled={exportBusy === 'pptx'}
+                                style={{
+                                  padding: '7px 12px',
+                                  background: exportBusy === 'pptx' ? 'rgba(99,102,241,0.20)' : 'linear-gradient(135deg, rgba(99,102,241,0.30), rgba(168,85,247,0.30))',
+                                  border: '1px solid rgba(99,102,241,0.45)', borderRadius: '7px',
+                                  color: '#fff', fontSize: '12px', fontWeight: 700,
+                                  cursor: exportBusy === 'pptx' ? 'wait' : 'pointer',
+                                }}>
+                                {exportBusy === 'pptx' ? '⏳ .pptx 생성 중…' : '📊 .pptx 다운로드'}
+                              </button>
+                            )}
+                            <button onClick={createNotionSaved} disabled={exportBusy === 'notion'}
+                              style={{
+                                padding: '7px 12px',
+                                background: exportBusy === 'notion' ? 'rgba(16,185,129,0.20)' : 'linear-gradient(135deg, #10b981, #14b8a6)',
+                                border: 'none', borderRadius: '7px',
+                                color: '#fff', fontSize: '12px', fontWeight: 700,
+                                cursor: exportBusy === 'notion' ? 'wait' : 'pointer',
+                              }}>
+                              {exportBusy === 'notion' ? `⏳ 노션 push 중… ${isPpt ? '(1~3분)' : ''}` : '📋 노션에 페이지 만들기'}
+                            </button>
+                            {notionRes?.url && (
+                              <a href={notionRes.url} target="_blank" rel="noopener noreferrer"
+                                style={{ alignSelf: 'center', fontSize: '11px', color: '#86efac', textDecoration: 'underline', marginLeft: '4px' }}>
+                                ✅ 노션 페이지 열기 →
+                              </a>
+                            )}
                           </div>
-                          {savedPlanDetail.topic && (
-                            <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '4px' }}>주제: {savedPlanDetail.topic}</div>
+
+                          {/* 본문 — PPT는 슬라이드 카드, 그 외는 마크다운 미리보기 + JSON 펼침 */}
+                          {isPpt ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '60vh', overflowY: 'auto', paddingRight: '4px' }}>
+                              {/* 강의 제목 + 분포 */}
+                              <div style={{ padding: '12px 14px', background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '10px' }}>
+                                <div style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 700, marginBottom: '4px' }}>강의 제목 · 총 {plan.totalSlides || (plan.slides?.length ?? 0)}장</div>
+                                <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: distroEntries.length ? '8px' : 0 }}>{plan.title}</div>
+                                {distroEntries.length > 0 && (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    {distroEntries.map(([k, n]) => (
+                                      <span key={k} style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '999px', background: PPT_KIND_META[k].bg, color: PPT_KIND_META[k].color, fontWeight: 600 }}>
+                                        {PPT_KIND_META[k].label} {n}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              {/* 슬라이드 카드 */}
+                              {Array.isArray(plan.slides) && plan.slides.map((s, i) => {
+                                const kindMeta = PPT_KIND_META[s.kind] || null
+                                return (
+                                  <div key={i} style={{ padding: '12px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '9px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                      <div style={{ fontSize: '10.5px', color: '#a5b4fc', fontWeight: 700 }}>슬라이드 {s.slideNumber || i + 1}</div>
+                                      {kindMeta && (
+                                        <span style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '999px', background: kindMeta.bg, color: kindMeta.color, fontWeight: 600 }}>
+                                          {kindMeta.label}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#fff', marginTop: '4px', marginBottom: '4px' }}>{s.title}</div>
+                                    {Array.isArray(s.bullets) && s.bullets.length > 0 && (
+                                      <ul style={{ margin: '4px 0 6px 18px', padding: 0, fontSize: '12.5px', color: '#cbd5e1', lineHeight: 1.6 }}>
+                                        {s.bullets.map((b, j) => <li key={j}>{b}</li>)}
+                                      </ul>
+                                    )}
+                                    {s.speakerNotes && (
+                                      <div style={{ marginTop: '4px', padding: '7px 9px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', borderLeft: '2px solid rgba(99,102,241,0.5)' }}>
+                                        <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '2px' }}>🎤 발표 멘트</div>
+                                        <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{s.speakerNotes}</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          ) : (
+                            // PPT 외 봇: 마크다운 미리보기 우선 + JSON 펼침 details
+                            <>
+                              <div style={{ padding: '12px', background: 'rgba(0,0,0,0.30)', border: '1px solid var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '13px', lineHeight: 1.7, maxHeight: '55vh', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                {markdown}
+                              </div>
+                              <details style={{ marginTop: '10px' }}>
+                                <summary style={{ fontSize: '11px', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}>📦 원본 JSON</summary>
+                                <pre style={{ marginTop: '6px', padding: '10px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#94a3b8', fontSize: '11.5px', lineHeight: 1.55, maxHeight: '40vh', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                  {JSON.stringify(plan, null, 2)}
+                                </pre>
+                              </details>
+                            </>
                           )}
                         </div>
-                        {/* plan JSON 그대로 표시 — 향후 봇별 렌더러로 확장 가능 */}
-                        <pre style={{
-                          padding: '12px',
-                          background: 'rgba(0,0,0,0.40)',
-                          border: '1px solid var(--border)',
-                          borderRadius: '8px',
-                          color: '#cbd5e1',
-                          fontSize: '12px',
-                          lineHeight: 1.6,
-                          maxHeight: '60vh',
-                          overflow: 'auto',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          margin: 0,
-                        }}>{JSON.stringify(savedPlanDetail.plan, null, 2)}</pre>
-                      </div>
-                    )}
+                      )
+                    })()}
                   </div>
                 </div>
               </div>
