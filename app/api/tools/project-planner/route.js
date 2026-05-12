@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { planners, PLANNER_META } from '@/lib/planners'
 import { extractEbookContents } from '@/lib/planners/_text'
+import { logError, classifyAnthropicError } from '@/lib/errorLog'
 
 export const runtime = 'nodejs'
 // 267장 PPT outline 같은 큰 출력은 Anthropic 호출만 5분+ 걸림.
@@ -209,11 +210,29 @@ export async function POST(request) {
                 },
               })
             } catch (err) {
+              // 에러 로그 DB에 저장 (분류 자동). 사용자에겐 친절한 메시지로 변환.
+              const errorCode = classifyAnthropicError(err)
+              const logged = await logError({
+                request,
+                error: err,
+                route: '/api/tools/project-planner',
+                method: 'POST',
+                username: auth.user?.username,
+                errorCode,
+                context: {
+                  taskKey,
+                  instructor: context.instructor,
+                  sessionName: context.sessionName,
+                  topic: (context.topic || '').slice(0, 200),
+                  model: PLANNER_META[taskKey]?.label,
+                },
+              })
               send('task_done', {
                 task: taskKey,
                 result: {
                   ok: false,
-                  error: err?.message || String(err),
+                  error: logged.userMessage,    // 사용자 친화 메시지
+                  errorId: logged.id,            // 추적용 ID (개발자 문의 시)
                   durationMs: Date.now() - start,
                 },
               })
@@ -232,8 +251,17 @@ export async function POST(request) {
           } : null,
         })
       } catch (e) {
-        console.error('project-planner stream error:', e)
-        send('fatal', { message: e?.message || String(e) })
+        // 스트림 자체 fatal — DB에 기록 + 사용자에겐 친절한 메시지.
+        const logged = await logError({
+          request,
+          error: e,
+          route: '/api/tools/project-planner',
+          method: 'POST',
+          username: auth.user?.username,
+          errorCode: 'INTERNAL',
+          context: { phase: 'stream', validTasks, instructor: context.instructor },
+        })
+        send('fatal', { message: logged.userMessage, errorId: logged.id })
       } finally {
         closed = true
         clearInterval(heartbeatTimer)

@@ -15,6 +15,7 @@
 
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { createMeetingReportPage, parseNotionDatabaseId } from '@/lib/integrations/notion-write'
+import { logError, errorResponse } from '@/lib/errorLog'
 
 export const runtime = 'nodejs'
 // PPT outline 250장은 노션 블록 1000+ 개로 변환되고 노션 API 100개씩 다회 호출이라
@@ -83,10 +84,20 @@ export async function POST(request) {
     })
   } catch (e) {
     const elapsed = Date.now() - t0
-    console.error(`[notion/create-plan-page] FAILED after ${elapsed}ms:`, e?.message || e)
-    return Response.json({
-      error: e?.message || String(e),
-      elapsedMs: elapsed,
-    }, { status: 500 })
+    const logged = await logError({
+      request,
+      error: e,
+      route: '/api/integrations/notion/create-plan-page',
+      method: 'POST',
+      username: auth.user?.username,
+      errorCode: 'EXTERNAL_API',
+      context: {
+        title: title.slice(0, 100),
+        mdLength: markdown.length,
+        elapsedMs: elapsed,
+      },
+      userMessage: '노션 페이지 생성 중 오류가 발생했습니다. 노션 통합 권한 또는 데이터베이스 연결 상태를 확인해주세요.',
+    })
+    return errorResponse(logged, 500)
   }
 }
