@@ -767,6 +767,95 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
     }
     console.log(`[buildDesignedPptx] 폰트 슬롯 강제: ${xmlFilePaths.length}개 XML, 패턴A=${patchCountA}, 패턴B=${patchCountB}`)
 
+    // (3) 폰트 임베드 — Pretendard 톤일 때만 적용.
+    //   PowerPoint가 시스템 폰트 매칭에 의존하지 않고 PPTX 자체 폰트 사용 →
+    //   슬라이드별 캐시 차이로 렌더 일관성 깨지는 문제 해결.
+    //   public/fonts/Pretendard-Regular.otf, Pretendard-Bold.otf 사용.
+    if (fontName === 'Pretendard') {
+      try {
+        const [regBuf, boldBuf] = await Promise.all([
+          fetch('/fonts/Pretendard-Regular.otf').then(r => r.arrayBuffer()),
+          fetch('/fonts/Pretendard-Bold.otf').then(r => r.arrayBuffer()),
+        ])
+        // 폰트 파일 → ppt/fonts/*.fntdata로 저장 (실제 형식은 OTF지만 확장자만 .fntdata)
+        zip.file('ppt/fonts/font1.fntdata', regBuf)
+        zip.file('ppt/fonts/font2.fntdata', boldBuf)
+
+        // presentation.xml에 embeddedFontLst 추가 (sldIdLst 뒤)
+        const presFile = zip.file('ppt/presentation.xml')
+        if (presFile) {
+          let presXml = await presFile.async('string')
+          // r: 네임스페이스 prefix가 이미 정의되어 있는지 확인 (보통 있음)
+          const fontListXml =
+            `<p:embeddedFontLst>` +
+              `<p:embeddedFont>` +
+                `<p:font typeface="${fontName}" charset="-127"/>` +
+                `<p:regular r:id="rIdFontReg"/>` +
+                `<p:bold r:id="rIdFontBold"/>` +
+              `</p:embeddedFont>` +
+            `</p:embeddedFontLst>`
+          // 이미 embeddedFontLst 있으면 교체, 없으면 sldIdLst 뒤에 삽입
+          if (presXml.includes('<p:embeddedFontLst>')) {
+            presXml = presXml.replace(/<p:embeddedFontLst>[\s\S]*?<\/p:embeddedFontLst>/, fontListXml)
+          } else if (presXml.includes('</p:sldIdLst>')) {
+            presXml = presXml.replace('</p:sldIdLst>', `</p:sldIdLst>${fontListXml}`)
+          } else {
+            console.warn('[buildDesignedPptx] presentation.xml에 sldIdLst 없음 — 폰트 임베드 스킵')
+          }
+          zip.file('ppt/presentation.xml', presXml)
+        }
+
+        // _rels/presentation.xml.rels에 폰트 관계 추가
+        const relsFile = zip.file('ppt/_rels/presentation.xml.rels')
+        if (relsFile) {
+          let relsXml = await relsFile.async('string')
+          const newRels =
+            `<Relationship Id="rIdFontReg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font1.fntdata"/>` +
+            `<Relationship Id="rIdFontBold" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font2.fntdata"/>`
+          // 이미 있으면 스킵
+          if (!relsXml.includes('rIdFontReg')) {
+            relsXml = relsXml.replace('</Relationships>', `${newRels}</Relationships>`)
+            zip.file('ppt/_rels/presentation.xml.rels', relsXml)
+          }
+        }
+
+        // [Content_Types].xml에 .fntdata Content-Type 등록
+        const ctFile = zip.file('[Content_Types].xml')
+        if (ctFile) {
+          let ctXml = await ctFile.async('string')
+          if (!ctXml.includes('Extension="fntdata"')) {
+            // <Default ...> 형태로 추가
+            ctXml = ctXml.replace(
+              '</Types>',
+              `<Default Extension="fntdata" ContentType="application/x-fontdata"/></Types>`
+            )
+            zip.file('[Content_Types].xml', ctXml)
+          }
+        }
+
+        console.log(`[buildDesignedPptx] 폰트 임베드 완료: Pretendard Regular + Bold (~3MB)`)
+      } catch (e) {
+        console.warn('[buildDesignedPptx] 폰트 임베드 실패 (계속 진행):', e?.message)
+      }
+    }
+
+    // 디버깅: slide1.xml의 첫 텍스트 런 XML을 콘솔에 출력
+    //   → 폰트가 어떻게 들어갔는지 사용자가 확인 가능 (F12 콘솔에서 복사 → 공유)
+    try {
+      const debugSlide = zip.file('ppt/slides/slide1.xml')
+      if (debugSlide) {
+        const debugXml = await debugSlide.async('string')
+        // 첫 <a:rPr>...</a:rPr> 찾기
+        const firstRpr = debugXml.match(/<a:(?:rPr|defRPr|endParaRPr)[^>]*>[\s\S]*?<\/a:(?:rPr|defRPr|endParaRPr)>/)
+        const firstSelfClose = debugXml.match(/<a:(?:rPr|defRPr|endParaRPr)[^>]*\/>/)
+        console.log('[buildDesignedPptx] slide1.xml 첫 rPr (열고닫기):', firstRpr ? firstRpr[0].slice(0, 500) : '(없음)')
+        console.log('[buildDesignedPptx] slide1.xml 첫 rPr (self-close):', firstSelfClose ? firstSelfClose[0].slice(0, 500) : '(없음)')
+        // 첫 <a:t>...</a:t> 텍스트 찾기 (실제 한글 텍스트)
+        const firstText = debugXml.match(/<a:t>([\s\S]*?)<\/a:t>/)
+        console.log('[buildDesignedPptx] slide1.xml 첫 텍스트:', firstText ? firstText[1].slice(0, 100) : '(없음)')
+      }
+    } catch {}
+
     finalBlob = await zip.generateAsync({
       type: 'blob',
       mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
