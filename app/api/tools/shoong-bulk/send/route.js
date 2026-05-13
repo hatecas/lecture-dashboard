@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getNlabSupabase } from '@/lib/nlabSupabase'
+import { logError } from '@/lib/errorLog'
 
 const SHOONG_ENDPOINT = 'https://api.shoong.kr/send'
 
@@ -278,10 +279,25 @@ export async function POST(request) {
       testMode: testModeApplied
     })
   } catch (error) {
-    console.error('shoong-bulk/send error:', error)
-    return NextResponse.json({ error: error.message || '서버 오류' }, { status: 500 })
+    // 에러 로그 DB에 기록 + 사용자 친화 메시지로 응답.
+    // 2만명 같은 큰 발송이 timeout으로 끊기면 여기 catch에 안 들어오고 Vercel이
+    // HTML 에러 페이지 반환 → 클라이언트 JSON 파싱 실패. 그건 별도 처리 필요.
+    const logged = await logError({
+      request: req,
+      error,
+      route: '/api/tools/shoong-bulk/send',
+      method: 'POST',
+      errorCode: 'EXTERNAL_API',
+      context: {
+        // 가능하면 발송 컨텍스트 일부 기록 (대용량은 자르기)
+        // request body는 이미 소진됐을 수 있어서 별도 정보만
+      },
+      userMessage: '슝 발송 중 오류가 발생했습니다. 큰 명단(수천명 이상)은 한 번에 못 보낼 수 있어요 — 검색 결과를 더 좁혀서 다시 시도하거나, 명단을 나눠서 보내주세요.',
+    })
+    return NextResponse.json({ error: logged.userMessage, errorId: logged.id }, { status: 500 })
   }
 }
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// 대용량 발송 시 더 길게 필요. Hobby plan 한도 300초.
+export const maxDuration = 300
