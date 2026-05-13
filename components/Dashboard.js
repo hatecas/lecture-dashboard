@@ -150,36 +150,49 @@ function makeSafeFileName(base, fallback = 'plan') {
 // 색상/폰트를 추출 + kind별 레이아웃에 적용해 디자인된 .pptx 생성.
 // ===================================================================
 
-// 기본 톤 (사용자가 입력 안 했을 때 — N잡연구소 다크 인디고/앰버)
-const DEFAULT_DESIGN_TONE_MD = `# N잡연구소 무료강의 디자인 톤
-Modern, minimal, bold typography. Dark mode default with vibrant accents.
+// 기본 톤 — 사용자 디자인 시스템(presentation-design-system.md) 기반.
+// Nike-style editorial minimalism: 흰 캔버스 + 검정 잉크, Pretendard 전용, 16:9 고정 그리드.
+const DEFAULT_DESIGN_TONE_MD = `# N잡연구소 무료강의 디자인 시스템
+Editorial minimalism (Nike-style). Bold typography, high-contrast black-and-white palette,
+consistent spatial anchoring across all slides. Fixed positional grid for rhythmic consistency.
 
 ## Colors
-- Primary: #6366F1   (인디고 — 메인 강조)
-- Secondary: #EC4899 (핫핑크 — 보조 강조)
-- Background: #0F0F23 (다크 — 슬라이드 배경)
-- Text: #FFFFFF       (글씨)
-- Accent: #FBBF24    (앰버 — 수치/CTA 강조)
+- Background: #FFFFFF (canvas — 슬라이드 배경)
+- Text: #111111       (ink — 모든 본문/제목)
+- Primary: #111111    (ink — 강조도 흑색 통일)
+- Secondary: #39393B  (charcoal — 약한 강조)
+- Accent: #707072     (mute — 부제·캡션)
+- Soft: #F5F5F5       (soft-cloud — 콜아웃 박스 배경)
+
+## Semantic
+- Sale: #D30005 (경고 — sparingly)
+- Success: #007D48 (긍정 지표 — sparingly)
+- Pink: #ED1AA0 (강조 슬라이드만)
 
 ## Fonts
-- Heading: Pretendard Bold
-- Body: Pretendard
+- Heading: Pretendard Bold (700)
+- Body: Pretendard Regular (400)
+- Display: Pretendard Black (900) — 챕터 표지용
 
 ## Style
-- Sharp typography, lots of whitespace.
-- Big numbers for proof slides (캡쳐/스크린샷 자리).
-- Quote-style cards for testimonials (3단 구조: 상황 → 코칭 → 결과).
-- High contrast for hook/CTA — bold accent stripes on left edge.`
+- High content density — 슬라이드 본문이 위→아래까지 꽉 차게.
+- Left-aligned body, center-aligned hero/quote only.
+- Sharp corners, no shadows, no gradients.
+- Hierarchy by weight, not size jumps.
+- Chapter markers at top-left corner (80px from edge).`
 
 // 톤 MD에서 색상/폰트 추출. 정규식 기반 + 키워드 매칭 + fallback.
 // 사용자가 어떤 형식의 MD를 줘도 최대한 추출. 못 찾으면 기본값.
 function parseToneMd(md) {
+  // 기본값 — 사용자 디자인 시스템(Nike-style editorial minimalism) 매칭
   const DEFAULTS = {
-    primary: '6366F1',
-    secondary: 'EC4899',
-    background: '0F0F23',
-    text: 'FFFFFF',
-    accent: 'FBBF24',
+    background: 'FFFFFF', // canvas
+    text: '111111',       // ink
+    primary: '111111',    // ink (강조도 흑백)
+    secondary: '39393B',  // charcoal
+    accent: '707072',     // mute (부제·캡션)
+    soft: 'F5F5F5',       // soft-cloud (콜아웃 배경)
+    sale: 'D30005',       // 경고
     fontMain: 'Pretendard',
   }
   if (!md || typeof md !== 'string') return DEFAULTS
@@ -190,29 +203,20 @@ function parseToneMd(md) {
   // 키워드별 색상 매칭 — 라벨 옆 hex 추출
   const findColor = (keywords) => {
     for (const kw of keywords) {
-      // "primary: #6366F1" 또는 "primary - #6366F1" 또는 "primary  #6366F1"
-      const rx = new RegExp(`${kw}\\s*[:\\-\\|]?\\s*#?([0-9A-Fa-f]{6})`, 'i')
+      const rx = new RegExp(`${kw}\\s*[:\\-\\|]?\\s*\`?#?([0-9A-Fa-f]{6})`, 'i')
       const m = md.match(rx)
       if (m) return m[1].toUpperCase()
     }
     return null
   }
 
-  const primary = findColor(['primary', 'main', '메인', '주요']) ; if (primary) result.primary = primary
-  const secondary = findColor(['secondary', 'sub', '보조']) ; if (secondary) result.secondary = secondary
-  const background = findColor(['background', 'bg', '배경']) ; if (background) result.background = background
-  const text = findColor(['text', 'foreground', 'fg', '글씨', '텍스트']) ; if (text) result.text = text
-  const accent = findColor(['accent', '강조', 'highlight']) ; if (accent) result.accent = accent
-
-  // 키워드 매칭 실패 시 fallback — md 내 모든 hex 찾아서 순서대로 채움
-  const allHex = [...md.matchAll(/#([0-9A-Fa-f]{6})\b/g)].map(m => m[1].toUpperCase())
-  if (allHex.length >= 5) {
-    if (!primary && allHex[0]) result.primary = allHex[0]
-    if (!secondary && allHex[1]) result.secondary = allHex[1]
-    if (!background && allHex[2]) result.background = allHex[2]
-    if (!text && allHex[3]) result.text = allHex[3]
-    if (!accent && allHex[4]) result.accent = allHex[4]
-  }
+  const primary = findColor(['primary', 'main', '메인', '주요']); if (primary) result.primary = primary
+  const secondary = findColor(['secondary', 'sub', '보조', 'charcoal']); if (secondary) result.secondary = secondary
+  const background = findColor(['background', 'bg', '배경', 'canvas']); if (background) result.background = background
+  const text = findColor(['text', 'foreground', 'fg', '글씨', '텍스트', 'ink']); if (text) result.text = text
+  const accent = findColor(['accent', '강조', 'highlight', 'mute']); if (accent) result.accent = accent
+  const soft = findColor(['soft', 'soft-cloud', 'cloud']); if (soft) result.soft = soft
+  const sale = findColor(['sale', 'warning', 'error', '경고']); if (sale) result.sale = sale
 
   // 폰트 추출 — 유명 한글 폰트 우선
   const knownFonts = ['Pretendard', 'Noto Sans KR', 'Noto Sans', 'Malgun Gothic', 'Spoqa Han Sans', 'Nanum Gothic', 'Inter', 'Roboto', 'Poppins', 'Montserrat']
@@ -233,7 +237,20 @@ function isDarkColor(hex) {
 }
 
 // 디자인 적용된 .pptx 생성. plan + tone(parsed) → pptxgenjs 호출.
-// kind별 레이아웃 + 색상 적용. 클라이언트에서 dynamic import.
+// 사용자의 presentation-design-system.md 기반 — Nike editorial minimalism, 16:9 1920×1080,
+// Pretendard 전용, 좌측 정렬 본문, fixed positional grid.
+//
+// 핵심 가이드 (인치 단위로 변환 — 13.33×7.5 inch == 1920×1080 px):
+//   - 슬라이드 좌측 안전 마진: 80px = 0.55"
+//   - 챕터 마커: (0.55, 0.55)
+//   - 제목: (0.55, 1.4)
+//   - 부제: (0.55, 1.95)
+//   - 본문 시작: (0.55, 2.5)
+//   - 본문 끝: y ≤ 6.5
+//   - 푸터 디바이더: y = 6.55
+//   - 슬라이드 번호: 우하단 (12.8, 6.7)
+//
+// 배경은 풀스크린 fill rect로 강제 적용 (slide.background API 불안정).
 async function buildDesignedPptx(plan, parsedTone, safeFileName) {
   const PptxGenJS = (await import('pptxgenjs')).default
   const pptx = new PptxGenJS()
@@ -241,218 +258,319 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
   pptx.layout = 'LAYOUT_WIDE'  // 16:9, 13.33 x 7.5 inch
 
   const T = parsedTone
+  const SLIDE_W = 13.33
+  const SLIDE_H = 7.5
+  const MARGIN_X = 0.55   // 좌측 마진 (80px)
+  const RIGHT_X = SLIDE_W - MARGIN_X  // 우측 안전 마진
+  const CONTENT_W = SLIDE_W - MARGIN_X * 2  // 1760px = 12.23"
+
+  // 색상 보조 — 배경이 어두우면 텍스트는 밝게, 반대도
   const dark = isDarkColor(T.background)
-  const dimText = dark ? 'BBBBBB' : '555555'  // 보조 텍스트 색상
+  const onBg = dark ? 'FFFFFF' : T.text
+  const onBgMute = dark ? 'BBBBBB' : T.accent   // 보조 텍스트
+  const onBgSubtle = dark ? '888888' : '9E9EA0' // 더 약함
+
+  // 공통 헬퍼: 모든 슬라이드 시작 시 호출
+  const drawBackground = (slide) => {
+    // 풀스크린 배경 박스 (slide.background보다 안정적)
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+      fill: { color: T.background },
+      line: { color: T.background, width: 0 },
+    })
+  }
+  // 모든 슬라이드 공통 푸터 (디바이더 + 슬라이드 번호)
+  const drawFooter = (slide, slideNum) => {
+    // hairline 색상 (1px) — 톤에서 못 가져오면 단순 grey
+    slide.addShape(pptx.ShapeType.line, {
+      x: MARGIN_X, y: 6.55, w: CONTENT_W, h: 0,
+      line: { color: dark ? '333333' : 'E5E5E5', width: 0.5 },
+    })
+    slide.addText(String(slideNum || '?'), {
+      x: SLIDE_W - 0.8, y: 6.7, w: 0.6, h: 0.3,
+      fontSize: 10, color: onBgSubtle, fontFace: T.fontMain, align: 'right',
+    })
+  }
+  // 챕터 마커 (좌상단 작은 라벨)
+  const drawChapterMarker = (slide, label) => {
+    slide.addText(label, {
+      x: MARGIN_X, y: 0.45, w: 4, h: 0.3,
+      fontSize: 11, color: onBgMute, fontFace: T.fontMain, bold: false,
+    })
+  }
+
+  // 디자인 시스템의 kind 매핑:
+  //   hook       = Chapter Divider (full-bleed ink bg, hero typography)
+  //   intro      = Title Slide (좌측 텍스트 + 우측 이미지 placeholder)
+  //   proof      = Stat Display (큰 숫자 + 캡션)
+  //   journey    = Two Column (좌측 마커 + 우측 본문)
+  //   myth       = Title Slide (강한 단일 메시지)
+  //   info       = Content Slide (단일 컬럼 — title + body)
+  //   empty      = Image + Caption (배경만 + 가운데 캡션)
+  //   qna        = Quote Slide variant (Q. + 답변)
+  //   testimonial= Quote Slide (테두리 없는 인용 + 3단 본문)
+  //   cta        = Stat Display (강조 박스)
+  //   outro      = Quote Slide (중앙 한 줄)
 
   for (const s of (plan.slides || [])) {
     const slide = pptx.addSlide()
     const kind = s.kind || 'info'
+    const slideNum = s.slideNumber
 
-    // 모든 슬라이드 공통: 배경색
-    slide.background = { color: T.background }
+    drawBackground(slide)
 
-    // kind별 레이아웃 적용
     switch (kind) {
       case 'hook': {
-        // 풀스크린 큰 타이포, 좌측 accent bar
-        slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.15, h: 7.5, fill: { color: T.accent } })
+        // 챕터 디바이더 — full bleed 검정 배경에 흰 hero 타이포 (다크/라이트 토글)
+        // 톤이 라이트 모드면 ink 배경 + canvas 텍스트로 반전
+        slide.addShape(pptx.ShapeType.rect, {
+          x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+          fill: { color: T.text }, line: { color: T.text, width: 0 },
+        })
+        // 챕터 번호 (큰 숫자)
+        slide.addText(String(slideNum).padStart(2, '0'), {
+          x: MARGIN_X, y: 1.8, w: 4, h: 1.5,
+          fontSize: 120, bold: true, color: T.background, fontFace: T.fontMain,
+          charSpacing: -2,
+        })
+        // 메인 타이틀
         slide.addText(s.title || '', {
-          x: 0.6, y: 2.8, w: 12.2, h: 2.0,
-          fontSize: 56, bold: true, color: T.text,
-          fontFace: T.fontMain, valign: 'middle', align: 'left',
+          x: MARGIN_X, y: 3.5, w: SLIDE_W - MARGIN_X * 2, h: 2.0,
+          fontSize: 64, bold: true, color: T.background, fontFace: T.fontMain,
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.join('  ·  '), {
-            x: 0.6, y: 4.9, w: 12.2, h: 1.0,
-            fontSize: 20, color: T.accent, fontFace: T.fontMain, align: 'left',
+            x: MARGIN_X, y: 5.4, w: SLIDE_W - MARGIN_X * 2, h: 0.7,
+            fontSize: 20, color: T.background, fontFace: T.fontMain,
           })
         }
+        // 푸터는 색상 톤 반전
+        slide.addText(String(slideNum || '?'), {
+          x: SLIDE_W - 0.8, y: 6.9, w: 0.6, h: 0.3,
+          fontSize: 10, color: T.background, fontFace: T.fontMain, align: 'right',
+        })
         break
       }
       case 'intro': {
-        // 좌측 텍스트, 우측 이미지 자리 (placeholder 박스)
+        drawChapterMarker(slide, 'Introduction')
+        // 제목
         slide.addText(s.title || '', {
-          x: 0.6, y: 0.8, w: 7, h: 1.0,
-          fontSize: 36, bold: true, color: T.text, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.4, w: 7.5, h: 1.0,
+          fontSize: 48, bold: true, color: onBg, fontFace: T.fontMain,
         })
+        // 본문 좌측
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
-            x: 0.6, y: 2.0, w: 7, h: 4.5,
-            fontSize: 18, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 8,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: MARGIN_X, y: 2.5, w: 7.5, h: 3.9,
+            fontSize: 18, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 8, lineSpacing: 28,
           })
         }
-        // 우측 강사 이미지 자리
-        slide.addShape(pptx.ShapeType.roundRect, {
-          x: 8.5, y: 0.8, w: 4.3, h: 5.7,
-          fill: { color: T.primary, transparency: 70 },
-          line: { color: T.primary, width: 1 },
-          rectRadius: 0.2,
+        // 우측 강사 사진 placeholder
+        slide.addShape(pptx.ShapeType.rect, {
+          x: 8.5, y: 1.4, w: 4.3, h: 5.0,
+          fill: { color: T.soft }, line: { color: T.soft, width: 0 },
         })
-        slide.addText('강사 사진 영역', { x: 8.5, y: 3.5, w: 4.3, h: 0.5, fontSize: 12, color: dimText, align: 'center', fontFace: T.fontMain })
+        slide.addText('강사 사진', {
+          x: 8.5, y: 3.6, w: 4.3, h: 0.5,
+          fontSize: 14, color: onBgMute, fontFace: T.fontMain, align: 'center',
+        })
+        drawFooter(slide, slideNum)
         break
       }
       case 'proof': {
-        // 큰 숫자 + 캡션. 강사 성과 — 메인 메시지를 큰 폰트로.
+        drawChapterMarker(slide, 'Proof / 성과')
+        // 큰 숫자 — campaign size
         slide.addText(s.title || '', {
-          x: 0.6, y: 2.2, w: 12.2, h: 2.5,
-          fontSize: 72, bold: true, color: T.accent,
-          fontFace: T.fontMain, align: 'center', valign: 'middle',
+          x: MARGIN_X, y: 1.8, w: CONTENT_W, h: 2.5,
+          fontSize: 96, bold: true, color: onBg, fontFace: T.fontMain,
+          align: 'left', charSpacing: -1,
         })
+        // 캡션
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.join(' · '), {
-            x: 0.6, y: 4.9, w: 12.2, h: 1.0,
-            fontSize: 18, color: T.text, fontFace: T.fontMain, align: 'center',
+            x: MARGIN_X, y: 4.6, w: CONTENT_W, h: 1.5,
+            fontSize: 20, color: onBgMute, fontFace: T.fontMain,
           })
         }
+        drawFooter(slide, slideNum)
         break
       }
       case 'journey': {
-        // 좌측 연도/마커 + 우측 본문 (타임라인 카드 느낌)
+        drawChapterMarker(slide, 'Journey / 시행착오')
+        // 좌측 큰 연도/마커
         slide.addText(s.title || '', {
-          x: 0.6, y: 1.0, w: 3.5, h: 1.2,
-          fontSize: 36, bold: true, color: T.primary, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.4, w: 4, h: 1.4,
+          fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain,
         })
-        slide.addShape(pptx.ShapeType.rect, { x: 4.4, y: 1.0, w: 0.05, h: 5.5, fill: { color: T.primary } })
+        // 디바이더 라인
+        slide.addShape(pptx.ShapeType.line, {
+          x: 4.9, y: 1.5, w: 0, h: 4.8,
+          line: { color: dark ? '444444' : 'CACACB', width: 1 },
+        })
+        // 우측 본문
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
-            x: 4.8, y: 1.0, w: 8.0, h: 5.5,
-            fontSize: 18, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 8,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: 5.2, y: 1.5, w: 7.5, h: 4.8,
+            fontSize: 18, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 8, lineSpacing: 28,
           })
         }
+        drawFooter(slide, slideNum)
         break
       }
       case 'myth': {
-        // 통념 깨기 — "VS" 또는 강한 대비. 큰 강조 텍스트.
+        drawChapterMarker(slide, 'Myth / 통념 깨기')
         slide.addText(s.title || '', {
-          x: 0.6, y: 1.8, w: 12.2, h: 1.8,
-          fontSize: 44, bold: true, color: T.text,
-          fontFace: T.fontMain, align: 'center',
+          x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.5,
+          fontSize: 52, bold: true, color: onBg, fontFace: T.fontMain,
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
-            x: 1.5, y: 4.0, w: 10.3, h: 3.0,
-            fontSize: 18, color: T.secondary, fontFace: T.fontMain, paraSpaceAfter: 6,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: MARGIN_X, y: 3.0, w: CONTENT_W, h: 3.3,
+            fontSize: 20, color: T.secondary, fontFace: T.fontMain,
+            paraSpaceAfter: 10, lineSpacing: 30,
           })
         }
+        drawFooter(slide, slideNum)
         break
       }
       case 'info': {
-        // 표준: 좌상단 제목 + 본문 불릿
+        // 본론 — 표준 콘텐츠 슬라이드
+        drawChapterMarker(slide, 'Content')
         slide.addText(s.title || '', {
-          x: 0.6, y: 0.5, w: 12.2, h: 1.0,
-          fontSize: 32, bold: true, color: T.text, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.0,
+          fontSize: 44, bold: true, color: onBg, fontFace: T.fontMain,
         })
-        slide.addShape(pptx.ShapeType.rect, { x: 0.6, y: 1.5, w: 1.5, h: 0.06, fill: { color: T.primary } })
+        // 제목 아래 짧은 강조선 (16px 두께)
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 2.35, w: 0.6, h: 0.04,
+          fill: { color: T.text }, line: { color: T.text, width: 0 },
+        })
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
-            x: 0.6, y: 2.0, w: 12.2, h: 5.0,
-            fontSize: 20, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 10,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: MARGIN_X, y: 2.6, w: CONTENT_W, h: 3.9,
+            fontSize: 20, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 10, lineSpacing: 32,
           })
         }
+        drawFooter(slide, slideNum)
         break
       }
       case 'empty': {
-        // 빈 슬라이드 — 풀스크린 배경. 영상/이미지 자리.
-        slide.addText(s.title || '', {
-          x: 0.6, y: 3.0, w: 12.2, h: 1.5,
-          fontSize: 28, color: dimText,
-          fontFace: T.fontMain, align: 'center', italic: true,
+        // 빈/이미지 슬라이드 — soft-cloud 큰 placeholder + 캡션
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 1.0, w: CONTENT_W, h: 4.5,
+          fill: { color: T.soft }, line: { color: T.soft, width: 0 },
         })
+        slide.addText('이미지 / 영상 자리', {
+          x: MARGIN_X, y: 3.0, w: CONTENT_W, h: 0.5,
+          fontSize: 16, color: onBgMute, fontFace: T.fontMain, align: 'center',
+        })
+        if (s.title) {
+          slide.addText(s.title, {
+            x: MARGIN_X, y: 5.7, w: CONTENT_W, h: 0.8,
+            fontSize: 18, color: onBgMute, fontFace: T.fontMain, italic: true,
+          })
+        }
+        drawFooter(slide, slideNum)
         break
       }
       case 'qna': {
-        // Q. 큰 글씨 + 답변
+        drawChapterMarker(slide, 'Q&A')
+        // 큰 Q.
         slide.addText('Q.', {
-          x: 0.6, y: 0.8, w: 1.5, h: 1.5,
-          fontSize: 64, bold: true, color: T.accent, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.4, w: 1.0, h: 1.5,
+          fontSize: 72, bold: true, color: onBg, fontFace: T.fontMain,
         })
+        // 질문 텍스트
         slide.addText(s.title || '', {
-          x: 2.2, y: 1.0, w: 10.6, h: 1.5,
-          fontSize: 28, bold: true, color: T.text, fontFace: T.fontMain, valign: 'middle',
+          x: 1.8, y: 1.6, w: CONTENT_W - 1.3, h: 1.3,
+          fontSize: 32, bold: true, color: onBg, fontFace: T.fontMain, valign: 'middle',
         })
+        // 답변
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
-            x: 2.2, y: 2.8, w: 10.6, h: 4.2,
-            fontSize: 18, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 8,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: 1.8, y: 3.2, w: CONTENT_W - 1.3, h: 3.0,
+            fontSize: 18, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 8, lineSpacing: 28,
           })
         }
+        drawFooter(slide, slideNum)
         break
       }
       case 'testimonial': {
-        // 인용 박스. 따옴표 + 3단 구조 본문 + 카드형.
-        slide.addShape(pptx.ShapeType.roundRect, {
-          x: 0.6, y: 0.8, w: 12.2, h: 5.9,
-          fill: { color: T.primary, transparency: 85 },
-          line: { color: T.primary, width: 1 },
-          rectRadius: 0.15,
-        })
+        drawChapterMarker(slide, 'Testimonial / 후기')
+        // 큰 따옴표 (장식)
         slide.addText('"', {
-          x: 0.8, y: 0.6, w: 1.0, h: 1.5,
-          fontSize: 72, bold: true, color: T.accent, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.0, w: 1.0, h: 1.5,
+          fontSize: 120, bold: true, color: onBgSubtle, fontFace: T.fontMain,
         })
+        // 인용 제목
         slide.addText(s.title || '', {
-          x: 1.6, y: 1.3, w: 10.6, h: 1.0,
-          fontSize: 22, bold: true, color: T.text, fontFace: T.fontMain,
+          x: MARGIN_X + 0.2, y: 2.2, w: CONTENT_W - 0.4, h: 1.0,
+          fontSize: 28, bold: true, color: onBg, fontFace: T.fontMain,
         })
+        // 3단 본문 (상황 → 코칭 → 결과)
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
-            x: 1.6, y: 2.5, w: 10.6, h: 3.8,
-            fontSize: 16, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 6,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: MARGIN_X + 0.2, y: 3.3, w: CONTENT_W - 0.4, h: 3.0,
+            fontSize: 17, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 10, lineSpacing: 26,
           })
         }
+        drawFooter(slide, slideNum)
         break
       }
       case 'cta': {
-        // 모집 — 강한 색상 박스, 가격/혜택 강조
-        slide.addShape(pptx.ShapeType.roundRect, {
-          x: 1.0, y: 1.0, w: 11.3, h: 5.5,
-          fill: { color: T.accent },
-          line: { color: T.accent, width: 0 },
-          rectRadius: 0.25,
+        drawChapterMarker(slide, 'CTA / 모집')
+        // 강조 박스 — soft-cloud 풀 너비
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 1.3, w: CONTENT_W, h: 5.0,
+          fill: { color: T.soft }, line: { color: T.soft, width: 0 },
         })
         slide.addText(s.title || '', {
-          x: 1.4, y: 1.4, w: 10.5, h: 1.2,
-          fontSize: 36, bold: true, color: isDarkColor(T.accent) ? 'FFFFFF' : '111111', fontFace: T.fontMain,
+          x: MARGIN_X + 0.4, y: 1.7, w: CONTENT_W - 0.8, h: 1.2,
+          fontSize: 44, bold: true, color: T.text, fontFace: T.fontMain,
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
-            x: 1.4, y: 2.8, w: 10.5, h: 3.5,
-            fontSize: 20, color: isDarkColor(T.accent) ? 'FFFFFF' : '222222', fontFace: T.fontMain, paraSpaceAfter: 10,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: MARGIN_X + 0.4, y: 3.1, w: CONTENT_W - 0.8, h: 3.0,
+            fontSize: 20, color: T.text, fontFace: T.fontMain,
+            paraSpaceAfter: 10, lineSpacing: 32,
           })
         }
+        drawFooter(slide, slideNum)
         break
       }
       case 'outro': {
-        // 마무리 — 중앙 정렬 텍스트
         slide.addText(s.title || '감사합니다', {
-          x: 0.6, y: 3.0, w: 12.2, h: 1.5,
-          fontSize: 48, bold: true, color: T.text,
-          fontFace: T.fontMain, align: 'center', valign: 'middle',
+          x: MARGIN_X, y: 2.5, w: CONTENT_W, h: 1.5,
+          fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain,
+          align: 'center', valign: 'middle',
         })
+        drawFooter(slide, slideNum)
         break
       }
       default: {
         // info와 동일 fallback
+        drawChapterMarker(slide, 'Content')
         slide.addText(s.title || '', {
-          x: 0.6, y: 0.5, w: 12.2, h: 1.0,
-          fontSize: 32, bold: true, color: T.text, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.0,
+          fontSize: 44, bold: true, color: onBg, fontFace: T.fontMain,
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
-            x: 0.6, y: 2.0, w: 12.2, h: 5.0,
-            fontSize: 20, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 10,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: MARGIN_X, y: 2.6, w: CONTENT_W, h: 3.9,
+            fontSize: 20, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 10, lineSpacing: 32,
           })
         }
+        drawFooter(slide, slideNum)
       }
     }
 
-    // 좌상단 슬라이드 번호 (모든 슬라이드)
-    slide.addText(`${s.slideNumber || '?'}`, {
-      x: 12.5, y: 7.0, w: 0.8, h: 0.3,
-      fontSize: 10, color: dimText, fontFace: T.fontMain, align: 'right',
-    })
-
-    // 발표 멘트는 슬라이드 노트로 (PowerPoint [발표자 노트] 영역)
+    // 발표 멘트는 슬라이드 노트로
     if (s.speakerNotes) {
       slide.addNotes(s.speakerNotes)
     }
@@ -11022,10 +11140,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', margin: 0 }}>PPT 디자인 톤</h3>
                           <span style={{ fontSize: '11px', padding: '3px 8px', background: 'rgba(168,85,247,0.15)', color: '#d8b4fe', borderRadius: '999px', fontWeight: 700 }}>선택</span>
                         </div>
-                        <p style={{ fontSize: '12.5px', color: '#94a3b8', lineHeight: 1.55, marginBottom: '14px' }}>
+                        <p style={{ fontSize: '12.5px', color: '#94a3b8', lineHeight: 1.55, marginBottom: '10px' }}>
                           <a href="https://www.designmd.org/" target="_blank" rel="noopener noreferrer" style={{ color: '#a5b4fc' }}>design.md</a> 같은 곳에서 원하는 톤의 MD를 복사해 붙여넣으세요.
-                          색상 hex(예: <code style={{ color: '#fbbf24' }}>#6366F1</code>)와 폰트명을 자동 추출합니다. <b style={{ color: '#cbd5e1' }}>입력 안 하면 기본 N잡연구소 다크 톤</b>으로 진행.
+                          색상 hex(예: <code style={{ color: '#fbbf24' }}>#111111</code>)와 폰트명을 자동 추출합니다. 입력 안 하면 <b style={{ color: '#cbd5e1' }}>기본 N잡연구소 톤</b>(Nike editorial, 흰 캔버스 + 검정 잉크)으로 진행.
                         </p>
+                        <div style={{ marginBottom: '14px', padding: '10px 12px', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: '8px', fontSize: '11.5px', color: '#fbbf24', lineHeight: 1.55 }}>
+                          ℹ️ <b>폰트 안내</b>: PPTX는 폰트명만 참조합니다. PC에 <a href="https://github.com/orioncactus/pretendard/releases" target="_blank" rel="noopener noreferrer" style={{ color: '#fcd34d', textDecoration: 'underline' }}>Pretendard 폰트</a>가 설치돼있어야 디자인대로 보입니다. 없으면 시스템 fallback(Malgun Gothic 등)으로 표시.
+                        </div>
 
                         <textarea value={pp_designToneMd} onChange={(e) => setPpDesignToneMd(e.target.value)} rows={14}
                           placeholder="# Brand Tone\nModern, minimal, bold typography...\n\n## Colors\n- Primary: #6366F1\n- Background: #0F0F23\n..."
