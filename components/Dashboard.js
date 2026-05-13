@@ -379,7 +379,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         break
       }
       case 'intro': {
-        drawChapterMarker(slide, 'Intro / 강사 소개')
+        drawChapterMarker(slide, 'Intro')
         drawTopHairline(slide)
         // 제목
         slide.addText(s.title || '', {
@@ -416,7 +416,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         break
       }
       case 'proof': {
-        drawChapterMarker(slide, 'Proof / 성과')
+        drawChapterMarker(slide, 'Proof')
         drawTopHairline(slide)
         // 큰 숫자/메시지 — 96 → 64
         slide.addText(s.title || '', {
@@ -446,7 +446,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         break
       }
       case 'journey': {
-        drawChapterMarker(slide, 'Journey / 시행착오')
+        drawChapterMarker(slide, 'Journey')
         drawTopHairline(slide)
         // 좌측 마커 — 박스 폭 늘리고 폰트 줄임 (긴 한글 제목도 안 넘침)
         slide.addText(s.title || '', {
@@ -471,7 +471,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         break
       }
       case 'myth': {
-        drawChapterMarker(slide, 'Myth / 통념 깨기')
+        drawChapterMarker(slide, 'Myth')
         drawTopHairline(slide)
         slide.addText(s.title || '', {
           x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.5,
@@ -570,7 +570,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         break
       }
       case 'testimonial': {
-        drawChapterMarker(slide, 'Testimonial / 후기')
+        drawChapterMarker(slide, 'Testimonial')
         drawTopHairline(slide)
         // soft-cloud 콘텐츠 박스 (인용 느낌)
         slide.addShape(pptx.ShapeType.rect, {
@@ -599,7 +599,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         break
       }
       case 'cta': {
-        drawChapterMarker(slide, 'CTA / 모집')
+        drawChapterMarker(slide, 'CTA')
         drawTopHairline(slide)
         // 강조 박스 — 검정 풀 너비 (모집은 가장 강한 강조)
         slide.addShape(pptx.ShapeType.rect, {
@@ -687,12 +687,26 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
     const allFontsXml = `<a:latin typeface="${fontName}"/><a:ea typeface="${fontName}"/><a:cs typeface="${fontName}"/>`
 
     // (1) theme1.xml의 majorFont/minorFont 강제
+    //   - 기존 latin/ea/cs만 교체. 기존 <a:font script="..."> 매핑 (수십 개)은 보존.
+    //   - 단 'Hang' (한국어) script도 동일 폰트로 명시 (한글 폰트 fallback 강화).
     const themeFile = zip.file('ppt/theme/theme1.xml')
     if (themeFile) {
       let themeXml = await themeFile.async('string')
-      themeXml = themeXml
-        .replace(/<a:majorFont>[\s\S]*?<\/a:majorFont>/, `<a:majorFont>${allFontsXml}<a:font script="Hang" typeface="${fontName}"/><a:font script="Hans" typeface="${fontName}"/><a:font script="Hant" typeface="${fontName}"/></a:majorFont>`)
-        .replace(/<a:minorFont>[\s\S]*?<\/a:minorFont>/, `<a:minorFont>${allFontsXml}<a:font script="Hang" typeface="${fontName}"/><a:font script="Hans" typeface="${fontName}"/><a:font script="Hant" typeface="${fontName}"/></a:minorFont>`)
+      const replaceFontGroup = (tag, xml) => {
+        const rx = new RegExp(`<a:${tag}>([\\s\\S]*?)<\\/a:${tag}>`, 'g')
+        return xml.replace(rx, (_, inner) => {
+          // 기존 latin/ea/cs 제거 (우리 것으로 교체) — script 태그는 그대로 보존
+          let cleaned = inner
+            .replace(/<a:latin[^/]*\/>/g, '')
+            .replace(/<a:ea[^/]*\/>/g, '')
+            .replace(/<a:cs[^/]*\/>/g, '')
+          // 한국어 script(Hang)도 우리 폰트로 명시 (있으면 typeface 교체, 없으면 무시)
+          cleaned = cleaned.replace(/<a:font script="Hang"[^/]*\/>/g, `<a:font script="Hang" typeface="${fontName}"/>`)
+          return `<a:${tag}>${allFontsXml}${cleaned}</a:${tag}>`
+        })
+      }
+      themeXml = replaceFontGroup('majorFont', themeXml)
+      themeXml = replaceFontGroup('minorFont', themeXml)
       zip.file('ppt/theme/theme1.xml', themeXml)
     }
 
