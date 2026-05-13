@@ -152,6 +152,10 @@ function makeSafeFileName(base, fallback = 'plan') {
 
 // 기본 톤 — 사용자 디자인 시스템(presentation-design-system.md) 기반.
 // Nike-style editorial minimalism: 흰 캔버스 + 검정 잉크, Pretendard 전용, 16:9 고정 그리드.
+//
+// 폰트는 Pretendard. buildDesignedPptx 후처리로 PPTX의 theme1.xml과 모든 슬라이드의
+// 폰트 슬롯 3종(latin/ea/cs)을 Pretendard로 강제 → 받는 사람 PC에 Pretendard 설치만
+// 돼있으면 디자인 그대로 보임.
 const DEFAULT_DESIGN_TONE_MD = `# N잡연구소 무료강의 디자인 시스템
 Editorial minimalism (Nike-style). Bold typography, high-contrast black-and-white palette,
 consistent spatial anchoring across all slides. Fixed positional grid for rhythmic consistency.
@@ -185,6 +189,9 @@ consistent spatial anchoring across all slides. Fixed positional grid for rhythm
 // 사용자가 어떤 형식의 MD를 줘도 최대한 추출. 못 찾으면 기본값.
 function parseToneMd(md) {
   // 기본값 — 사용자 디자인 시스템(Nike-style editorial minimalism) 매칭
+  // 폰트는 Pretendard — buildDesignedPptx 후처리로 PPTX의 theme + 슬라이드 XML의
+  // 폰트 슬롯 3종(latin/ea/cs)을 모두 Pretendard로 강제하므로 받는 사람 PC에
+  // Pretendard 설치만 돼있으면 PowerPoint가 Pretendard로 정확히 표시.
   const DEFAULTS = {
     background: 'FFFFFF', // canvas
     text: '111111',       // ink
@@ -660,7 +667,87 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
     }
   }
 
-  await pptx.writeFile({ fileName: `${safeFileName}.pptx` })
+  // ===== PPTX 후처리: 폰트 슬롯 3종(latin/ea/cs) 강제 적용 =====
+  //
+  // pptxgenjs는 fontFace를 PPTX XML의 <a:latin> typeface에만 넣고, <a:ea>(동아시아)
+  // 및 <a:cs>(복합 스크립트)는 비워둠. 그래서 받는 PowerPoint가 빈 슬롯에 대해
+  // 기본값(Inter, Calibri 등)을 사용 → 사용자 PC에 Pretendard 있어도 다른 폰트로 표시.
+  //
+  // 해결: pptxgenjs blob을 JSZip으로 풀어서
+  //   1) theme1.xml의 majorFont/minorFont에 ea/cs typeface 강제 추가
+  //   2) 모든 slide*.xml의 <a:rPr> 안에 latin이 있으면 ea/cs도 같은 폰트로 추가
+  // 그 후 다시 ZIP → 다운로드.
+  const blob = await pptx.write({ outputType: 'blob' })
+  let finalBlob = blob
+
+  try {
+    const JSZip = (await import('jszip')).default
+    const zip = await JSZip.loadAsync(blob)
+    const fontName = T.fontMain
+    const allFontsXml = `<a:latin typeface="${fontName}"/><a:ea typeface="${fontName}"/><a:cs typeface="${fontName}"/>`
+
+    // (1) theme1.xml의 majorFont/minorFont 강제
+    const themeFile = zip.file('ppt/theme/theme1.xml')
+    if (themeFile) {
+      let themeXml = await themeFile.async('string')
+      themeXml = themeXml
+        .replace(/<a:majorFont>[\s\S]*?<\/a:majorFont>/, `<a:majorFont>${allFontsXml}<a:font script="Hang" typeface="${fontName}"/><a:font script="Hans" typeface="${fontName}"/><a:font script="Hant" typeface="${fontName}"/></a:majorFont>`)
+        .replace(/<a:minorFont>[\s\S]*?<\/a:minorFont>/, `<a:minorFont>${allFontsXml}<a:font script="Hang" typeface="${fontName}"/><a:font script="Hans" typeface="${fontName}"/><a:font script="Hant" typeface="${fontName}"/></a:minorFont>`)
+      zip.file('ppt/theme/theme1.xml', themeXml)
+    }
+
+    // (2) 모든 슬라이드/마스터/레이아웃의 <a:rPr> 처리
+    //   - 이미 <a:latin>이 있는 rPr에 <a:ea>/<a:cs>가 없으면 추가
+    //   - <a:defRPr>도 동일 처리
+    //   - <a:endParaRPr>도 동일 처리
+    const xmlFilePaths = Object.keys(zip.files).filter(p =>
+      (p.startsWith('ppt/slides/slide') || p.startsWith('ppt/slideMasters/') || p.startsWith('ppt/slideLayouts/') || p.startsWith('ppt/notesSlides/') || p.startsWith('ppt/notesMasters/')) &&
+      p.endsWith('.xml')
+    )
+    const eaCsTags = `<a:ea typeface="${fontName}"/><a:cs typeface="${fontName}"/>`
+    for (const path of xmlFilePaths) {
+      const file = zip.file(path)
+      if (!file) continue
+      let xml = await file.async('string')
+
+      // <a:rPr ...>...<a:latin typeface="X"/>...</a:rPr> 형태 — ea/cs 없으면 latin 뒤에 추가
+      // (a:rPr가 self-closing인 경우는 보통 latin 없음 — 스킵)
+      xml = xml.replace(/(<a:(?:rPr|defRPr|endParaRPr)[^>]*>)([\s\S]*?)(<\/a:(?:rPr|defRPr|endParaRPr)>)/g, (match, open, inner, close) => {
+        const hasLatin = inner.includes('<a:latin ')
+        const hasEa = inner.includes('<a:ea ')
+        const hasCs = inner.includes('<a:cs ')
+        if (!hasLatin) return match // latin 없으면 fontFace 미지정 — 그대로
+        if (hasEa && hasCs) return match // 이미 다 있음
+        // latin 태그 뒤에 ea/cs 삽입
+        let added = ''
+        if (!hasEa) added += `<a:ea typeface="${fontName}"/>`
+        if (!hasCs) added += `<a:cs typeface="${fontName}"/>`
+        const newInner = inner.replace(/(<a:latin[^/]*\/>)/, `$1${added}`)
+        return `${open}${newInner}${close}`
+      })
+
+      zip.file(path, xml)
+    }
+
+    finalBlob = await zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    })
+  } catch (e) {
+    // 후처리 실패해도 원본 blob으로 fallback (디자인은 그대로, 폰트만 한글이 시스템 fallback)
+    console.warn('[buildDesignedPptx] 폰트 강제 후처리 실패:', e?.message)
+    finalBlob = blob
+  }
+
+  // 다운로드
+  const url = URL.createObjectURL(finalBlob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${safeFileName}.pptx`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 // 정리봇 markdown 렌더러 (의존성 없는 경량 구현).
@@ -11229,7 +11316,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           색상 hex(예: <code style={{ color: '#fbbf24' }}>#111111</code>)와 폰트명을 자동 추출합니다. 입력 안 하면 <b style={{ color: '#cbd5e1' }}>기본 N잡연구소 톤</b>(Nike editorial, 흰 캔버스 + 검정 잉크)으로 진행.
                         </p>
                         <div style={{ marginBottom: '14px', padding: '10px 12px', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: '8px', fontSize: '11.5px', color: '#fbbf24', lineHeight: 1.55 }}>
-                          ℹ️ <b>폰트 안내</b>: PPTX는 폰트명만 참조합니다. PC에 <a href="https://github.com/orioncactus/pretendard/releases" target="_blank" rel="noopener noreferrer" style={{ color: '#fcd34d', textDecoration: 'underline' }}>Pretendard 폰트</a>가 설치돼있어야 디자인대로 보입니다. 없으면 시스템 fallback(Malgun Gothic 등)으로 표시.
+                          ℹ️ <b>폰트 안내</b>: 기본값은 <b style={{ color: '#fef3c7' }}>Pretendard</b>. 다운로드 시 PPTX의 폰트 슬롯 3종(영문/한글/복합)을 모두 Pretendard로 자동 강제 적용합니다.
+                          <b style={{ color: '#fef3c7' }}> 보내는 쪽 + 받는 쪽 PC 모두 Pretendard 설치돼있으면</b> 디자인 그대로 보입니다.
+                          (<a href="https://github.com/orioncactus/pretendard/releases" target="_blank" rel="noopener noreferrer" style={{ color: '#fcd34d', textDecoration: 'underline' }}>Pretendard 무료 다운로드</a>)
                         </div>
 
                         <textarea value={pp_designToneMd} onChange={(e) => setPpDesignToneMd(e.target.value)} rows={14}
