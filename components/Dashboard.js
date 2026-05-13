@@ -710,38 +710,62 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       zip.file('ppt/theme/theme1.xml', themeXml)
     }
 
-    // (2) 모든 슬라이드/마스터/레이아웃의 <a:rPr> 처리
-    //   - 이미 <a:latin>이 있는 rPr에 <a:ea>/<a:cs>가 없으면 추가
-    //   - <a:defRPr>도 동일 처리
-    //   - <a:endParaRPr>도 동일 처리
+    // (2) 모든 슬라이드/마스터/레이아웃 XML의 폰트 슬롯 강제 — 두 패턴 모두 처리:
+    //
+    //   패턴 A: 열고 닫는 태그 — <a:rPr ...><a:latin .../>...</a:rPr>
+    //     → latin/ea/cs 중 빠진 것 추가
+    //   패턴 B: self-closing 태그 — <a:rPr ... /> (자식 없음, 폰트 미지정)
+    //     → 자식 추가하면서 열고 닫는 태그로 변환 (모든 rPr에 우리 폰트 강제 적용)
+    //
+    //   이러면 슬라이드 안의 모든 텍스트 런이 latin/ea/cs 폰트 슬롯 3종 모두에
+    //   동일한 우리 폰트를 갖게 됨 → PowerPoint가 한글/영문 무관하게 우리 폰트로 렌더.
     const xmlFilePaths = Object.keys(zip.files).filter(p =>
       (p.startsWith('ppt/slides/slide') || p.startsWith('ppt/slideMasters/') || p.startsWith('ppt/slideLayouts/') || p.startsWith('ppt/notesSlides/') || p.startsWith('ppt/notesMasters/')) &&
       p.endsWith('.xml')
     )
-    const eaCsTags = `<a:ea typeface="${fontName}"/><a:cs typeface="${fontName}"/>`
+    const allSlotsXml = `<a:latin typeface="${fontName}"/><a:ea typeface="${fontName}"/><a:cs typeface="${fontName}"/>`
+
+    let patchCountA = 0, patchCountB = 0
     for (const path of xmlFilePaths) {
       const file = zip.file(path)
       if (!file) continue
       let xml = await file.async('string')
 
-      // <a:rPr ...>...<a:latin typeface="X"/>...</a:rPr> 형태 — ea/cs 없으면 latin 뒤에 추가
-      // (a:rPr가 self-closing인 경우는 보통 latin 없음 — 스킵)
+      // 패턴 B 먼저: self-closing → 열고 닫는 태그로 변환 + 폰트 슬롯 3종 강제.
+      //   주의: <a:tab/>, <a:effectLst/> 같이 비슷한 이름의 self-closing 다른 태그와 헷갈리지 않게
+      //   정확히 rPr/defRPr/endParaRPr만 매칭.
+      xml = xml.replace(/<a:(rPr|defRPr|endParaRPr)([^>]*?)\/>/g, (match, tag, attrs) => {
+        patchCountB++
+        return `<a:${tag}${attrs}>${allSlotsXml}</a:${tag}>`
+      })
+
+      // 패턴 A: 열고 닫는 태그 — latin/ea/cs 중 빠진 것 추가
       xml = xml.replace(/(<a:(?:rPr|defRPr|endParaRPr)[^>]*>)([\s\S]*?)(<\/a:(?:rPr|defRPr|endParaRPr)>)/g, (match, open, inner, close) => {
-        const hasLatin = inner.includes('<a:latin ')
-        const hasEa = inner.includes('<a:ea ')
-        const hasCs = inner.includes('<a:cs ')
-        if (!hasLatin) return match // latin 없으면 fontFace 미지정 — 그대로
-        if (hasEa && hasCs) return match // 이미 다 있음
-        // latin 태그 뒤에 ea/cs 삽입
-        let added = ''
-        if (!hasEa) added += `<a:ea typeface="${fontName}"/>`
-        if (!hasCs) added += `<a:cs typeface="${fontName}"/>`
-        const newInner = inner.replace(/(<a:latin[^/]*\/>)/, `$1${added}`)
+        const hasLatin = /<a:latin\s/.test(inner)
+        const hasEa = /<a:ea\s/.test(inner)
+        const hasCs = /<a:cs\s/.test(inner)
+        if (hasLatin && hasEa && hasCs) return match // 모두 있음 — 그대로
+
+        let newInner = inner
+        if (!hasLatin) {
+          // latin 자체가 없으면 inner 맨 앞에 추가
+          newInner = `<a:latin typeface="${fontName}"/>` + newInner
+        }
+        if (!hasEa) {
+          // latin 직후에 ea 삽입
+          newInner = newInner.replace(/(<a:latin[^/]*\/>)/, `$1<a:ea typeface="${fontName}"/>`)
+        }
+        if (!hasCs) {
+          // ea 직후에 cs 삽입 (이제 ea는 무조건 있음)
+          newInner = newInner.replace(/(<a:ea[^/]*\/>)/, `$1<a:cs typeface="${fontName}"/>`)
+        }
+        patchCountA++
         return `${open}${newInner}${close}`
       })
 
       zip.file(path, xml)
     }
+    console.log(`[buildDesignedPptx] 폰트 슬롯 강제: ${xmlFilePaths.length}개 XML, 패턴A=${patchCountA}, 패턴B=${patchCountB}`)
 
     finalBlob = await zip.generateAsync({
       type: 'blob',
