@@ -745,62 +745,53 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       zip.file('ppt/theme/theme1.xml', themeXml)
     }
 
-    // (2) 모든 슬라이드/마스터/레이아웃 XML의 폰트 슬롯 강제 — 두 패턴 모두 처리:
+    // (2) 모든 XML의 폰트 슬롯 강제 — 단순/강력 버전:
+    //   pptxgenjs가 typeface="Inter"(또는 다른 폰트)를 박아넣는 게 진짜 원인 발견.
+    //   "다 있으면 스킵"이 아니라 "있는 typeface 값을 무조건 우리 폰트로 교체"가 정답.
     //
-    //   패턴 A: 열고 닫는 태그 — <a:rPr ...><a:latin .../>...</a:rPr>
-    //     → latin/ea/cs 중 빠진 것 추가
-    //   패턴 B: self-closing 태그 — <a:rPr ... /> (자식 없음, 폰트 미지정)
-    //     → 자식 추가하면서 열고 닫는 태그로 변환 (모든 rPr에 우리 폰트 강제 적용)
-    //
-    //   이러면 슬라이드 안의 모든 텍스트 런이 latin/ea/cs 폰트 슬롯 3종 모두에
-    //   동일한 우리 폰트를 갖게 됨 → PowerPoint가 한글/영문 무관하게 우리 폰트로 렌더.
+    //   1) <a:latin typeface="X" .../> → <a:latin typeface="{fontName}" .../>
+    //   2) <a:ea typeface="X" .../> → <a:ea typeface="{fontName}" .../>
+    //   3) <a:cs typeface="X" .../> → <a:cs typeface="{fontName}" .../>
+    //   4) self-closing <a:rPr ... /> → <a:rPr ...>{3종}</a:rPr> (폰트 슬롯 자체가 없는 경우)
+    //   5) 열고 닫는 <a:rPr>{내용에 latin 없음}</a:rPr> → latin/ea/cs 3종 자식 추가
     const xmlFilePaths = Object.keys(zip.files).filter(p =>
       (p.startsWith('ppt/slides/slide') || p.startsWith('ppt/slideMasters/') || p.startsWith('ppt/slideLayouts/') || p.startsWith('ppt/notesSlides/') || p.startsWith('ppt/notesMasters/')) &&
       p.endsWith('.xml')
     )
     const allSlotsXml = `<a:latin typeface="${fontName}"/><a:ea typeface="${fontName}"/><a:cs typeface="${fontName}"/>`
 
-    let patchCountA = 0, patchCountB = 0
+    let typefaceReplaced = 0, selfCloseConverted = 0, slotsAdded = 0
     for (const path of xmlFilePaths) {
       const file = zip.file(path)
       if (!file) continue
       let xml = await file.async('string')
 
-      // 패턴 B 먼저: self-closing → 열고 닫는 태그로 변환 + 폰트 슬롯 3종 강제.
-      //   주의: <a:tab/>, <a:effectLst/> 같이 비슷한 이름의 self-closing 다른 태그와 헷갈리지 않게
-      //   정확히 rPr/defRPr/endParaRPr만 매칭.
+      // (a) 가장 강력: 모든 typeface 속성을 강제로 우리 폰트로 교체.
+      //     이미 존재하는 latin/ea/cs/font script="..." 등 모든 typeface 속성 대상.
+      xml = xml.replace(/(<a:(?:latin|ea|cs)\s[^>]*?\btypeface=")([^"]*)("[^>]*\/?>)/g, (m, pre, oldFont, post) => {
+        if (oldFont === fontName) return m
+        typefaceReplaced++
+        return `${pre}${fontName}${post}`
+      })
+
+      // (b) self-closing rPr/defRPr/endParaRPr — 자식이 없으니 latin/ea/cs도 없음 → 통째로 추가.
       xml = xml.replace(/<a:(rPr|defRPr|endParaRPr)([^>]*?)\/>/g, (match, tag, attrs) => {
-        patchCountB++
+        selfCloseConverted++
         return `<a:${tag}${attrs}>${allSlotsXml}</a:${tag}>`
       })
 
-      // 패턴 A: 열고 닫는 태그 — latin/ea/cs 중 빠진 것 추가
+      // (c) 열고 닫는 rPr/defRPr/endParaRPr 중 latin 자체가 없는 경우 — 3종 추가.
+      //     (a) 단계에서 latin이 있으면 typeface는 우리 폰트로 이미 교체됐고,
+      //     latin 자체가 없는 경우만 여기서 추가.
       xml = xml.replace(/(<a:(?:rPr|defRPr|endParaRPr)[^>]*>)([\s\S]*?)(<\/a:(?:rPr|defRPr|endParaRPr)>)/g, (match, open, inner, close) => {
-        const hasLatin = /<a:latin\s/.test(inner)
-        const hasEa = /<a:ea\s/.test(inner)
-        const hasCs = /<a:cs\s/.test(inner)
-        if (hasLatin && hasEa && hasCs) return match // 모두 있음 — 그대로
-
-        let newInner = inner
-        if (!hasLatin) {
-          // latin 자체가 없으면 inner 맨 앞에 추가
-          newInner = `<a:latin typeface="${fontName}"/>` + newInner
-        }
-        if (!hasEa) {
-          // latin 직후에 ea 삽입
-          newInner = newInner.replace(/(<a:latin[^/]*\/>)/, `$1<a:ea typeface="${fontName}"/>`)
-        }
-        if (!hasCs) {
-          // ea 직후에 cs 삽입 (이제 ea는 무조건 있음)
-          newInner = newInner.replace(/(<a:ea[^/]*\/>)/, `$1<a:cs typeface="${fontName}"/>`)
-        }
-        patchCountA++
-        return `${open}${newInner}${close}`
+        if (/<a:latin\s/.test(inner)) return match // latin 있으면 (a)에서 처리됨
+        slotsAdded++
+        return `${open}${allSlotsXml}${inner}${close}`
       })
 
       zip.file(path, xml)
     }
-    console.log(`[buildDesignedPptx] 폰트 슬롯 강제: ${xmlFilePaths.length}개 XML, 패턴A=${patchCountA}, 패턴B=${patchCountB}`)
+    console.log(`[buildDesignedPptx] 폰트 강제: ${xmlFilePaths.length}개 XML, typeface 교체=${typefaceReplaced}, self-close 변환=${selfCloseConverted}, 슬롯 추가=${slotsAdded}`)
 
     // (3) 폰트 임베드 — Pretendard 톤일 때만 적용.
     //   PowerPoint가 시스템 폰트 매칭에 의존하지 않고 PPTX 자체 폰트 사용 →
@@ -1454,6 +1445,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [shoongBulkReservedAt, setShoongBulkReservedAt] = useState('')
   const [shoongBulkSending, setShoongBulkSending] = useState(false)
   const [shoongBulkResult, setShoongBulkResult] = useState(null)
+  // 청크 분할 발송 진행 상황 (큰 명단 처리 중 실시간 표시)
+  const [shoongBulkProgress, setShoongBulkProgress] = useState(null)
+  // { totalChunks, currentChunk, totalRecipients, sent, failed, status: 'running'|'done' }
   // 테스트 모드: ON이면 모든 발송이 testPhone으로만 감 (수만명 신청자한테 가는 사고 방지)
   const [shoongBulkTestMode, setShoongBulkTestMode] = useState(true) // 기본 ON
   const [shoongBulkTestPhone, setShoongBulkTestPhone] = useState('')
@@ -7382,29 +7376,104 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
                                     setShoongBulkSending(true)
                                     setShoongBulkResult(null)
+                                    setShoongBulkProgress(null)
                                     try {
                                       const token = localStorage.getItem('authToken') || ''
                                       const tplVarsForSend = BULK_TPL[shoongBulkTplCode] || []
                                       const variables = {}
                                       for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
-                                      const body = {
+                                      const baseBody = {
                                         courseIds: shoongBulkSelectedIds,
                                         templatecode: shoongBulkTplCode,
                                         variables
                                       }
                                       if (shoongBulkSendMode === 'reserved' && shoongBulkReservedAt) {
-                                        body.reservedTime = new Date(shoongBulkReservedAt).toISOString()
+                                        baseBody.reservedTime = new Date(shoongBulkReservedAt).toISOString()
                                       }
                                       if (shoongBulkTestMode) {
-                                        body.testPhone = shoongBulkTestPhone.trim()
-                                        body.testLimit = shoongBulkTestLimit
+                                        baseBody.testPhone = shoongBulkTestPhone.trim()
+                                        baseBody.testLimit = shoongBulkTestLimit
+                                        // 테스트 모드는 어차피 1~5건만 발송 → 청크 불필요
+                                        const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                          body: JSON.stringify(baseBody)
+                                        })
+                                        setShoongBulkResult({ ...data, _httpStatus: status })
+                                        return
                                       }
-                                      const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                        body: JSON.stringify(body)
+
+                                      // ===== 실전 발송 — 청크 분할 루프 =====
+                                      //   1) 첫 호출: chunkOffset=0, chunkSize=CHUNK_SIZE → 서버가 첫 청크 발송 + totalRecipients 반환
+                                      //   2) 총 청크 수 계산 → 2번째부터 N번째까지 순차 호출
+                                      //   3) 각 청크 결과를 누적 + 진행률 state 갱신
+                                      //   Vercel 300초 한도 안에서 안전하게 처리되는 청크 크기 = 500명 정도
+                                      //   (한 명당 슝 API 호출 + 동시 5개 한도 → 500명 ≈ 60~90초)
+                                      const CHUNK_SIZE = 500
+                                      let totalRecipients = 0
+                                      let totalChunks = 1
+                                      let totalSent = 0, totalFailed = 0, totalSkipped = { noUser: 0, invalidPhone: 0, duplicate: 0 }
+                                      const allErrors = []
+                                      let firstChunkData = null
+
+                                      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                                        const chunkOffset = chunkIndex * CHUNK_SIZE
+                                        setShoongBulkProgress({
+                                          status: 'running',
+                                          currentChunk: chunkIndex + 1,
+                                          totalChunks,
+                                          totalRecipients,
+                                          sent: totalSent,
+                                          failed: totalFailed,
+                                        })
+                                        const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                          body: JSON.stringify({ ...baseBody, chunkOffset, chunkSize: CHUNK_SIZE })
+                                        })
+                                        if (status >= 400 || data.error) {
+                                          setShoongBulkResult({
+                                            error: data.error || `청크 ${chunkIndex + 1}/${totalChunks} 실패 (HTTP ${status})`,
+                                            partialResult: {
+                                              completedChunks: chunkIndex,
+                                              totalChunks,
+                                              sent: totalSent,
+                                              failed: totalFailed,
+                                              errors: allErrors.slice(0, 50),
+                                            },
+                                          })
+                                          break
+                                        }
+                                        if (chunkIndex === 0) {
+                                          firstChunkData = data
+                                          totalRecipients = data.totalRecipients || data.recipientCount || 0
+                                          totalChunks = Math.max(1, Math.ceil(totalRecipients / CHUNK_SIZE))
+                                          totalSkipped = data.skipped || totalSkipped
+                                        }
+                                        totalSent += data.sent || 0
+                                        totalFailed += data.failed || 0
+                                        if (Array.isArray(data.errors)) allErrors.push(...data.errors)
+                                      }
+
+                                      setShoongBulkProgress({
+                                        status: 'done',
+                                        currentChunk: totalChunks,
+                                        totalChunks,
+                                        totalRecipients,
+                                        sent: totalSent,
+                                        failed: totalFailed,
                                       })
-                                      setShoongBulkResult({ ...data, _httpStatus: status })
+                                      setShoongBulkResult({
+                                        via: 'vercel-server-bulk-chunked',
+                                        mode: 'db',
+                                        totalApplies: firstChunkData?.totalApplies || 0,
+                                        recipientCount: totalRecipients,
+                                        sent: totalSent,
+                                        failed: totalFailed,
+                                        skipped: totalSkipped,
+                                        errors: allErrors.slice(0, 50),
+                                        chunkInfo: { totalChunks, chunkSize: CHUNK_SIZE },
+                                      })
                                     } catch (err) {
                                       setShoongBulkResult({ error: err.message })
                                     } finally {
@@ -7430,6 +7499,41 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 </button>
                               </div>
                             </>
+                          )}
+
+                          {/* 청크 발송 진행 패널 — 큰 명단 발송 중 실시간 진행률 */}
+                          {shoongBulkProgress && (
+                            <div style={{
+                              marginTop: '16px', padding: '12px 14px',
+                              background: shoongBulkProgress.status === 'done' ? 'rgba(16,185,129,0.10)' : 'rgba(99,102,241,0.10)',
+                              border: `1px solid ${shoongBulkProgress.status === 'done' ? 'rgba(16,185,129,0.30)' : 'rgba(99,102,241,0.30)'}`,
+                              borderRadius: '10px',
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff' }}>
+                                  {shoongBulkProgress.status === 'done' ? '✅ 발송 완료' : '📤 청크 발송 중'}
+                                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500, marginLeft: '8px' }}>
+                                    청크 {shoongBulkProgress.currentChunk} / {shoongBulkProgress.totalChunks}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>
+                                  성공 {shoongBulkProgress.sent?.toLocaleString() || 0} · 실패 {shoongBulkProgress.failed?.toLocaleString() || 0} · 총 {shoongBulkProgress.totalRecipients?.toLocaleString() || 0}
+                                </div>
+                              </div>
+                              <div style={{ height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+                                <div style={{
+                                  width: `${shoongBulkProgress.totalChunks > 0 ? Math.round((shoongBulkProgress.currentChunk / shoongBulkProgress.totalChunks) * 100) : 0}%`,
+                                  height: '100%',
+                                  background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                                  transition: 'width 0.4s ease',
+                                }} />
+                              </div>
+                              {shoongBulkProgress.status === 'running' && (
+                                <div style={{ marginTop: '6px', fontSize: '10.5px', color: '#94a3b8' }}>
+                                  💡 청크당 500명씩 분할 발송 중. 화면 닫지 마세요 — 다 끝나면 알림 결과 표시됩니다.
+                                </div>
+                              )}
+                            </div>
                           )}
 
                           {/* 결과 패널 */}
