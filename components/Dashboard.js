@@ -139,6 +139,41 @@ function genericPlanToMarkdown(taskKey, plan) {
   return lines.join('\n')
 }
 
+// 안전한 JSON 파싱 — 응답이 JSON 아닐 때(Vercel timeout HTML 등) 친절한 에러로 변환.
+// 사용법: const { data, ok, status } = await safeFetchJson(url, options)
+async function safeFetchJson(url, options) {
+  let res, text, data, parseError
+  try {
+    res = await fetch(url, options)
+  } catch (e) {
+    return { ok: false, status: 0, data: { error: `네트워크 오류: ${e?.message || e}` }, isNetworkError: true }
+  }
+  try {
+    text = await res.text()
+  } catch (e) {
+    text = ''
+  }
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch (e) {
+    parseError = e
+    // JSON 파싱 실패 — Vercel timeout / HTML 에러 페이지 / 빈 응답 등.
+    const isTimeout = res.status === 504 || res.status === 408 ||
+                      /timeout|FUNCTION_INVOCATION/i.test(text)
+    const isServerErr = res.status >= 500
+    let friendlyMsg
+    if (isTimeout) {
+      friendlyMsg = '서버 처리 시간 초과 (Vercel 한도 300초). 큰 명단은 한 번에 못 보냅니다 — 명단을 더 작은 청크로 나눠서 다시 시도해주세요.'
+    } else if (isServerErr) {
+      friendlyMsg = `서버 오류 (HTTP ${res.status}). 잠시 후 다시 시도하거나 명단을 줄여서 시도해주세요.`
+    } else {
+      friendlyMsg = `잘못된 응답 형식 (HTTP ${res.status}). 응답: ${text.slice(0, 100)}`
+    }
+    data = { error: friendlyMsg, _raw: text.slice(0, 300), _parseError: parseError?.message }
+  }
+  return { ok: res.ok, status: res.status, data }
+}
+
 // 파일명 안전 처리 (Windows/macOS 모두 금지 문자 제거)
 function makeSafeFileName(base, fallback = 'plan') {
   const s = (base || fallback).replace(/[\\/:*?"<>|]/g, '_').trim()
@@ -7293,7 +7328,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                       const tplVarsForSend = BULK_TPL[shoongBulkTplCode] || []
                                       const variables = {}
                                       for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
-                                      const res = await fetch('/api/tools/shoong-bulk/send', {
+                                      const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                                         body: JSON.stringify({
@@ -7303,8 +7338,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                           dryRun: true
                                         })
                                       })
-                                      const data = await res.json()
-                                      setShoongBulkResult({ ...data, _httpStatus: res.status, _dryRun: true })
+                                      setShoongBulkResult({ ...data, _httpStatus: status, _dryRun: true })
                                     } catch (err) {
                                       setShoongBulkResult({ error: err.message })
                                     } finally {
@@ -7365,13 +7399,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                         body.testPhone = shoongBulkTestPhone.trim()
                                         body.testLimit = shoongBulkTestLimit
                                       }
-                                      const res = await fetch('/api/tools/shoong-bulk/send', {
+                                      const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                                         body: JSON.stringify(body)
                                       })
-                                      const data = await res.json()
-                                      setShoongBulkResult({ ...data, _httpStatus: res.status })
+                                      setShoongBulkResult({ ...data, _httpStatus: status })
                                     } catch (err) {
                                       setShoongBulkResult({ error: err.message })
                                     } finally {
@@ -7716,7 +7749,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                       const tplVarsForSend = BULK_TPL[shoongBulkTplCode] || []
                                       const variables = {}
                                       for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
-                                      const res = await fetch('/api/tools/shoong-bulk/send', {
+                                      const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                                         body: JSON.stringify({
@@ -7726,8 +7759,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                           dryRun: true
                                         })
                                       })
-                                      const data = await res.json()
-                                      setShoongManualResult({ ...data, _httpStatus: res.status, _dryRun: true })
+                                      setShoongManualResult({ ...data, _httpStatus: status, _dryRun: true })
                                     } catch (err) {
                                       setShoongManualResult({ error: err.message })
                                     } finally {
@@ -7783,13 +7815,12 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                         body.testPhone = shoongBulkTestPhone.trim()
                                         body.testLimit = shoongBulkTestLimit
                                       }
-                                      const res = await fetch('/api/tools/shoong-bulk/send', {
+                                      const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                                         body: JSON.stringify(body)
                                       })
-                                      const data = await res.json()
-                                      setShoongManualResult({ ...data, _httpStatus: res.status })
+                                      setShoongManualResult({ ...data, _httpStatus: status })
                                     } catch (err) {
                                       setShoongManualResult({ error: err.message })
                                     } finally {
