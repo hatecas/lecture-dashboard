@@ -145,6 +145,322 @@ function makeSafeFileName(base, fallback = 'plan') {
   return s.slice(0, 80) || fallback
 }
 
+// ===================================================================
+// PPT 디자인 톤 — 사용자가 design.md 같은 곳에서 복붙한 톤 MD를 받아
+// 색상/폰트를 추출 + kind별 레이아웃에 적용해 디자인된 .pptx 생성.
+// ===================================================================
+
+// 기본 톤 (사용자가 입력 안 했을 때 — N잡연구소 다크 인디고/앰버)
+const DEFAULT_DESIGN_TONE_MD = `# N잡연구소 무료강의 디자인 톤
+Modern, minimal, bold typography. Dark mode default with vibrant accents.
+
+## Colors
+- Primary: #6366F1   (인디고 — 메인 강조)
+- Secondary: #EC4899 (핫핑크 — 보조 강조)
+- Background: #0F0F23 (다크 — 슬라이드 배경)
+- Text: #FFFFFF       (글씨)
+- Accent: #FBBF24    (앰버 — 수치/CTA 강조)
+
+## Fonts
+- Heading: Pretendard Bold
+- Body: Pretendard
+
+## Style
+- Sharp typography, lots of whitespace.
+- Big numbers for proof slides (캡쳐/스크린샷 자리).
+- Quote-style cards for testimonials (3단 구조: 상황 → 코칭 → 결과).
+- High contrast for hook/CTA — bold accent stripes on left edge.`
+
+// 톤 MD에서 색상/폰트 추출. 정규식 기반 + 키워드 매칭 + fallback.
+// 사용자가 어떤 형식의 MD를 줘도 최대한 추출. 못 찾으면 기본값.
+function parseToneMd(md) {
+  const DEFAULTS = {
+    primary: '6366F1',
+    secondary: 'EC4899',
+    background: '0F0F23',
+    text: 'FFFFFF',
+    accent: 'FBBF24',
+    fontMain: 'Pretendard',
+  }
+  if (!md || typeof md !== 'string') return DEFAULTS
+
+  const result = { ...DEFAULTS }
+  const lower = md.toLowerCase()
+
+  // 키워드별 색상 매칭 — 라벨 옆 hex 추출
+  const findColor = (keywords) => {
+    for (const kw of keywords) {
+      // "primary: #6366F1" 또는 "primary - #6366F1" 또는 "primary  #6366F1"
+      const rx = new RegExp(`${kw}\\s*[:\\-\\|]?\\s*#?([0-9A-Fa-f]{6})`, 'i')
+      const m = md.match(rx)
+      if (m) return m[1].toUpperCase()
+    }
+    return null
+  }
+
+  const primary = findColor(['primary', 'main', '메인', '주요']) ; if (primary) result.primary = primary
+  const secondary = findColor(['secondary', 'sub', '보조']) ; if (secondary) result.secondary = secondary
+  const background = findColor(['background', 'bg', '배경']) ; if (background) result.background = background
+  const text = findColor(['text', 'foreground', 'fg', '글씨', '텍스트']) ; if (text) result.text = text
+  const accent = findColor(['accent', '강조', 'highlight']) ; if (accent) result.accent = accent
+
+  // 키워드 매칭 실패 시 fallback — md 내 모든 hex 찾아서 순서대로 채움
+  const allHex = [...md.matchAll(/#([0-9A-Fa-f]{6})\b/g)].map(m => m[1].toUpperCase())
+  if (allHex.length >= 5) {
+    if (!primary && allHex[0]) result.primary = allHex[0]
+    if (!secondary && allHex[1]) result.secondary = allHex[1]
+    if (!background && allHex[2]) result.background = allHex[2]
+    if (!text && allHex[3]) result.text = allHex[3]
+    if (!accent && allHex[4]) result.accent = allHex[4]
+  }
+
+  // 폰트 추출 — 유명 한글 폰트 우선
+  const knownFonts = ['Pretendard', 'Noto Sans KR', 'Noto Sans', 'Malgun Gothic', 'Spoqa Han Sans', 'Nanum Gothic', 'Inter', 'Roboto', 'Poppins', 'Montserrat']
+  for (const f of knownFonts) {
+    if (lower.includes(f.toLowerCase())) { result.fontMain = f; break }
+  }
+
+  return result
+}
+
+// 어두운 배경인지 — text 색상 자동 보정용
+function isDarkColor(hex) {
+  const r = parseInt(hex.slice(0, 2), 16)
+  const g = parseInt(hex.slice(2, 4), 16)
+  const b = parseInt(hex.slice(4, 6), 16)
+  // 휘도 (luma)
+  return (0.299 * r + 0.587 * g + 0.114 * b) < 128
+}
+
+// 디자인 적용된 .pptx 생성. plan + tone(parsed) → pptxgenjs 호출.
+// kind별 레이아웃 + 색상 적용. 클라이언트에서 dynamic import.
+async function buildDesignedPptx(plan, parsedTone, safeFileName) {
+  const PptxGenJS = (await import('pptxgenjs')).default
+  const pptx = new PptxGenJS()
+  pptx.title = plan.title || '강의 PPT outline'
+  pptx.layout = 'LAYOUT_WIDE'  // 16:9, 13.33 x 7.5 inch
+
+  const T = parsedTone
+  const dark = isDarkColor(T.background)
+  const dimText = dark ? 'BBBBBB' : '555555'  // 보조 텍스트 색상
+
+  for (const s of (plan.slides || [])) {
+    const slide = pptx.addSlide()
+    const kind = s.kind || 'info'
+
+    // 모든 슬라이드 공통: 배경색
+    slide.background = { color: T.background }
+
+    // kind별 레이아웃 적용
+    switch (kind) {
+      case 'hook': {
+        // 풀스크린 큰 타이포, 좌측 accent bar
+        slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.15, h: 7.5, fill: { color: T.accent } })
+        slide.addText(s.title || '', {
+          x: 0.6, y: 2.8, w: 12.2, h: 2.0,
+          fontSize: 56, bold: true, color: T.text,
+          fontFace: T.fontMain, valign: 'middle', align: 'left',
+        })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.join('  ·  '), {
+            x: 0.6, y: 4.9, w: 12.2, h: 1.0,
+            fontSize: 20, color: T.accent, fontFace: T.fontMain, align: 'left',
+          })
+        }
+        break
+      }
+      case 'intro': {
+        // 좌측 텍스트, 우측 이미지 자리 (placeholder 박스)
+        slide.addText(s.title || '', {
+          x: 0.6, y: 0.8, w: 7, h: 1.0,
+          fontSize: 36, bold: true, color: T.text, fontFace: T.fontMain,
+        })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
+            x: 0.6, y: 2.0, w: 7, h: 4.5,
+            fontSize: 18, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 8,
+          })
+        }
+        // 우측 강사 이미지 자리
+        slide.addShape(pptx.ShapeType.roundRect, {
+          x: 8.5, y: 0.8, w: 4.3, h: 5.7,
+          fill: { color: T.primary, transparency: 70 },
+          line: { color: T.primary, width: 1 },
+          rectRadius: 0.2,
+        })
+        slide.addText('강사 사진 영역', { x: 8.5, y: 3.5, w: 4.3, h: 0.5, fontSize: 12, color: dimText, align: 'center', fontFace: T.fontMain })
+        break
+      }
+      case 'proof': {
+        // 큰 숫자 + 캡션. 강사 성과 — 메인 메시지를 큰 폰트로.
+        slide.addText(s.title || '', {
+          x: 0.6, y: 2.2, w: 12.2, h: 2.5,
+          fontSize: 72, bold: true, color: T.accent,
+          fontFace: T.fontMain, align: 'center', valign: 'middle',
+        })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.join(' · '), {
+            x: 0.6, y: 4.9, w: 12.2, h: 1.0,
+            fontSize: 18, color: T.text, fontFace: T.fontMain, align: 'center',
+          })
+        }
+        break
+      }
+      case 'journey': {
+        // 좌측 연도/마커 + 우측 본문 (타임라인 카드 느낌)
+        slide.addText(s.title || '', {
+          x: 0.6, y: 1.0, w: 3.5, h: 1.2,
+          fontSize: 36, bold: true, color: T.primary, fontFace: T.fontMain,
+        })
+        slide.addShape(pptx.ShapeType.rect, { x: 4.4, y: 1.0, w: 0.05, h: 5.5, fill: { color: T.primary } })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
+            x: 4.8, y: 1.0, w: 8.0, h: 5.5,
+            fontSize: 18, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 8,
+          })
+        }
+        break
+      }
+      case 'myth': {
+        // 통념 깨기 — "VS" 또는 강한 대비. 큰 강조 텍스트.
+        slide.addText(s.title || '', {
+          x: 0.6, y: 1.8, w: 12.2, h: 1.8,
+          fontSize: 44, bold: true, color: T.text,
+          fontFace: T.fontMain, align: 'center',
+        })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
+            x: 1.5, y: 4.0, w: 10.3, h: 3.0,
+            fontSize: 18, color: T.secondary, fontFace: T.fontMain, paraSpaceAfter: 6,
+          })
+        }
+        break
+      }
+      case 'info': {
+        // 표준: 좌상단 제목 + 본문 불릿
+        slide.addText(s.title || '', {
+          x: 0.6, y: 0.5, w: 12.2, h: 1.0,
+          fontSize: 32, bold: true, color: T.text, fontFace: T.fontMain,
+        })
+        slide.addShape(pptx.ShapeType.rect, { x: 0.6, y: 1.5, w: 1.5, h: 0.06, fill: { color: T.primary } })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
+            x: 0.6, y: 2.0, w: 12.2, h: 5.0,
+            fontSize: 20, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 10,
+          })
+        }
+        break
+      }
+      case 'empty': {
+        // 빈 슬라이드 — 풀스크린 배경. 영상/이미지 자리.
+        slide.addText(s.title || '', {
+          x: 0.6, y: 3.0, w: 12.2, h: 1.5,
+          fontSize: 28, color: dimText,
+          fontFace: T.fontMain, align: 'center', italic: true,
+        })
+        break
+      }
+      case 'qna': {
+        // Q. 큰 글씨 + 답변
+        slide.addText('Q.', {
+          x: 0.6, y: 0.8, w: 1.5, h: 1.5,
+          fontSize: 64, bold: true, color: T.accent, fontFace: T.fontMain,
+        })
+        slide.addText(s.title || '', {
+          x: 2.2, y: 1.0, w: 10.6, h: 1.5,
+          fontSize: 28, bold: true, color: T.text, fontFace: T.fontMain, valign: 'middle',
+        })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
+            x: 2.2, y: 2.8, w: 10.6, h: 4.2,
+            fontSize: 18, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 8,
+          })
+        }
+        break
+      }
+      case 'testimonial': {
+        // 인용 박스. 따옴표 + 3단 구조 본문 + 카드형.
+        slide.addShape(pptx.ShapeType.roundRect, {
+          x: 0.6, y: 0.8, w: 12.2, h: 5.9,
+          fill: { color: T.primary, transparency: 85 },
+          line: { color: T.primary, width: 1 },
+          rectRadius: 0.15,
+        })
+        slide.addText('"', {
+          x: 0.8, y: 0.6, w: 1.0, h: 1.5,
+          fontSize: 72, bold: true, color: T.accent, fontFace: T.fontMain,
+        })
+        slide.addText(s.title || '', {
+          x: 1.6, y: 1.3, w: 10.6, h: 1.0,
+          fontSize: 22, bold: true, color: T.text, fontFace: T.fontMain,
+        })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
+            x: 1.6, y: 2.5, w: 10.6, h: 3.8,
+            fontSize: 16, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 6,
+          })
+        }
+        break
+      }
+      case 'cta': {
+        // 모집 — 강한 색상 박스, 가격/혜택 강조
+        slide.addShape(pptx.ShapeType.roundRect, {
+          x: 1.0, y: 1.0, w: 11.3, h: 5.5,
+          fill: { color: T.accent },
+          line: { color: T.accent, width: 0 },
+          rectRadius: 0.25,
+        })
+        slide.addText(s.title || '', {
+          x: 1.4, y: 1.4, w: 10.5, h: 1.2,
+          fontSize: 36, bold: true, color: isDarkColor(T.accent) ? 'FFFFFF' : '111111', fontFace: T.fontMain,
+        })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
+            x: 1.4, y: 2.8, w: 10.5, h: 3.5,
+            fontSize: 20, color: isDarkColor(T.accent) ? 'FFFFFF' : '222222', fontFace: T.fontMain, paraSpaceAfter: 10,
+          })
+        }
+        break
+      }
+      case 'outro': {
+        // 마무리 — 중앙 정렬 텍스트
+        slide.addText(s.title || '감사합니다', {
+          x: 0.6, y: 3.0, w: 12.2, h: 1.5,
+          fontSize: 48, bold: true, color: T.text,
+          fontFace: T.fontMain, align: 'center', valign: 'middle',
+        })
+        break
+      }
+      default: {
+        // info와 동일 fallback
+        slide.addText(s.title || '', {
+          x: 0.6, y: 0.5, w: 12.2, h: 1.0,
+          fontSize: 32, bold: true, color: T.text, fontFace: T.fontMain,
+        })
+        if (Array.isArray(s.bullets) && s.bullets.length) {
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })), {
+            x: 0.6, y: 2.0, w: 12.2, h: 5.0,
+            fontSize: 20, color: T.text, fontFace: T.fontMain, paraSpaceAfter: 10,
+          })
+        }
+      }
+    }
+
+    // 좌상단 슬라이드 번호 (모든 슬라이드)
+    slide.addText(`${s.slideNumber || '?'}`, {
+      x: 12.5, y: 7.0, w: 0.8, h: 0.3,
+      fontSize: 10, color: dimText, fontFace: T.fontMain, align: 'right',
+    })
+
+    // 발표 멘트는 슬라이드 노트로 (PowerPoint [발표자 노트] 영역)
+    if (s.speakerNotes) {
+      slide.addNotes(s.speakerNotes)
+    }
+  }
+
+  await pptx.writeFile({ fileName: `${safeFileName}.pptx` })
+}
+
 // 정리봇 markdown 렌더러 (의존성 없는 경량 구현).
 // 지원: ## / ### 헤더, - 불릿, 1. 번호, | ... | 표(GFM), > 인용, --- 구분선,
 //       **굵게**, *기울임*, _기울임_, `코드`, 단락.
@@ -746,6 +1062,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // 드래그앤드롭 상태 (구조 설정 모달용)
   const [pp_dragIndex, setPpDragIndex] = useState(null)        // 잡은 카드 idx
   const [pp_dragOverIndex, setPpDragOverIndex] = useState(null) // hover 중인 drop target idx
+  // PPT 디자인 톤 (기획 생성 시 한 번 묻고 결과에 적용)
+  const [pp_designToneMd, setPpDesignToneMd] = useState(DEFAULT_DESIGN_TONE_MD)
+  const [pp_toneModalOpen, setPpToneModalOpen] = useState(false)
+  const [pp_pendingGenerate, setPpPendingGenerate] = useState(null) // 톤 모달에서 진행 시 실행할 함수
 
   // 마운트 시 localStorage에서 사용자별 구조 복원 (없으면 default 유지)
   useEffect(() => {
@@ -757,6 +1077,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         if (Array.isArray(parsed) && parsed.length > 0) {
           setPpPptStructure(parsed)
         }
+      }
+      // 디자인 톤도 마지막에 사용한 거 복원
+      const toneRaw = localStorage.getItem(`pp_designToneMd:${loginId}`)
+      if (toneRaw && typeof toneRaw === 'string' && toneRaw.length > 10) {
+        setPpDesignToneMd(toneRaw)
       }
     } catch (e) {
       console.warn('[pptStructure] localStorage 복원 실패:', e?.message)
@@ -9001,21 +9326,16 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
             }
 
-            // 사전 점검 → 모달 또는 본 생성
-            const handleGenerate = async () => {
-              if (!ready) { setPpError('강사와 기수를 먼저 선택하세요.'); return }
-              if (!pp_topic.trim() || pp_enabledTasks.length === 0) {
-                setPpError('주제와 최소 1개 항목이 필요합니다.')
-                return
-              }
-              // 전자책 사전 검증은 precheck 전에도 한 번 더 (서버 round-trip 절약)
-              if (pp_enabledTasks.includes('ebook')) {
-                const ebookCount = attachments.filter(a => a.file_role === 'ebook').length
-                if (ebookCount === 0) {
-                  alert('📚 무료 전자책 기획안을 만들려면 강사가 제공한 전자책 파일이 필요합니다.\n\n자료 영역의 [📚 전자책] 버튼으로 PDF나 텍스트 파일을 먼저 업로드해주세요.')
-                  return
-                }
-              }
+            // 톤 모달 → 사전 점검 → 모달 또는 본 생성
+            //
+            // 흐름:
+            //   1. PPT outline이 체크돼있으면 톤 입력 모달부터 띄움
+            //      (사용자가 design.md 톤을 복붙하거나 기본 톤 그대로 진행)
+            //   2. 톤 확인 후 기존 precheck 흐름으로 진입
+            //   3. 톤은 localStorage 저장 + 생성된 기획안 메타에도 저장
+            //
+            // PPT 체크 안 했으면 톤 모달 스킵.
+            const proceedAfterTone = async () => {
               setPpError('')
               setPpPrechecking(true)
               try {
@@ -9040,9 +9360,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     setPpModalOpen(true)
                     return
                   }
-                  // ready=true → 그대로 본 생성으로 떨어짐
                 } else {
-                  // 점검 실패는 사용자 흐름 막지 않음 — 콘솔 경고 후 본 생성 진행
                   console.warn('[precheck] HTTP', res.status)
                 }
               } catch (e) {
@@ -9051,6 +9369,52 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 setPpPrechecking(false)
               }
               await runPlanner()
+            }
+
+            const handleGenerate = async () => {
+              if (!ready) { setPpError('강사와 기수를 먼저 선택하세요.'); return }
+              if (!pp_topic.trim() || pp_enabledTasks.length === 0) {
+                setPpError('주제와 최소 1개 항목이 필요합니다.')
+                return
+              }
+              // 전자책 사전 검증은 precheck 전에도 한 번 더 (서버 round-trip 절약)
+              if (pp_enabledTasks.includes('ebook')) {
+                const ebookCount = attachments.filter(a => a.file_role === 'ebook').length
+                if (ebookCount === 0) {
+                  alert('📚 무료 전자책 기획안을 만들려면 강사가 제공한 전자책 파일이 필요합니다.\n\n자료 영역의 [📚 전자책] 버튼으로 PDF나 텍스트 파일을 먼저 업로드해주세요.')
+                  return
+                }
+              }
+
+              // PPT 체크돼있으면 디자인 톤 입력 모달 먼저. 그 후 proceedAfterTone 실행.
+              if (pp_enabledTasks.includes('ppt')) {
+                setPpPendingGenerate(() => proceedAfterTone)
+                setPpToneModalOpen(true)
+                return
+              }
+
+              await proceedAfterTone()
+            }
+
+            // 톤 모달 → "이 톤으로 진행" 클릭 시 호출
+            const confirmToneAndProceed = () => {
+              // localStorage에 저장 (다음에 같은 톤 자동 복원)
+              if (typeof window !== 'undefined' && loginId) {
+                try {
+                  localStorage.setItem(`pp_designToneMd:${loginId}`, pp_designToneMd)
+                } catch {}
+              }
+              setPpToneModalOpen(false)
+              if (typeof pp_pendingGenerate === 'function') {
+                pp_pendingGenerate()
+                setPpPendingGenerate(null)
+              }
+            }
+
+            // 톤 모달 → "취소" 클릭 시
+            const cancelToneAndAbort = () => {
+              setPpToneModalOpen(false)
+              setPpPendingGenerate(null)
             }
 
             const handleModalContinue = async () => {
@@ -9206,58 +9570,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   setTimeout(() => URL.revokeObjectURL(url), 1000)
                 }
 
-                // 4) .pptx 파일 다운로드 — pptxgenjs로 실제 PowerPoint 파일 생성.
-                //    슬라이드별 1페이지, 제목 + 불릿 + 발표 멘트(노트). 강사가 PowerPoint에서
-                //    열어 디자인만 입히면 됨. 클라이언트 측 처리(서버 X).
+                // 4) .pptx 파일 다운로드 — 디자인 톤 적용된 PowerPoint 파일 생성.
+                //    pp_designToneMd 또는 기본 톤 사용. kind별 레이아웃 + 색상 자동 적용.
+                //    강사는 받자마자 거의 그대로 사용 가능. 일러스트만 더하면 끝.
                 const exportBusyKind = pp_exportBusy[taskKey] || null
                 const downloadPptx = async () => {
                   setPpExportBusy(prev => ({ ...prev, [taskKey]: 'pptx' }))
                   try {
-                    const { default: PptxGenJS } = await import('pptxgenjs')
-                    const pptx = new PptxGenJS()
-                    pptx.title = plan.title || '강의 PPT outline'
-                    pptx.layout = 'LAYOUT_WIDE' // 16:9
-
-                    for (const s of (plan.slides || [])) {
-                      const slide = pptx.addSlide()
-                      const kindLabel = KIND_LABEL[s.kind]?.label || ''
-
-                      // 좌상단 메타 (슬라이드 번호 · 종류)
-                      slide.addText(`#${s.slideNumber || '?'}${kindLabel ? `  ·  ${kindLabel}` : ''}`, {
-                        x: 0.3, y: 0.2, w: 5, h: 0.4,
-                        fontSize: 11, color: '888888',
-                      })
-
-                      // 제목 (큰 글씨)
-                      if (s.title) {
-                        slide.addText(s.title, {
-                          x: 0.5, y: 0.8, w: 12, h: 1.2,
-                          fontSize: 32, bold: true, color: '111111',
-                          fontFace: 'Malgun Gothic',
-                          valign: 'top',
-                        })
-                      }
-
-                      // 본문 불릿
-                      if (Array.isArray(s.bullets) && s.bullets.length) {
-                        slide.addText(
-                          s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })),
-                          {
-                            x: 0.6, y: 2.2, w: 12, h: 4.5,
-                            fontSize: 20, color: '333333',
-                            fontFace: 'Malgun Gothic',
-                            paraSpaceAfter: 8,
-                          }
-                        )
-                      }
-
-                      // 발표 멘트는 슬라이드 노트로 (PowerPoint에서 [발표자 노트] 영역에 표시)
-                      if (s.speakerNotes) {
-                        slide.addNotes(s.speakerNotes)
-                      }
-                    }
-
-                    await pptx.writeFile({ fileName: `${safeFileName}.pptx` })
+                    const parsed = parseToneMd(pp_designToneMd || DEFAULT_DESIGN_TONE_MD)
+                    await buildDesignedPptx(plan, parsed, safeFileName)
                   } catch (e) {
                     alert('.pptx 생성 실패: ' + (e?.message || e))
                   } finally {
@@ -9348,7 +9669,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           cursor: exportBusyKind === 'pptx' ? 'wait' : 'pointer',
                         }}
                         title="실제 PowerPoint 파일(.pptx) 생성 — 슬라이드별 제목·불릿·발표자 노트 포함">
-                        {exportBusyKind === 'pptx' ? '⏳ .pptx 생성 중…' : '📊 .pptx 다운로드'}
+                        {exportBusyKind === 'pptx' ? '⏳ .pptx 생성 중…' : '🎨 디자인 적용 .pptx'}
                       </button>
                       <button onClick={createNotionPlanPage} disabled={exportBusyKind === 'notion'}
                         style={{
@@ -10687,6 +11008,74 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   )
                 })()}
 
+                {/* ───── 🎨 PPT 디자인 톤 입력 모달 ─────
+                    PPT 체크돼있을 때 [🪄 기획 생성] 클릭 시 자동 표시.
+                    사용자가 design.md 톤 복붙하거나 기본 톤으로 진행. */}
+                {pp_toneModalOpen && (() => {
+                  const T = parseToneMd(pp_designToneMd)
+                  return (
+                    <div onClick={(e) => { if (e.target === e.currentTarget) cancelToneAndAbort() }}
+                      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+                      <div style={{ background: '#0f0f15', borderRadius: '14px', padding: '24px', maxWidth: '760px', width: '100%', maxHeight: '92vh', overflowY: 'auto', border: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                          <span style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'linear-gradient(135deg, #f472b6, #a855f7)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px' }}>🎨</span>
+                          <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', margin: 0 }}>PPT 디자인 톤</h3>
+                          <span style={{ fontSize: '11px', padding: '3px 8px', background: 'rgba(168,85,247,0.15)', color: '#d8b4fe', borderRadius: '999px', fontWeight: 700 }}>선택</span>
+                        </div>
+                        <p style={{ fontSize: '12.5px', color: '#94a3b8', lineHeight: 1.55, marginBottom: '14px' }}>
+                          <a href="https://www.designmd.org/" target="_blank" rel="noopener noreferrer" style={{ color: '#a5b4fc' }}>design.md</a> 같은 곳에서 원하는 톤의 MD를 복사해 붙여넣으세요.
+                          색상 hex(예: <code style={{ color: '#fbbf24' }}>#6366F1</code>)와 폰트명을 자동 추출합니다. <b style={{ color: '#cbd5e1' }}>입력 안 하면 기본 N잡연구소 다크 톤</b>으로 진행.
+                        </p>
+
+                        <textarea value={pp_designToneMd} onChange={(e) => setPpDesignToneMd(e.target.value)} rows={14}
+                          placeholder="# Brand Tone\nModern, minimal, bold typography...\n\n## Colors\n- Primary: #6366F1\n- Background: #0F0F23\n..."
+                          style={{ width: '100%', padding: '12px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '12.5px', fontFamily: 'monospace', lineHeight: 1.6, boxSizing: 'border-box', resize: 'vertical', minHeight: '220px' }} />
+
+                        {/* 추출된 톤 미리보기 — 사용자가 입력한 MD에서 자동 파싱 결과 */}
+                        <div style={{ marginTop: '14px', padding: '12px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '10px' }}>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '8px', letterSpacing: '0.05em' }}>🔍 자동 추출 결과 (디자인 적용에 사용됨)</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                            {[
+                              { key: 'primary', label: 'Primary' },
+                              { key: 'secondary', label: 'Secondary' },
+                              { key: 'background', label: 'Background' },
+                              { key: 'text', label: 'Text' },
+                              { key: 'accent', label: 'Accent' },
+                            ].map(c => (
+                              <div key={c.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(0,0,0,0.30)', borderRadius: '7px', border: '1px solid var(--border)' }}>
+                                <span style={{ width: '18px', height: '18px', borderRadius: '4px', background: `#${T[c.key]}`, border: '1px solid rgba(255,255,255,0.18)' }} />
+                                <span style={{ fontSize: '11px', color: '#cbd5e1' }}>{c.label}</span>
+                                <code style={{ fontSize: '10.5px', color: '#94a3b8' }}>#{T[c.key]}</code>
+                              </div>
+                            ))}
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(99,102,241,0.10)', borderRadius: '7px', border: '1px solid rgba(99,102,241,0.30)' }}>
+                              <span style={{ fontSize: '11px', color: '#a5b4fc' }}>🔤 폰트</span>
+                              <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>{T.fontMain}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
+                          <button onClick={() => setPpDesignToneMd(DEFAULT_DESIGN_TONE_MD)}
+                            style={{ padding: '8px 14px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '8px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>
+                            🔄 기본 톤으로
+                          </button>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button onClick={cancelToneAndAbort}
+                              style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: '8px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>
+                              취소
+                            </button>
+                            <button onClick={confirmToneAndProceed}
+                              style={{ padding: '9px 22px', background: 'linear-gradient(135deg, #a855f7, #ec4899)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: 'pointer', boxShadow: '0 6px 14px rgba(168,85,247,0.30)' }}>
+                              🪄 이 톤으로 기획 생성
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
+
                 {/* ───── 사전 점검 모달 ───── */}
                 {pp_modalOpen && pp_precheckResult && (
                   <div
@@ -11889,37 +12278,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         document.body.appendChild(a); a.click(); document.body.removeChild(a)
                         setTimeout(() => URL.revokeObjectURL(url), 1000)
                       }
-                      // 3) .pptx 다운로드 — PPT만
+                      // 3) .pptx 다운로드 — PPT만. 디자인 톤 적용된 파일 생성.
+                      //    저장된 결과의 톤은 메타에 없어서(현재 미저장) localStorage의 현재 사용자 톤 사용.
+                      //    원래 생성 시 톤과 다를 수 있지만 어차피 같은 사용자라 비슷할 것.
                       const downloadPptxSaved = async () => {
                         if (!isPpt) return
                         setPpExportBusy(prev => ({ ...prev, [`saved:${savedPlanDetail.id}`]: 'pptx' }))
                         try {
-                          const { default: PptxGenJS } = await import('pptxgenjs')
-                          const pptx = new PptxGenJS()
-                          pptx.title = plan.title || '강의 PPT outline'
-                          pptx.layout = 'LAYOUT_WIDE'
-                          for (const s of (plan.slides || [])) {
-                            const slide = pptx.addSlide()
-                            const kindLabel = PPT_KIND_META[s.kind]?.label || ''
-                            slide.addText(`#${s.slideNumber || '?'}${kindLabel ? `  ·  ${kindLabel}` : ''}`, {
-                              x: 0.3, y: 0.2, w: 5, h: 0.4, fontSize: 11, color: '888888',
-                            })
-                            if (s.title) {
-                              slide.addText(s.title, {
-                                x: 0.5, y: 0.8, w: 12, h: 1.2,
-                                fontSize: 32, bold: true, color: '111111',
-                                fontFace: 'Malgun Gothic', valign: 'top',
-                              })
-                            }
-                            if (Array.isArray(s.bullets) && s.bullets.length) {
-                              slide.addText(
-                                s.bullets.map(b => ({ text: String(b), options: { bullet: { type: 'bullet' } } })),
-                                { x: 0.6, y: 2.2, w: 12, h: 4.5, fontSize: 20, color: '333333', fontFace: 'Malgun Gothic', paraSpaceAfter: 8 }
-                              )
-                            }
-                            if (s.speakerNotes) slide.addNotes(s.speakerNotes)
-                          }
-                          await pptx.writeFile({ fileName: `${safeTitle}.pptx` })
+                          const parsed = parseToneMd(pp_designToneMd || DEFAULT_DESIGN_TONE_MD)
+                          await buildDesignedPptx(plan, parsed, safeTitle)
                         } catch (e) {
                           alert('.pptx 생성 실패: ' + (e?.message || e))
                         } finally {
@@ -11997,7 +12364,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                   color: '#fff', fontSize: '12px', fontWeight: 700,
                                   cursor: exportBusy === 'pptx' ? 'wait' : 'pointer',
                                 }}>
-                                {exportBusy === 'pptx' ? '⏳ .pptx 생성 중…' : '📊 .pptx 다운로드'}
+                                {exportBusy === 'pptx' ? '⏳ .pptx 생성 중…' : '🎨 디자인 적용 .pptx'}
                               </button>
                             )}
                             <button onClick={createNotionSaved} disabled={exportBusy === 'notion'}
