@@ -312,85 +312,127 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
   //   cta        = Stat Display (강조 박스)
   //   outro      = Quote Slide (중앙 한 줄)
 
+  // 공통 디자인 요소 — 모든 슬라이드에 일관 적용
+  // 1) 좌측 끝에 얇은 ink 사이드바 (3px) — 디자인 시그니처
+  // 2) 상단 hairline 라인 (Y=0.95) — 챕터 마커 아래
+  // 3) 푸터 디바이더 + 슬라이드 번호 (drawFooter)
+  const drawTopHairline = (slide) => {
+    slide.addShape(pptx.ShapeType.line, {
+      x: MARGIN_X, y: 0.95, w: CONTENT_W, h: 0,
+      line: { color: 'E5E5E5', width: 0.5 },
+    })
+  }
+  const drawLeftSidebar = (slide) => {
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0, y: 0, w: 0.04, h: SLIDE_H,
+      fill: { color: T.text }, line: { color: T.text, width: 0 },
+    })
+  }
+
   for (const s of (plan.slides || [])) {
     const slide = pptx.addSlide()
     const kind = s.kind || 'info'
     const slideNum = s.slideNumber
 
     drawBackground(slide)
+    drawLeftSidebar(slide)
 
     switch (kind) {
       case 'hook': {
-        // 챕터 디바이더 — full bleed 검정 배경에 흰 hero 타이포 (다크/라이트 토글)
-        // 톤이 라이트 모드면 ink 배경 + canvas 텍스트로 반전
-        slide.addShape(pptx.ShapeType.rect, {
-          x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
-          fill: { color: T.text }, line: { color: T.text, width: 0 },
-        })
-        // 챕터 번호 (큰 숫자)
+        // 후크 — 흰 캔버스 + 검정 hero 타이포 (이전 다크 모드 제거, 톤 일관성 위해).
+        // 좌측 큰 챕터 번호(작게) + 메인 타이틀 + 좌측 mute 라벨.
+        drawChapterMarker(slide, 'Hook')
+        drawTopHairline(slide)
+        // 챕터 번호 (작게)
         slide.addText(String(slideNum).padStart(2, '0'), {
-          x: MARGIN_X, y: 1.8, w: 4, h: 1.5,
-          fontSize: 120, bold: true, color: T.background, fontFace: T.fontMain,
-          charSpacing: -2,
+          x: MARGIN_X, y: 1.2, w: 2.5, h: 0.6,
+          fontSize: 32, bold: true, color: T.accent, fontFace: T.fontMain,
         })
-        // 메인 타이틀
+        // 메인 타이틀 — 큰 폰트지만 256pt 같이 과하지 않게
         slide.addText(s.title || '', {
-          x: MARGIN_X, y: 3.5, w: SLIDE_W - MARGIN_X * 2, h: 2.0,
-          fontSize: 64, bold: true, color: T.background, fontFace: T.fontMain,
+          x: MARGIN_X, y: 2.0, w: CONTENT_W, h: 3.0,
+          fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain,
+          valign: 'top',
         })
+        // 불릿 (한 줄 X — 별도 리스트로)
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.join('  ·  '), {
-            x: MARGIN_X, y: 5.4, w: SLIDE_W - MARGIN_X * 2, h: 0.7,
-            fontSize: 20, color: T.background, fontFace: T.fontMain,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: MARGIN_X, y: 5.2, w: CONTENT_W, h: 1.3,
+            fontSize: 16, color: T.secondary, fontFace: T.fontMain,
+            paraSpaceAfter: 4,
+          })
+        } else {
+          // 불릿 없으면 강조 라인으로 비주얼 채움
+          slide.addShape(pptx.ShapeType.rect, {
+            x: MARGIN_X, y: 5.5, w: 1.2, h: 0.05,
+            fill: { color: T.text }, line: { color: T.text, width: 0 },
           })
         }
-        // 푸터는 색상 톤 반전
-        slide.addText(String(slideNum || '?'), {
-          x: SLIDE_W - 0.8, y: 6.9, w: 0.6, h: 0.3,
-          fontSize: 10, color: T.background, fontFace: T.fontMain, align: 'right',
-        })
+        drawFooter(slide, slideNum)
         break
       }
       case 'intro': {
-        drawChapterMarker(slide, 'Introduction')
+        drawChapterMarker(slide, 'Intro / 강사 소개')
+        drawTopHairline(slide)
         // 제목
         slide.addText(s.title || '', {
-          x: MARGIN_X, y: 1.4, w: 7.5, h: 1.0,
-          fontSize: 48, bold: true, color: onBg, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.4, w: 7.3, h: 1.0,
+          fontSize: 40, bold: true, color: onBg, fontFace: T.fontMain,
+        })
+        // 짧은 강조선
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 2.4, w: 0.6, h: 0.04,
+          fill: { color: T.text }, line: { color: T.text, width: 0 },
         })
         // 본문 좌측
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: MARGIN_X, y: 2.5, w: 7.5, h: 3.9,
-            fontSize: 18, color: onBg, fontFace: T.fontMain,
-            paraSpaceAfter: 8, lineSpacing: 28,
+            x: MARGIN_X, y: 2.7, w: 7.3, h: 3.7,
+            fontSize: 16, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
-        // 우측 강사 사진 placeholder
+        // 우측 강사 사진 placeholder (soft-cloud)
         slide.addShape(pptx.ShapeType.rect, {
           x: 8.5, y: 1.4, w: 4.3, h: 5.0,
           fill: { color: T.soft }, line: { color: T.soft, width: 0 },
         })
+        slide.addText('👤', {
+          x: 8.5, y: 3.0, w: 4.3, h: 1.0,
+          fontSize: 48, color: onBgMute, fontFace: T.fontMain, align: 'center',
+        })
         slide.addText('강사 사진', {
-          x: 8.5, y: 3.6, w: 4.3, h: 0.5,
-          fontSize: 14, color: onBgMute, fontFace: T.fontMain, align: 'center',
+          x: 8.5, y: 4.2, w: 4.3, h: 0.4,
+          fontSize: 12, color: onBgMute, fontFace: T.fontMain, align: 'center',
         })
         drawFooter(slide, slideNum)
         break
       }
       case 'proof': {
         drawChapterMarker(slide, 'Proof / 성과')
-        // 큰 숫자 — campaign size
+        drawTopHairline(slide)
+        // 큰 숫자/메시지 — 96 → 64
         slide.addText(s.title || '', {
-          x: MARGIN_X, y: 1.8, w: CONTENT_W, h: 2.5,
-          fontSize: 96, bold: true, color: onBg, fontFace: T.fontMain,
-          align: 'left', charSpacing: -1,
+          x: MARGIN_X, y: 2.0, w: CONTENT_W, h: 2.0,
+          fontSize: 64, bold: true, color: onBg, fontFace: T.fontMain,
+          align: 'left', charSpacing: -1, valign: 'middle',
+        })
+        // 강조 라인 (제목 아래)
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 4.3, w: 1.5, h: 0.06,
+          fill: { color: T.text }, line: { color: T.text, width: 0 },
         })
         // 캡션
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.join(' · '), {
-            x: MARGIN_X, y: 4.6, w: CONTENT_W, h: 1.5,
-            fontSize: 20, color: onBgMute, fontFace: T.fontMain,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+            x: MARGIN_X, y: 4.6, w: CONTENT_W, h: 1.7,
+            fontSize: 16, color: onBgMute, fontFace: T.fontMain, paraSpaceAfter: 4,
+          })
+        } else {
+          // 캡션 없으면 sub-text 자리 비워두지 않고 디자인 채움
+          slide.addText('— 강사 누적 성과', {
+            x: MARGIN_X, y: 4.6, w: CONTENT_W, h: 0.5,
+            fontSize: 16, color: onBgMute, fontFace: T.fontMain, italic: true,
           })
         }
         drawFooter(slide, slideNum)
@@ -398,22 +440,24 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       }
       case 'journey': {
         drawChapterMarker(slide, 'Journey / 시행착오')
-        // 좌측 큰 연도/마커
+        drawTopHairline(slide)
+        // 좌측 마커 — 박스 폭 늘리고 폰트 줄임 (긴 한글 제목도 안 넘침)
         slide.addText(s.title || '', {
-          x: MARGIN_X, y: 1.4, w: 4, h: 1.4,
-          fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.4, w: 4.5, h: 5.0,
+          fontSize: 26, bold: true, color: onBg, fontFace: T.fontMain,
+          valign: 'top',
         })
         // 디바이더 라인
         slide.addShape(pptx.ShapeType.line, {
-          x: 4.9, y: 1.5, w: 0, h: 4.8,
-          line: { color: dark ? '444444' : 'CACACB', width: 1 },
+          x: 5.3, y: 1.4, w: 0, h: 5.0,
+          line: { color: 'CACACB', width: 0.5 },
         })
         // 우측 본문
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: 5.2, y: 1.5, w: 7.5, h: 4.8,
-            fontSize: 18, color: onBg, fontFace: T.fontMain,
-            paraSpaceAfter: 8, lineSpacing: 28,
+            x: 5.6, y: 1.4, w: 7.2, h: 5.0,
+            fontSize: 15, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 6, lineSpacing: 24,
           })
         }
         drawFooter(slide, slideNum)
@@ -421,15 +465,21 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       }
       case 'myth': {
         drawChapterMarker(slide, 'Myth / 통념 깨기')
+        drawTopHairline(slide)
         slide.addText(s.title || '', {
           x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.5,
-          fontSize: 52, bold: true, color: onBg, fontFace: T.fontMain,
+          fontSize: 40, bold: true, color: onBg, fontFace: T.fontMain,
+        })
+        // 강조선
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 2.9, w: 0.6, h: 0.04,
+          fill: { color: T.text }, line: { color: T.text, width: 0 },
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: MARGIN_X, y: 3.0, w: CONTENT_W, h: 3.3,
-            fontSize: 20, color: T.secondary, fontFace: T.fontMain,
-            paraSpaceAfter: 10, lineSpacing: 30,
+            x: MARGIN_X, y: 3.2, w: CONTENT_W, h: 3.2,
+            fontSize: 16, color: T.secondary, fontFace: T.fontMain,
+            paraSpaceAfter: 8, lineSpacing: 28,
           })
         }
         drawFooter(slide, slideNum)
@@ -438,20 +488,21 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       case 'info': {
         // 본론 — 표준 콘텐츠 슬라이드
         drawChapterMarker(slide, 'Content')
+        drawTopHairline(slide)
         slide.addText(s.title || '', {
           x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.0,
-          fontSize: 44, bold: true, color: onBg, fontFace: T.fontMain,
+          fontSize: 36, bold: true, color: onBg, fontFace: T.fontMain,
         })
-        // 제목 아래 짧은 강조선 (16px 두께)
+        // 제목 아래 짧은 강조선
         slide.addShape(pptx.ShapeType.rect, {
-          x: MARGIN_X, y: 2.35, w: 0.6, h: 0.04,
+          x: MARGIN_X, y: 2.4, w: 0.6, h: 0.04,
           fill: { color: T.text }, line: { color: T.text, width: 0 },
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: MARGIN_X, y: 2.6, w: CONTENT_W, h: 3.9,
-            fontSize: 20, color: onBg, fontFace: T.fontMain,
-            paraSpaceAfter: 10, lineSpacing: 32,
+            x: MARGIN_X, y: 2.7, w: CONTENT_W, h: 3.8,
+            fontSize: 16, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
         drawFooter(slide, slideNum)
@@ -459,18 +510,24 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       }
       case 'empty': {
         // 빈/이미지 슬라이드 — soft-cloud 큰 placeholder + 캡션
+        drawChapterMarker(slide, 'Visual')
+        drawTopHairline(slide)
         slide.addShape(pptx.ShapeType.rect, {
-          x: MARGIN_X, y: 1.0, w: CONTENT_W, h: 4.5,
+          x: MARGIN_X, y: 1.3, w: CONTENT_W, h: 4.5,
           fill: { color: T.soft }, line: { color: T.soft, width: 0 },
         })
+        slide.addText('🖼️', {
+          x: MARGIN_X, y: 3.0, w: CONTENT_W, h: 1.0,
+          fontSize: 56, color: onBgMute, fontFace: T.fontMain, align: 'center',
+        })
         slide.addText('이미지 / 영상 자리', {
-          x: MARGIN_X, y: 3.0, w: CONTENT_W, h: 0.5,
-          fontSize: 16, color: onBgMute, fontFace: T.fontMain, align: 'center',
+          x: MARGIN_X, y: 4.0, w: CONTENT_W, h: 0.5,
+          fontSize: 14, color: onBgMute, fontFace: T.fontMain, align: 'center',
         })
         if (s.title) {
           slide.addText(s.title, {
-            x: MARGIN_X, y: 5.7, w: CONTENT_W, h: 0.8,
-            fontSize: 18, color: onBgMute, fontFace: T.fontMain, italic: true,
+            x: MARGIN_X, y: 5.95, w: CONTENT_W, h: 0.5,
+            fontSize: 16, color: onBgMute, fontFace: T.fontMain, italic: true,
           })
         }
         drawFooter(slide, slideNum)
@@ -478,22 +535,28 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       }
       case 'qna': {
         drawChapterMarker(slide, 'Q&A')
+        drawTopHairline(slide)
         // 큰 Q.
         slide.addText('Q.', {
-          x: MARGIN_X, y: 1.4, w: 1.0, h: 1.5,
-          fontSize: 72, bold: true, color: onBg, fontFace: T.fontMain,
+          x: MARGIN_X, y: 1.3, w: 1.0, h: 1.0,
+          fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain,
         })
         // 질문 텍스트
         slide.addText(s.title || '', {
-          x: 1.8, y: 1.6, w: CONTENT_W - 1.3, h: 1.3,
-          fontSize: 32, bold: true, color: onBg, fontFace: T.fontMain, valign: 'middle',
+          x: 1.6, y: 1.4, w: CONTENT_W - 1.1, h: 1.2,
+          fontSize: 26, bold: true, color: onBg, fontFace: T.fontMain, valign: 'middle',
+        })
+        // 디바이더
+        slide.addShape(pptx.ShapeType.line, {
+          x: MARGIN_X, y: 2.8, w: CONTENT_W, h: 0,
+          line: { color: 'E5E5E5', width: 0.5 },
         })
         // 답변
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: 1.8, y: 3.2, w: CONTENT_W - 1.3, h: 3.0,
-            fontSize: 18, color: onBg, fontFace: T.fontMain,
-            paraSpaceAfter: 8, lineSpacing: 28,
+            x: MARGIN_X, y: 3.0, w: CONTENT_W, h: 3.3,
+            fontSize: 16, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
         drawFooter(slide, slideNum)
@@ -501,22 +564,28 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       }
       case 'testimonial': {
         drawChapterMarker(slide, 'Testimonial / 후기')
-        // 큰 따옴표 (장식)
+        drawTopHairline(slide)
+        // soft-cloud 콘텐츠 박스 (인용 느낌)
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 1.3, w: CONTENT_W, h: 5.1,
+          fill: { color: T.soft }, line: { color: T.soft, width: 0 },
+        })
+        // 큰 따옴표 장식
         slide.addText('"', {
-          x: MARGIN_X, y: 1.0, w: 1.0, h: 1.5,
-          fontSize: 120, bold: true, color: onBgSubtle, fontFace: T.fontMain,
+          x: MARGIN_X + 0.3, y: 1.3, w: 1.0, h: 1.5,
+          fontSize: 84, bold: true, color: 'CACACB', fontFace: T.fontMain,
         })
         // 인용 제목
         slide.addText(s.title || '', {
-          x: MARGIN_X + 0.2, y: 2.2, w: CONTENT_W - 0.4, h: 1.0,
-          fontSize: 28, bold: true, color: onBg, fontFace: T.fontMain,
+          x: MARGIN_X + 1.2, y: 1.7, w: CONTENT_W - 1.5, h: 1.0,
+          fontSize: 22, bold: true, color: T.text, fontFace: T.fontMain,
         })
         // 3단 본문 (상황 → 코칭 → 결과)
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: MARGIN_X + 0.2, y: 3.3, w: CONTENT_W - 0.4, h: 3.0,
-            fontSize: 17, color: onBg, fontFace: T.fontMain,
-            paraSpaceAfter: 10, lineSpacing: 26,
+            x: MARGIN_X + 0.5, y: 2.9, w: CONTENT_W - 0.8, h: 3.3,
+            fontSize: 14, color: T.text, fontFace: T.fontMain,
+            paraSpaceAfter: 8, lineSpacing: 24,
           })
         }
         drawFooter(slide, slideNum)
@@ -524,46 +593,61 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       }
       case 'cta': {
         drawChapterMarker(slide, 'CTA / 모집')
-        // 강조 박스 — soft-cloud 풀 너비
+        drawTopHairline(slide)
+        // 강조 박스 — 검정 풀 너비 (모집은 가장 강한 강조)
         slide.addShape(pptx.ShapeType.rect, {
-          x: MARGIN_X, y: 1.3, w: CONTENT_W, h: 5.0,
-          fill: { color: T.soft }, line: { color: T.soft, width: 0 },
+          x: MARGIN_X, y: 1.3, w: CONTENT_W, h: 5.1,
+          fill: { color: T.text }, line: { color: T.text, width: 0 },
         })
         slide.addText(s.title || '', {
           x: MARGIN_X + 0.4, y: 1.7, w: CONTENT_W - 0.8, h: 1.2,
-          fontSize: 44, bold: true, color: T.text, fontFace: T.fontMain,
+          fontSize: 36, bold: true, color: T.background, fontFace: T.fontMain,
+        })
+        // 흰 라인 강조
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X + 0.4, y: 3.0, w: 0.8, h: 0.04,
+          fill: { color: T.background }, line: { color: T.background, width: 0 },
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: MARGIN_X + 0.4, y: 3.1, w: CONTENT_W - 0.8, h: 3.0,
-            fontSize: 20, color: T.text, fontFace: T.fontMain,
-            paraSpaceAfter: 10, lineSpacing: 32,
+          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CB' } } })), {
+            x: MARGIN_X + 0.4, y: 3.2, w: CONTENT_W - 0.8, h: 3.0,
+            fontSize: 16, color: T.background, fontFace: T.fontMain,
+            paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
-        drawFooter(slide, slideNum)
+        // 우하단 슬라이드 번호 — 검정 박스 안이라 흰색으로
+        slide.addText(String(slideNum || '?'), {
+          x: SLIDE_W - 0.8, y: 6.7, w: 0.6, h: 0.3,
+          fontSize: 10, color: T.background, fontFace: T.fontMain, align: 'right',
+        })
         break
       }
       case 'outro': {
+        drawTopHairline(slide)
         slide.addText(s.title || '감사합니다', {
           x: MARGIN_X, y: 2.5, w: CONTENT_W, h: 1.5,
-          fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain,
+          fontSize: 48, bold: true, color: onBg, fontFace: T.fontMain,
           align: 'center', valign: 'middle',
+        })
+        slide.addShape(pptx.ShapeType.line, {
+          x: SLIDE_W / 2 - 1, y: 4.3, w: 2, h: 0,
+          line: { color: T.text, width: 0.5 },
         })
         drawFooter(slide, slideNum)
         break
       }
       default: {
-        // info와 동일 fallback
         drawChapterMarker(slide, 'Content')
+        drawTopHairline(slide)
         slide.addText(s.title || '', {
           x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.0,
-          fontSize: 44, bold: true, color: onBg, fontFace: T.fontMain,
+          fontSize: 36, bold: true, color: onBg, fontFace: T.fontMain,
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: MARGIN_X, y: 2.6, w: CONTENT_W, h: 3.9,
-            fontSize: 20, color: onBg, fontFace: T.fontMain,
-            paraSpaceAfter: 10, lineSpacing: 32,
+            x: MARGIN_X, y: 2.7, w: CONTENT_W, h: 3.8,
+            fontSize: 16, color: onBg, fontFace: T.fontMain,
+            paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
         drawFooter(slide, slideNum)
