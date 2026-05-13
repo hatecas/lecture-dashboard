@@ -151,7 +151,11 @@ function makeSafeFileName(base, fallback = 'plan') {
 // ===================================================================
 
 // 기본 톤 — 사용자 디자인 시스템(presentation-design-system.md) 기반.
-// Nike-style editorial minimalism: 흰 캔버스 + 검정 잉크, Pretendard 전용, 16:9 고정 그리드.
+// Nike-style editorial minimalism: 흰 캔버스 + 검정 잉크, 16:9 고정 그리드.
+//
+// 폰트는 Malgun Gothic 기본 사용 (Windows 기본 한글 폰트라 받는 사람 환경에서
+// 폰트 깨짐 없음). Pretendard를 회사 톤으로 쓰려면 톤 MD에 명시하되, 받는
+// 사람 PC에도 Pretendard 설치 필요 또는 향후 폰트 임베드 옵션 활성화 필요.
 const DEFAULT_DESIGN_TONE_MD = `# N잡연구소 무료강의 디자인 시스템
 Editorial minimalism (Nike-style). Bold typography, high-contrast black-and-white palette,
 consistent spatial anchoring across all slides. Fixed positional grid for rhythmic consistency.
@@ -170,9 +174,9 @@ consistent spatial anchoring across all slides. Fixed positional grid for rhythm
 - Pink: #ED1AA0 (강조 슬라이드만)
 
 ## Fonts
-- Heading: Pretendard Bold (700)
-- Body: Pretendard Regular (400)
-- Display: Pretendard Black (900) — 챕터 표지용
+- Heading: Malgun Gothic Bold   (호환성 — Windows 기본 한글 폰트)
+- Body: Malgun Gothic Regular
+- Display: Malgun Gothic Bold
 
 ## Style
 - High content density — 슬라이드 본문이 위→아래까지 꽉 차게.
@@ -185,6 +189,7 @@ consistent spatial anchoring across all slides. Fixed positional grid for rhythm
 // 사용자가 어떤 형식의 MD를 줘도 최대한 추출. 못 찾으면 기본값.
 function parseToneMd(md) {
   // 기본값 — 사용자 디자인 시스템(Nike-style editorial minimalism) 매칭
+  // 폰트는 Malgun Gothic — Windows 기본 한글 폰트라 받는 사람 PC에서도 폰트 깨짐 X
   const DEFAULTS = {
     background: 'FFFFFF', // canvas
     text: '111111',       // ink
@@ -193,7 +198,7 @@ function parseToneMd(md) {
     accent: '707072',     // mute (부제·캡션)
     soft: 'F5F5F5',       // soft-cloud (콜아웃 배경)
     sale: 'D30005',       // 경고
-    fontMain: 'Pretendard',
+    fontMain: 'Malgun Gothic',
   }
   if (!md || typeof md !== 'string') return DEFAULTS
 
@@ -11229,7 +11234,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           색상 hex(예: <code style={{ color: '#fbbf24' }}>#111111</code>)와 폰트명을 자동 추출합니다. 입력 안 하면 <b style={{ color: '#cbd5e1' }}>기본 N잡연구소 톤</b>(Nike editorial, 흰 캔버스 + 검정 잉크)으로 진행.
                         </p>
                         <div style={{ marginBottom: '14px', padding: '10px 12px', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: '8px', fontSize: '11.5px', color: '#fbbf24', lineHeight: 1.55 }}>
-                          ℹ️ <b>폰트 안내</b>: PPTX는 폰트명만 참조합니다. PC에 <a href="https://github.com/orioncactus/pretendard/releases" target="_blank" rel="noopener noreferrer" style={{ color: '#fcd34d', textDecoration: 'underline' }}>Pretendard 폰트</a>가 설치돼있어야 디자인대로 보입니다. 없으면 시스템 fallback(Malgun Gothic 등)으로 표시.
+                          ℹ️ <b>폰트 안내</b>: 기본값은 <b style={{ color: '#fef3c7' }}>Malgun Gothic</b> — Windows 기본 한글 폰트라 카톡/이메일로 PPT 보내도 받는 사람한테 그대로 보임. <br/>
+                          회사 톤(Pretendard 등)을 쓰려면 톤 MD에 명시 가능하지만 <b style={{ color: '#fef3c7' }}>받는 사람 PC에도 그 폰트가 설치돼있어야</b> 디자인 깨짐 없이 보임. 폰트 임베드(PPTX에 폰트 통째로 넣기) 기능은 향후 추가 예정.
                         </div>
 
                         <textarea value={pp_designToneMd} onChange={(e) => setPpDesignToneMd(e.target.value)} rows={14}
