@@ -80,7 +80,14 @@ export async function POST(request) {
       // 테스트 모드: 모든 발송이 testPhone으로만 감 (실제 신청자 번호 무시).
       // testLimit으로 발송 횟수도 제한 (기본 1). 수신자 이름은 원래 신청자 이름 그대로 사용.
       testPhone,
-      testLimit
+      testLimit,
+      // 청크 분할 — 대용량 발송 시 Vercel 300초 timeout 회피.
+      //   클라이언트가 chunkOffset/chunkSize로 일부 수신자만 처리 요청.
+      //   서버는 전체 명단을 조회한 뒤 (offset, offset+size) 범위만 실제 발송.
+      //   응답에 totalRecipients(전체 수)도 같이 반환 → 클라이언트가 청크 횟수 계산.
+      //   미지정 시 기존 동작과 동일 (전체 한 번에).
+      chunkOffset,
+      chunkSize,
     } = body
 
     const hasCourseIds = Array.isArray(courseIds) && courseIds.length > 0
@@ -173,11 +180,15 @@ export async function POST(request) {
       }
     }
 
+    // 전체 명단의 총 수 (청크 분할 응답에 포함 — 클라이언트가 총 청크 수 계산)
+    const totalRecipients = recipients.length
+
     if (dryRun) {
       return NextResponse.json({
         dryRun: true,
         totalApplies: totalSourceRows,
         recipientCount: recipients.length,
+        totalRecipients,
         skipped,
         sample: recipients.slice(0, 10),
         mode: hasCourseIds ? 'db' : 'manual'
@@ -190,6 +201,24 @@ export async function POST(request) {
         totalApplies: totalSourceRows,
         skipped
       }, { status: 400 })
+    }
+
+    // 청크 분할 적용 — chunkOffset/chunkSize 지정되면 그 범위만 처리
+    let chunkInfo = null
+    if (typeof chunkOffset === 'number' && typeof chunkSize === 'number' && chunkSize > 0) {
+      const start = Math.max(0, chunkOffset)
+      const end = Math.min(recipients.length, start + chunkSize)
+      const chunked = recipients.slice(start, end)
+      chunkInfo = {
+        offset: start,
+        size: chunkSize,
+        actual: chunked.length,
+        total: recipients.length,
+        chunkIndex: Math.floor(start / chunkSize),
+        totalChunks: Math.ceil(recipients.length / chunkSize),
+      }
+      recipients.length = 0
+      recipients.push(...chunked)
     }
 
     // 테스트 모드 적용: 명단의 phone을 모두 testPhone으로 덮어쓰고 첫 N명만 남김
@@ -271,6 +300,8 @@ export async function POST(request) {
       mode: hasCourseIds ? 'db' : 'manual',
       totalApplies: totalSourceRows,
       recipientCount: recipients.length,
+      totalRecipients,                // 전체 명단 수 (청크 합)
+      chunk: chunkInfo,               // 청크 정보 (null이면 전체 한번에)
       sent,
       failed,
       skipped,
