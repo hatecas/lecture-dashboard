@@ -745,62 +745,53 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       zip.file('ppt/theme/theme1.xml', themeXml)
     }
 
-    // (2) 모든 슬라이드/마스터/레이아웃 XML의 폰트 슬롯 강제 — 두 패턴 모두 처리:
+    // (2) 모든 XML의 폰트 슬롯 강제 — 단순/강력 버전:
+    //   pptxgenjs가 typeface="Inter"(또는 다른 폰트)를 박아넣는 게 진짜 원인 발견.
+    //   "다 있으면 스킵"이 아니라 "있는 typeface 값을 무조건 우리 폰트로 교체"가 정답.
     //
-    //   패턴 A: 열고 닫는 태그 — <a:rPr ...><a:latin .../>...</a:rPr>
-    //     → latin/ea/cs 중 빠진 것 추가
-    //   패턴 B: self-closing 태그 — <a:rPr ... /> (자식 없음, 폰트 미지정)
-    //     → 자식 추가하면서 열고 닫는 태그로 변환 (모든 rPr에 우리 폰트 강제 적용)
-    //
-    //   이러면 슬라이드 안의 모든 텍스트 런이 latin/ea/cs 폰트 슬롯 3종 모두에
-    //   동일한 우리 폰트를 갖게 됨 → PowerPoint가 한글/영문 무관하게 우리 폰트로 렌더.
+    //   1) <a:latin typeface="X" .../> → <a:latin typeface="{fontName}" .../>
+    //   2) <a:ea typeface="X" .../> → <a:ea typeface="{fontName}" .../>
+    //   3) <a:cs typeface="X" .../> → <a:cs typeface="{fontName}" .../>
+    //   4) self-closing <a:rPr ... /> → <a:rPr ...>{3종}</a:rPr> (폰트 슬롯 자체가 없는 경우)
+    //   5) 열고 닫는 <a:rPr>{내용에 latin 없음}</a:rPr> → latin/ea/cs 3종 자식 추가
     const xmlFilePaths = Object.keys(zip.files).filter(p =>
       (p.startsWith('ppt/slides/slide') || p.startsWith('ppt/slideMasters/') || p.startsWith('ppt/slideLayouts/') || p.startsWith('ppt/notesSlides/') || p.startsWith('ppt/notesMasters/')) &&
       p.endsWith('.xml')
     )
     const allSlotsXml = `<a:latin typeface="${fontName}"/><a:ea typeface="${fontName}"/><a:cs typeface="${fontName}"/>`
 
-    let patchCountA = 0, patchCountB = 0
+    let typefaceReplaced = 0, selfCloseConverted = 0, slotsAdded = 0
     for (const path of xmlFilePaths) {
       const file = zip.file(path)
       if (!file) continue
       let xml = await file.async('string')
 
-      // 패턴 B 먼저: self-closing → 열고 닫는 태그로 변환 + 폰트 슬롯 3종 강제.
-      //   주의: <a:tab/>, <a:effectLst/> 같이 비슷한 이름의 self-closing 다른 태그와 헷갈리지 않게
-      //   정확히 rPr/defRPr/endParaRPr만 매칭.
+      // (a) 가장 강력: 모든 typeface 속성을 강제로 우리 폰트로 교체.
+      //     이미 존재하는 latin/ea/cs/font script="..." 등 모든 typeface 속성 대상.
+      xml = xml.replace(/(<a:(?:latin|ea|cs)\s[^>]*?\btypeface=")([^"]*)("[^>]*\/?>)/g, (m, pre, oldFont, post) => {
+        if (oldFont === fontName) return m
+        typefaceReplaced++
+        return `${pre}${fontName}${post}`
+      })
+
+      // (b) self-closing rPr/defRPr/endParaRPr — 자식이 없으니 latin/ea/cs도 없음 → 통째로 추가.
       xml = xml.replace(/<a:(rPr|defRPr|endParaRPr)([^>]*?)\/>/g, (match, tag, attrs) => {
-        patchCountB++
+        selfCloseConverted++
         return `<a:${tag}${attrs}>${allSlotsXml}</a:${tag}>`
       })
 
-      // 패턴 A: 열고 닫는 태그 — latin/ea/cs 중 빠진 것 추가
+      // (c) 열고 닫는 rPr/defRPr/endParaRPr 중 latin 자체가 없는 경우 — 3종 추가.
+      //     (a) 단계에서 latin이 있으면 typeface는 우리 폰트로 이미 교체됐고,
+      //     latin 자체가 없는 경우만 여기서 추가.
       xml = xml.replace(/(<a:(?:rPr|defRPr|endParaRPr)[^>]*>)([\s\S]*?)(<\/a:(?:rPr|defRPr|endParaRPr)>)/g, (match, open, inner, close) => {
-        const hasLatin = /<a:latin\s/.test(inner)
-        const hasEa = /<a:ea\s/.test(inner)
-        const hasCs = /<a:cs\s/.test(inner)
-        if (hasLatin && hasEa && hasCs) return match // 모두 있음 — 그대로
-
-        let newInner = inner
-        if (!hasLatin) {
-          // latin 자체가 없으면 inner 맨 앞에 추가
-          newInner = `<a:latin typeface="${fontName}"/>` + newInner
-        }
-        if (!hasEa) {
-          // latin 직후에 ea 삽입
-          newInner = newInner.replace(/(<a:latin[^/]*\/>)/, `$1<a:ea typeface="${fontName}"/>`)
-        }
-        if (!hasCs) {
-          // ea 직후에 cs 삽입 (이제 ea는 무조건 있음)
-          newInner = newInner.replace(/(<a:ea[^/]*\/>)/, `$1<a:cs typeface="${fontName}"/>`)
-        }
-        patchCountA++
-        return `${open}${newInner}${close}`
+        if (/<a:latin\s/.test(inner)) return match // latin 있으면 (a)에서 처리됨
+        slotsAdded++
+        return `${open}${allSlotsXml}${inner}${close}`
       })
 
       zip.file(path, xml)
     }
-    console.log(`[buildDesignedPptx] 폰트 슬롯 강제: ${xmlFilePaths.length}개 XML, 패턴A=${patchCountA}, 패턴B=${patchCountB}`)
+    console.log(`[buildDesignedPptx] 폰트 강제: ${xmlFilePaths.length}개 XML, typeface 교체=${typefaceReplaced}, self-close 변환=${selfCloseConverted}, 슬롯 추가=${slotsAdded}`)
 
     // (3) 폰트 임베드 — Pretendard 톤일 때만 적용.
     //   PowerPoint가 시스템 폰트 매칭에 의존하지 않고 PPTX 자체 폰트 사용 →
