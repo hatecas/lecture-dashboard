@@ -769,9 +769,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       (p.startsWith('ppt/slides/slide') || p.startsWith('ppt/slideMasters/') || p.startsWith('ppt/slideLayouts/') || p.startsWith('ppt/notesSlides/') || p.startsWith('ppt/notesMasters/')) &&
       p.endsWith('.xml')
     )
-    const allSlotsXml = `<a:latin typeface="${fontName}"/><a:ea typeface="${fontName}"/><a:cs typeface="${fontName}"/>`
-
-    let typefaceReplaced = 0, selfCloseConverted = 0, slotsAdded = 0
+    let typefaceReplaced = 0
     for (const path of xmlFilePaths) {
       const file = zip.file(path)
       if (!file) continue
@@ -797,24 +795,16 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         return `<a:${tag} typeface="${fontName}"/>`
       })
 
-      // (b) self-closing rPr/defRPr/endParaRPr — 자식이 없으니 latin/ea/cs도 없음 → 통째로 추가.
-      xml = xml.replace(/<a:(rPr|defRPr|endParaRPr)([^>]*?)\/>/g, (match, tag, attrs) => {
-        selfCloseConverted++
-        return `<a:${tag}${attrs}>${allSlotsXml}</a:${tag}>`
-      })
-
-      // (c) 열고 닫는 rPr/defRPr/endParaRPr 중 latin 자체가 없는 경우 — 3종 추가.
-      //     (a) 단계에서 latin이 있으면 typeface는 우리 폰트로 이미 교체됐고,
-      //     latin 자체가 없는 경우만 여기서 추가.
-      xml = xml.replace(/(<a:(?:rPr|defRPr|endParaRPr)[^>]*>)([\s\S]*?)(<\/a:(?:rPr|defRPr|endParaRPr)>)/g, (match, open, inner, close) => {
-        if (/<a:latin\s/.test(inner)) return match // latin 있으면 (a)에서 처리됨
-        slotsAdded++
-        return `${open}${allSlotsXml}${inner}${close}`
-      })
+      // (b)(c) 단계 제거 (2026-05-14):
+      //   self-closing rPr/defRPr/endParaRPr를 열고닫기로 변환 + latin/ea/cs 자식 추가
+      //   하던 후처리가 OOXML schema 순서(solidFill → latin → ea → cs)를 위반해
+      //   PowerPoint "프레젠테이션 복구" 다이얼로그 발생.
+      //   대안: latin 자식 자체가 없는 rPr은 theme1.xml의 minorFont에 박힌 Pretendard를
+      //   상속하므로 추가 처리 불필요. typeface 통일은 (a) 단계와 theme 후처리로 충분.
 
       zip.file(path, xml)
     }
-    console.log(`[buildDesignedPptx] 폰트 강제: ${xmlFilePaths.length}개 XML, typeface 교체=${typefaceReplaced}, self-close 변환=${selfCloseConverted}, 슬롯 추가=${slotsAdded}`)
+    console.log(`[buildDesignedPptx] 폰트 강제: ${xmlFilePaths.length}개 XML, typeface 교체=${typefaceReplaced}`)
 
     // 폰트 임베드는 의도적으로 제거됨 (2026-05-14).
     //   이전엔 PPTX 자체에 Pretendard OTF를 박아 다른 PC에서도 일관 렌더링 시도했으나:
