@@ -457,12 +457,16 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       case 'proof': {
         drawChapterMarker(slide, 'Proof')
         drawTopHairline(slide)
-        // 큰 숫자/메시지 — 긴 한글 문장(예: "숏폼+구매대행 월 매출 4,400만원")에
-        // 자동으로 폰트 크기가 줄어들도록 shrinkText 사용. h를 2.3으로 늘려
-        // 줄바꿈 발생 시에도 들어갈 여유 확보.
+        // 큰 숫자/메시지 — 텍스트 길이에 따라 fontSize 동적 적용.
+        //   짧은 숫자(예: "116억"): 64pt 유지.
+        //   중간 길이(예: "월 80만원"): 56pt.
+        //   긴 한글(예: "숏폼+구매대행 월 매출 4,400만원"): 44pt.
+        //   후처리에서 normAutofit도 추가로 박혀 박스 초과 시 추가 자동 축소.
+        const titleLen = String(s.title || '').length
+        const titleFontSize = titleLen > 14 ? 44 : titleLen > 10 ? 52 : 64
         slide.addText(s.title || '', {
           x: MARGIN_X, y: 2.0, w: CONTENT_W, h: 2.3,
-          fontSize: 60, bold: true, color: onBg, fontFace: T.fontMain,
+          fontSize: titleFontSize, bold: true, color: onBg, fontFace: T.fontMain,
           align: 'left', charSpacing: -1, valign: 'middle',
           shrinkText: true, fit: 'shrink', wrap: true,
         })
@@ -808,6 +812,22 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         return `${open}${allSlotsXml}${inner}${close}`
       })
 
+      // (d) 모든 텍스트 박스의 <a:bodyPr>에 <a:normAutofit/> 강제 박아 PowerPoint가
+      //   박스 초과 시 폰트 자동 축소하게 함. pptxgenjs의 shrinkText/fit 옵션이 실제로
+      //   normAutofit을 박지 않아 긴 한글 문장(예: "숏폼+구매대행 월 매출 4,400만원")이
+      //   풀스크린에서 잘리는 문제 해결.
+      //   - self-close <a:bodyPr .../> → 열고닫기 + <a:normAutofit/>
+      //   - 열고닫는 <a:bodyPr ...></a:bodyPr> 중 autofit 자식이 없으면 추가
+      //   slideLayouts/slideMasters의 placeholder bodyPr은 건드리지 않도록
+      //   slides/ 경로에만 한정 (디자인 깨짐 방지).
+      if (path.startsWith('ppt/slides/slide')) {
+        xml = xml.replace(/<a:bodyPr([^>]*?)\/>/g, '<a:bodyPr$1><a:normAutofit fontScale="100000" lnSpcReduction="0"/></a:bodyPr>')
+        xml = xml.replace(/<a:bodyPr([^>]*?)>([\s\S]*?)<\/a:bodyPr>/g, (m, attrs, inner) => {
+          if (/<a:(normAutofit|spAutoFit|noAutofit)/.test(inner)) return m
+          return `<a:bodyPr${attrs}><a:normAutofit fontScale="100000" lnSpcReduction="0"/>${inner}</a:bodyPr>`
+        })
+      }
+
       zip.file(path, xml)
     }
     console.log(`[buildDesignedPptx] 폰트 강제: ${xmlFilePaths.length}개 XML, typeface 교체=${typefaceReplaced}, self-close 변환=${selfCloseConverted}, 슬롯 추가=${slotsAdded}`)
@@ -822,24 +842,60 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
           fetch('/fonts/Pretendard-Regular.otf').then(r => r.arrayBuffer()),
           fetch('/fonts/Pretendard-Bold.otf').then(r => r.arrayBuffer()),
         ])
-        // 폰트 파일 → ppt/fonts/*.fntdata로 저장 (실제 형식은 OTF지만 확장자만 .fntdata)
-        zip.file('ppt/fonts/font1.fntdata', regBuf)
-        zip.file('ppt/fonts/font2.fntdata', boldBuf)
 
-        // presentation.xml에 embeddedFontLst 추가 (sldIdLst 뒤)
+        // OOXML §15.2.13 폰트 obfuscation:
+        //   ContentType "application/vnd.openxmlformats-officedocument.obfuscatedFont"는
+        //   폰트 데이터의 첫 32바이트가 Relationship Id의 GUID(16바이트)로 XOR 처리되어
+        //   있어야 함. raw OTF 그대로 박으면 PowerPoint가 깨진 데이터로 해석 → "복구"
+        //   다이얼로그 발생.
+        //
+        //   알고리즘:
+        //     key = Relationship Id의 GUID hex → 16바이트
+        //     첫 32바이트의 각 byte를 key의 reverse byte order로 cyclic XOR
+        //     (byte 0 XOR key[15], byte 1 XOR key[14], ..., byte 15 XOR key[0],
+        //      byte 16 XOR key[15], ..., byte 31 XOR key[0])
+        const generateGuid = () => {
+          const bytes = crypto.getRandomValues(new Uint8Array(16))
+          bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+          bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant
+          const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+          return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`
+        }
+        const obfuscateFont = (buf, guidStr) => {
+          const hex = guidStr.replace(/-/g, '')
+          const key = new Uint8Array(16)
+          for (let i = 0; i < 16; i++) key[i] = parseInt(hex.substr(i * 2, 2), 16)
+          const reversed = new Uint8Array(16)
+          for (let i = 0; i < 16; i++) reversed[i] = key[15 - i]
+          const out = new Uint8Array(buf.byteLength)
+          out.set(new Uint8Array(buf))
+          for (let i = 0; i < 32 && i < out.length; i++) {
+            out[i] ^= reversed[i % 16]
+          }
+          return out.buffer
+        }
+
+        const regGuid = generateGuid()
+        const boldGuid = generateGuid()
+        const regObfuscated = obfuscateFont(regBuf, regGuid)
+        const boldObfuscated = obfuscateFont(boldBuf, boldGuid)
+
+        // 폰트 파일 저장
+        zip.file('ppt/fonts/font1.fntdata', regObfuscated)
+        zip.file('ppt/fonts/font2.fntdata', boldObfuscated)
+
+        // presentation.xml에 embeddedFontLst 추가 — r:id에 GUID 사용
         const presFile = zip.file('ppt/presentation.xml')
         if (presFile) {
           let presXml = await presFile.async('string')
-          // r: 네임스페이스 prefix가 이미 정의되어 있는지 확인 (보통 있음)
           const fontListXml =
             `<p:embeddedFontLst>` +
               `<p:embeddedFont>` +
                 `<p:font typeface="${fontName}" charset="-127"/>` +
-                `<p:regular r:id="rIdFontReg"/>` +
-                `<p:bold r:id="rIdFontBold"/>` +
+                `<p:regular r:id="{${regGuid}}"/>` +
+                `<p:bold r:id="{${boldGuid}}"/>` +
               `</p:embeddedFont>` +
             `</p:embeddedFontLst>`
-          // 이미 embeddedFontLst 있으면 교체, 없으면 sldIdLst 뒤에 삽입
           if (presXml.includes('<p:embeddedFontLst>')) {
             presXml = presXml.replace(/<p:embeddedFontLst>[\s\S]*?<\/p:embeddedFontLst>/, fontListXml)
           } else if (presXml.includes('</p:sldIdLst>')) {
@@ -850,33 +906,27 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
           zip.file('ppt/presentation.xml', presXml)
         }
 
-        // _rels/presentation.xml.rels에 폰트 관계 추가
+        // _rels/presentation.xml.rels에 폰트 관계 추가 — Id가 GUID 형식이어야 PowerPoint가
+        //   obfuscation key 추출 가능. 매 다운로드마다 GUID가 새로 생성되므로 기존 GUID는
+        //   제거 후 추가.
         const relsFile = zip.file('ppt/_rels/presentation.xml.rels')
         if (relsFile) {
           let relsXml = await relsFile.async('string')
+          // 기존에 박혀있던 폰트 Relationship 제거 (rIdFontReg/rIdFontBold 옛 ID 또는 GUID)
+          relsXml = relsXml.replace(/<Relationship Id="[^"]*"[^>]*Type="[^"]*\/relationships\/font"[^>]*\/>/g, '')
           const newRels =
-            `<Relationship Id="rIdFontReg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font1.fntdata"/>` +
-            `<Relationship Id="rIdFontBold" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font2.fntdata"/>`
-          // 이미 있으면 스킵
-          if (!relsXml.includes('rIdFontReg')) {
-            relsXml = relsXml.replace('</Relationships>', `${newRels}</Relationships>`)
-            zip.file('ppt/_rels/presentation.xml.rels', relsXml)
-          }
+            `<Relationship Id="{${regGuid}}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font1.fntdata"/>` +
+            `<Relationship Id="{${boldGuid}}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font2.fntdata"/>`
+          relsXml = relsXml.replace('</Relationships>', `${newRels}</Relationships>`)
+          zip.file('ppt/_rels/presentation.xml.rels', relsXml)
         }
 
-        // [Content_Types].xml에 .fntdata Content-Type 등록.
-        //   "application/x-fontdata"는 비표준이라 PowerPoint가 폰트 part를 해석하지 못해
-        //   "프레젠테이션 복구가 시도될 수 있습니다" 다이얼로그 발생.
-        //   OOXML 표준(ECMA-376 §13.3.4) Content-Type "application/vnd.openxmlformats-
-        //   officedocument.obfuscatedFont"로 변경. 폰트는 obfuscation 없이 raw OTF지만
-        //   PowerPoint는 표준 ContentType만 만족하면 raw OTF도 best-effort로 처리.
-        //   이미 박힌 비표준 값이 있으면 교체.
+        // [Content_Types].xml에 obfuscatedFont Content-Type 등록.
         const ctFile = zip.file('[Content_Types].xml')
         if (ctFile) {
           let ctXml = await ctFile.async('string')
           const standardEntry = `<Default Extension="fntdata" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/>`
           if (ctXml.includes('Extension="fntdata"')) {
-            // 기존 잘못된 ContentType이 박혀있으면 교체
             ctXml = ctXml.replace(/<Default Extension="fntdata"[^/]*\/>/, standardEntry)
           } else {
             ctXml = ctXml.replace('</Types>', `${standardEntry}</Types>`)
@@ -884,7 +934,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
           zip.file('[Content_Types].xml', ctXml)
         }
 
-        console.log(`[buildDesignedPptx] 폰트 임베드 완료: Pretendard Regular + Bold (~3MB)`)
+        console.log(`[buildDesignedPptx] 폰트 임베드 완료: Pretendard Regular + Bold (obfuscated, GUID=${regGuid.slice(0,8)}.../${boldGuid.slice(0,8)}...)`)
       } catch (e) {
         console.warn('[buildDesignedPptx] 폰트 임베드 실패 (계속 진행):', e?.message)
       }
