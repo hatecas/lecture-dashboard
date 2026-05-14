@@ -774,6 +774,16 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         return `${pre}${fontName}${post}`
       })
 
+      // (a2) typeface 속성 자체가 없는 latin/ea/cs 슬롯도 보강.
+      //   예: <a:latin pitchFamily="34" charset="0"/> 형태 — PowerPoint가 빈 슬롯에
+      //   기본 폰트(Calibri 등)를 채워넣어 시각적 차이 발생. typeface="{fontName}" 강제 삽입.
+      xml = xml.replace(/<a:(latin|ea|cs)(\s[^>]*?)?\/>/g, (m, tag, attrs) => {
+        const a = attrs || ''
+        if (/\btypeface=/.test(a)) return m
+        typefaceReplaced++
+        return `<a:${tag}${a} typeface="${fontName}"/>`
+      })
+
       // (b) self-closing rPr/defRPr/endParaRPr — 자식이 없으니 latin/ea/cs도 없음 → 통째로 추가.
       xml = xml.replace(/<a:(rPr|defRPr|endParaRPr)([^>]*?)\/>/g, (match, tag, attrs) => {
         selfCloseConverted++
@@ -6000,7 +6010,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           { label: '신규 추가', value: orderSyncPreview.stats.newCount, color: '#10b981' },
                           { label: '시트 중복', value: orderSyncPreview.stats.duplicates, color: '#fbbf24' },
                           { label: '환불 제외', value: orderSyncPreview.stats.refunded, color: '#f87171' },
-                          { label: '연락처 누락', value: orderSyncPreview.stats.invalid, color: '#cbd5e1' }
+                          { label: '연락처 누락 (포함)', value: orderSyncPreview.stats.invalid, color: '#cbd5e1' }
                         ].map((stat, i) => (
                           <div key={i} style={{ padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', textAlign: 'center' }}>
                             <div style={{ fontSize: '20px', fontWeight: '700', color: stat.color }}>{stat.value}</div>

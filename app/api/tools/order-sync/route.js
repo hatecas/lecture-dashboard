@@ -202,13 +202,19 @@ async function buildPreview({ orders, year, tabName, logs, sourceTotal, sourceLa
   const invalid = []
   const dedupInBatch = new Set()
   for (const o of valid) {
-    if (!o.phoneNorm) { invalid.push(o); continue }
+    if (!o.phoneNorm) {
+      // 전화번호 누락 건도 시트에 추가 — dedup 불가하므로 그대로 통과.
+      // 사용자가 시트에서 수동 정리(또는 추후 보강) 가능하도록.
+      invalid.push(o)
+      newOrders.push(o)
+      continue
+    }
     if (existingPhones.has(o.phoneNorm)) { duplicates.push(o); continue }
     if (dedupInBatch.has(o.phoneNorm)) { duplicates.push(o); continue }
     dedupInBatch.add(o.phoneNorm)
     newOrders.push(o)
   }
-  logs.push(`최종: 신규 추가 후보 ${newOrders.length}건 / 중복 ${duplicates.length}건 / 전화번호 누락 ${invalid.length}건`)
+  logs.push(`최종: 신규 추가 후보 ${newOrders.length}건 (전화번호 누락 ${invalid.length}건 포함) / 중복 ${duplicates.length}건`)
 
   const colCount = sheetHeaders.length
   const previewRows = newOrders.map(o => {
