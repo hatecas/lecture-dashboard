@@ -1399,6 +1399,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [shoongBulkTestMode, setShoongBulkTestMode] = useState(true) // 기본 ON
   const [shoongBulkTestPhone, setShoongBulkTestPhone] = useState('')
   const [shoongBulkTestLimit, setShoongBulkTestLimit] = useState(1)
+  // 슝 공식 대량 API (POST /send/bulk) 사용 여부. ON이면 xlsx 한 번 업로드로 N명 발송 (1~2분).
+  //   OFF면 기존 청크 분할 단건 호출 (10~15분, fallback).
+  //   슝 IP 화이트리스트가 활성화되어 있어 403이 뜨면 OFF로 전환.
+  const [shoongUseBulkApi, setShoongUseBulkApi] = useState(true)
 
   // 슝 섹션 펼침 상태 (테스트/실전/수동 업로드)
   const [shoongSectionOpen, setShoongSectionOpen] = useState({ test: true, bulk: false, manual: false })
@@ -7256,6 +7260,38 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 )}
                               </div>
 
+                              {/* 슝 대량 API 토글 */}
+                              <div style={{
+                                marginBottom: '14px', padding: '12px 14px',
+                                background: shoongUseBulkApi ? 'rgba(139,92,246,0.10)' : 'rgba(100,116,139,0.10)',
+                                border: `1px solid ${shoongUseBulkApi ? 'rgba(139,92,246,0.4)' : 'var(--border)'}`,
+                                borderRadius: '10px'
+                              }}>
+                                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={shoongUseBulkApi}
+                                    onChange={(e) => setShoongUseBulkApi(e.target.checked)}
+                                    style={{ width: '18px', height: '18px', accentColor: '#8b5cf6', cursor: 'pointer', marginTop: '2px' }}
+                                  />
+                                  <div>
+                                    <div style={{ fontSize: '13px', fontWeight: 700, color: shoongUseBulkApi ? '#a78bfa' : '#94a3b8' }}>
+                                      🚀 슝 공식 대량 API 사용 ({shoongUseBulkApi ? 'ON' : 'OFF'})
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', lineHeight: 1.5 }}>
+                                      {shoongUseBulkApi
+                                        ? 'xlsx 한 번 업로드로 N명 일괄 발송. 2만 건 기준 1~2분. 슝 어드민 발송이력 → 대량 탭에 분류됨.'
+                                        : '단건 API 호출 N번 (청크 분할). 2만 건 기준 10~15분. 대량 API에서 403/오류 발생 시 fallback용.'}
+                                    </div>
+                                    {shoongUseBulkApi && (
+                                      <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '4px' }}>
+                                        ⚠️ 슝 IP 화이트리스트가 활성화되어 있으면 403 발생 가능. 그땐 OFF로 전환.
+                                      </div>
+                                    )}
+                                  </div>
+                                </label>
+                              </div>
+
                               {/* 발송 버튼 */}
                               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                 <button
@@ -7350,7 +7386,51 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                         return
                                       }
 
-                                      // ===== 실전 발송 — 청크 분할 루프 =====
+                                      // ===== 실전 발송 — 슝 공식 대량 API (기본 경로) =====
+                                      //   xlsx 한 번 업로드로 N명 발송. 슝 백엔드가 비동기 처리.
+                                      //   shoongUseBulkApi가 OFF이거나 대량 API 실패 시 청크 분할로 fallback.
+                                      if (shoongUseBulkApi) {
+                                        setShoongBulkProgress({
+                                          status: 'running',
+                                          currentChunk: 1,
+                                          totalChunks: 1,
+                                          totalRecipients: 0,
+                                          sent: 0,
+                                          failed: 0,
+                                          stage: '슝 대량 발송 요청 중...',
+                                        })
+                                        const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                          body: JSON.stringify({ ...baseBody, useBulkApi: true })
+                                        })
+                                        if (status >= 400 || data.error) {
+                                          setShoongBulkProgress(null)
+                                          setShoongBulkResult({
+                                            error: data.error || `슝 대량 API 실패 (HTTP ${status})`,
+                                            stage: data.stage,
+                                            response: data.response,
+                                            hint: status === 403
+                                              ? 'IP 화이트리스트 차단 가능성. 슝 어드민 → 개발자 도구 → IP 화이트리스트 확인 또는 비활성. 아래 "대량 API 사용" 끄고 다시 발송하면 기존 단건 청크 방식으로 fallback.'
+                                              : '문제 지속 시 "대량 API 사용" 끄고 청크 분할 방식으로 fallback 가능.',
+                                            _httpStatus: status,
+                                          })
+                                        } else {
+                                          setShoongBulkProgress({
+                                            status: 'done',
+                                            currentChunk: 1,
+                                            totalChunks: 1,
+                                            totalRecipients: data.recipientCount || 0,
+                                            sent: 0,
+                                            failed: 0,
+                                            pending: data.pending || data.recipientCount || 0,
+                                          })
+                                          setShoongBulkResult({ ...data, _httpStatus: status })
+                                        }
+                                        return
+                                      }
+
+                                      // ===== 실전 발송 — 청크 분할 루프 (fallback) =====
                                       //   1) 첫 호출: chunkOffset=0, chunkSize=CHUNK_SIZE → 서버가 첫 청크 발송 + totalRecipients 반환
                                       //   2) 총 청크 수 계산 → 2번째부터 N번째까지 순차 호출
                                       //   3) 각 청크 결과를 누적 + 진행률 state 갱신
@@ -7788,6 +7868,38 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 )}
                               </div>
 
+                              {/* 슝 대량 API 토글 */}
+                              <div style={{
+                                marginBottom: '14px', padding: '12px 14px',
+                                background: shoongUseBulkApi ? 'rgba(139,92,246,0.10)' : 'rgba(100,116,139,0.10)',
+                                border: `1px solid ${shoongUseBulkApi ? 'rgba(139,92,246,0.4)' : 'var(--border)'}`,
+                                borderRadius: '10px'
+                              }}>
+                                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={shoongUseBulkApi}
+                                    onChange={(e) => setShoongUseBulkApi(e.target.checked)}
+                                    style={{ width: '18px', height: '18px', accentColor: '#8b5cf6', cursor: 'pointer', marginTop: '2px' }}
+                                  />
+                                  <div>
+                                    <div style={{ fontSize: '13px', fontWeight: 700, color: shoongUseBulkApi ? '#a78bfa' : '#94a3b8' }}>
+                                      🚀 슝 공식 대량 API 사용 ({shoongUseBulkApi ? 'ON' : 'OFF'})
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', lineHeight: 1.5 }}>
+                                      {shoongUseBulkApi
+                                        ? 'xlsx 한 번 업로드로 N명 일괄 발송. 2만 건 기준 1~2분. 슝 어드민 발송이력 → 대량 탭에 분류됨.'
+                                        : '단건 API 호출 N번 (청크 분할). 2만 건 기준 10~15분. 대량 API에서 403/오류 발생 시 fallback용.'}
+                                    </div>
+                                    {shoongUseBulkApi && (
+                                      <div style={{ fontSize: '11px', color: '#fbbf24', marginTop: '4px' }}>
+                                        ⚠️ 슝 IP 화이트리스트가 활성화되어 있으면 403 발생 가능. 그땐 OFF로 전환.
+                                      </div>
+                                    )}
+                                  </div>
+                                </label>
+                              </div>
+
                               {/* 발송 버튼 */}
                               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                 <button
@@ -7866,6 +7978,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                       if (shoongBulkTestMode) {
                                         body.testPhone = shoongBulkTestPhone.trim()
                                         body.testLimit = shoongBulkTestLimit
+                                      }
+                                      // 슝 공식 대량 API 사용 (토글 ON 시)
+                                      if (shoongUseBulkApi && !shoongBulkTestMode) {
+                                        body.useBulkApi = true
                                       }
                                       const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
                                         method: 'POST',

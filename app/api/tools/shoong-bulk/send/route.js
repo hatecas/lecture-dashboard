@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getNlabSupabase } from '@/lib/nlabSupabase'
 import { logError } from '@/lib/errorLog'
+import * as XLSX from 'xlsx'
 
 const SHOONG_ENDPOINT = 'https://api.shoong.kr/send'
+const SHOONG_BULK_BASE = 'https://api.shoong.kr'
 
 const TEMPLATE_VARS = {
   'start(1)': ['고객명', '유튜브링크', '강좌명', '강사명', '링크명'],
@@ -88,6 +90,11 @@ export async function POST(request) {
       //   미지정 시 기존 동작과 동일 (전체 한 번에).
       chunkOffset,
       chunkSize,
+      // 대량 API 모드 — true면 슝의 공식 POST /send/bulk endpoint 사용 (xlsx 업로드 방식).
+      //   한 번의 호출로 전체 명단을 슝에 전달 → 슝 백엔드가 자동 발송 처리.
+      //   청크 분할 / 동시성 / Vercel timeout 모두 불필요.
+      //   ⚠️ 슝 IP 화이트리스트 등록 필요 (안 되어 있으면 403).
+      useBulkApi = false,
     } = body
 
     const hasCourseIds = Array.isArray(courseIds) && courseIds.length > 0
@@ -201,6 +208,162 @@ export async function POST(request) {
         totalApplies: totalSourceRows,
         skipped
       }, { status: 400 })
+    }
+
+    // === 대량 API 모드 (POST /send/bulk) ===
+    //   1. POST /send/template/download — 양식 xlsx 다운로드 URL
+    //   2. 양식 다운 → 헤더 파싱 → 수신자 데이터 채워 새 xlsx 생성
+    //   3. POST /send/bulk — groupId + uploadUrl 받음
+    //   4. PUT uploadUrl — xlsx 업로드 → 슝 백엔드가 자동 발송
+    //   응답: groupId, fileKey, recipientCount 등.
+    //   주의: 비동기라 발송 결과(sent/failed)는 별도 polling 필요.
+    if (useBulkApi) {
+      // 테스트 모드: testPhone 한 명에게만 보내도록 명단을 덮어씀
+      let testModeApplied = null
+      if (testPhone) {
+        const tp = normalizePhone(testPhone)
+        if (!tp) {
+          return NextResponse.json({
+            error: `테스트 번호 형식이 올바르지 않습니다: ${testPhone} (010 시작 11자리)`
+          }, { status: 400 })
+        }
+        const limit = Math.max(1, Math.min(parseInt(testLimit, 10) || 1, 5))
+        const realCount = recipients.length
+        recipients.length = Math.min(recipients.length, limit)
+        for (const r of recipients) r.phone = tp
+        testModeApplied = { testPhone: tp, limit, realRecipientCount: realCount }
+      }
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      }
+
+      // 1) 템플릿 양식 다운로드 URL 발급
+      const dlReq = await fetch(`${SHOONG_BULK_BASE}/send/template/download`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          senderKey: finalSenderKey,
+          senderKeyType: 'S',
+          templateCode: templatecode,
+          sendType: 'at',
+        }),
+      })
+      const dlJson = await dlReq.json().catch(() => ({}))
+      if (!dlReq.ok || !dlJson?.data?.downloadUrl) {
+        return NextResponse.json({
+          error: '슝 템플릿 양식 다운로드 실패',
+          status: dlReq.status,
+          response: dlJson,
+          stage: 'template-download',
+        }, { status: 502 })
+      }
+
+      // 2) 양식 xlsx 다운로드 + 파싱 → 헤더 확인
+      const sampleRes = await fetch(dlJson.data.downloadUrl)
+      if (!sampleRes.ok) {
+        return NextResponse.json({
+          error: '슝 양식 xlsx 다운로드 실패',
+          status: sampleRes.status,
+          stage: 'template-fetch',
+        }, { status: 502 })
+      }
+      const sampleBuf = await sampleRes.arrayBuffer()
+      const sampleWb = XLSX.read(sampleBuf, { type: 'array' })
+      const sampleWs = sampleWb.Sheets[sampleWb.SheetNames[0]]
+      const matrix = XLSX.utils.sheet_to_json(sampleWs, { header: 1, defval: '', raw: false })
+      if (!matrix.length) {
+        return NextResponse.json({ error: '슝 양식 xlsx가 비어있음', stage: 'template-parse' }, { status: 502 })
+      }
+      const sheetHeaders = matrix[0].map(h => String(h || '').trim())
+
+      // 3) 헤더 → 우리 데이터 매핑
+      //   - "연락처" / "전화번호" → recipient.phone
+      //   - "#{고객명}" → recipient.name
+      //   - "#{변수명}" (그 외) → trimmedVars[변수명]
+      //   - "대체발송1:#{변수명}" 같은 fallback 컬럼은 빈값 그대로
+      const dataRows = recipients.map(r => {
+        const row = []
+        for (const h of sheetHeaders) {
+          if (h === '연락처' || h === '전화번호' || h === 'phone' || h === '수신번호') {
+            row.push(r.phone)
+          } else if (h.startsWith('#{') && h.endsWith('}')) {
+            const varName = h.slice(2, -1)
+            if (varName === '고객명') row.push(r.name)
+            else row.push(trimmedVars[varName] ?? '')
+          } else if (h.startsWith('대체발송')) {
+            row.push('') // 대체발송 변수는 빈값 (alimtalk 단독)
+          } else {
+            row.push('')
+          }
+        }
+        return row
+      })
+
+      // 4) 새 xlsx 생성 (헤더 + 데이터)
+      const outWb = XLSX.utils.book_new()
+      const outWs = XLSX.utils.aoa_to_sheet([sheetHeaders, ...dataRows])
+      XLSX.utils.book_append_sheet(outWb, outWs, sampleWb.SheetNames[0] || '발송')
+      const xlsxBuf = XLSX.write(outWb, { type: 'array', bookType: 'xlsx' })
+
+      // 5) POST /send/bulk — 발송 + uploadUrl 발급
+      const bulkBody = {
+        sendType: 'at',
+        channelConfig: { senderkey: finalSenderKey, templatecode },
+        excelRowCount: recipients.length,
+      }
+      if (reservedTime) bulkBody.scheduledAt = reservedTime
+
+      const bulkReq = await fetch(`${SHOONG_BULK_BASE}/send/bulk`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(bulkBody),
+      })
+      const bulkJson = await bulkReq.json().catch(() => ({}))
+      if (!bulkReq.ok || !bulkJson?.data?.uploadUrl) {
+        return NextResponse.json({
+          error: '슝 대량 발송 요청 실패',
+          status: bulkReq.status,
+          response: bulkJson,
+          stage: 'bulk-create',
+        }, { status: 502 })
+      }
+
+      // 6) PUT uploadUrl — xlsx 업로드
+      const putRes = await fetch(bulkJson.data.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+        body: xlsxBuf,
+      })
+      if (!putRes.ok) {
+        const txt = await putRes.text().catch(() => '')
+        return NextResponse.json({
+          error: '슝 S3 엑셀 업로드 실패',
+          status: putRes.status,
+          response: txt.slice(0, 500),
+          groupId: bulkJson.data.groupId,
+          stage: 's3-upload',
+        }, { status: 502 })
+      }
+
+      // 7) 성공 — 발송은 슝 백엔드에서 비동기로 처리됨
+      return NextResponse.json({
+        via: 'shoong-bulk-api',
+        mode: hasCourseIds ? 'db' : 'manual',
+        totalApplies: totalSourceRows,
+        recipientCount: recipients.length,
+        totalRecipients: recipients.length,
+        groupId: bulkJson.data.groupId,
+        fileKey: bulkJson.data.fileKey,
+        skipped,
+        reservedTime: reservedTime || null,
+        testMode: testModeApplied,
+        pending: recipients.length, // 비동기 발송 — 실제 sent/failed는 슝 어드민에서 조회
+        message: '슝 대량 발송 요청 완료. 발송 진행은 슝 어드민의 발송이력 → 대량 탭에서 확인하세요.',
+      })
     }
 
     // 청크 분할 적용 — chunkOffset/chunkSize 지정되면 그 범위만 처리
