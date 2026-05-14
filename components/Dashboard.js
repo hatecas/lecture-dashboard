@@ -766,22 +766,24 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       if (!file) continue
       let xml = await file.async('string')
 
-      // (a) 가장 강력: 모든 typeface 속성을 강제로 우리 폰트로 교체.
-      //     이미 존재하는 latin/ea/cs/font script="..." 등 모든 typeface 속성 대상.
-      xml = xml.replace(/(<a:(?:latin|ea|cs)\s[^>]*?\btypeface=")([^"]*)("[^>]*\/?>)/g, (m, pre, oldFont, post) => {
-        if (oldFont === fontName) return m
+      // (a) 모든 latin/ea/cs 슬롯을 동일한 단순 형태로 통일.
+      //   진단: PowerPoint UI에 "Inter 11pt 동일"로 보이지만 슬라이드별로 실제 렌더링이
+      //   다르게 나오는 현상의 원인 — 슬롯에 박힌 pitchFamily/charset 부가 속성이
+      //   슬라이드별로 미세하게 달라 PowerPoint가 글리프 fallback을 다르게 적용함.
+      //   typeface 값만 교체하던 기존 방식은 부가 속성을 보존했기 때문에 차이가 남았음.
+      //   해결: 부가 속성 모두 제거하고 typeface="{fontName}"만 남겨 완전 통일.
+      //   - <a:latin typeface="X" pitchFamily="34" charset="0"/> → <a:latin typeface="fontName"/>
+      //   - <a:ea typeface="X" charset="-122"/> → <a:ea typeface="fontName"/>
+      //   - typeface 누락 케이스도 동일하게 처리됨.
+      xml = xml.replace(/<a:(latin|ea|cs)\b[^/>]*\/>/g, (m, tag) => {
         typefaceReplaced++
-        return `${pre}${fontName}${post}`
+        return `<a:${tag} typeface="${fontName}"/>`
       })
 
-      // (a2) typeface 속성 자체가 없는 latin/ea/cs 슬롯도 보강.
-      //   예: <a:latin pitchFamily="34" charset="0"/> 형태 — PowerPoint가 빈 슬롯에
-      //   기본 폰트(Calibri 등)를 채워넣어 시각적 차이 발생. typeface="{fontName}" 강제 삽입.
-      xml = xml.replace(/<a:(latin|ea|cs)(\s[^>]*?)?\/>/g, (m, tag, attrs) => {
-        const a = attrs || ''
-        if (/\btypeface=/.test(a)) return m
+      // (a3) self-closing이 아닌 <a:latin ...></a:latin> 형태(드물지만 가능)도 처리.
+      xml = xml.replace(/<a:(latin|ea|cs)\b[^>]*><\/a:(latin|ea|cs)>/g, (m, tag) => {
         typefaceReplaced++
-        return `<a:${tag}${a} typeface="${fontName}"/>`
+        return `<a:${tag} typeface="${fontName}"/>`
       })
 
       // (b) self-closing rPr/defRPr/endParaRPr — 자식이 없으니 latin/ea/cs도 없음 → 통째로 추가.
@@ -875,20 +877,16 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       }
     }
 
-    // 디버깅: slide1.xml의 첫 텍스트 런 XML을 콘솔에 출력
-    //   → 폰트가 어떻게 들어갔는지 사용자가 확인 가능 (F12 콘솔에서 복사 → 공유)
+    // 디버깅: slide 1~5의 첫 rPr/latin 슬롯을 비교용으로 출력.
+    //   사용자가 시각 차이 발견 시 F12 콘솔에서 비교 가능.
     try {
-      const debugSlide = zip.file('ppt/slides/slide1.xml')
-      if (debugSlide) {
-        const debugXml = await debugSlide.async('string')
-        // 첫 <a:rPr>...</a:rPr> 찾기
-        const firstRpr = debugXml.match(/<a:(?:rPr|defRPr|endParaRPr)[^>]*>[\s\S]*?<\/a:(?:rPr|defRPr|endParaRPr)>/)
-        const firstSelfClose = debugXml.match(/<a:(?:rPr|defRPr|endParaRPr)[^>]*\/>/)
-        console.log('[buildDesignedPptx] slide1.xml 첫 rPr (열고닫기):', firstRpr ? firstRpr[0].slice(0, 500) : '(없음)')
-        console.log('[buildDesignedPptx] slide1.xml 첫 rPr (self-close):', firstSelfClose ? firstSelfClose[0].slice(0, 500) : '(없음)')
-        // 첫 <a:t>...</a:t> 텍스트 찾기 (실제 한글 텍스트)
-        const firstText = debugXml.match(/<a:t>([\s\S]*?)<\/a:t>/)
-        console.log('[buildDesignedPptx] slide1.xml 첫 텍스트:', firstText ? firstText[1].slice(0, 100) : '(없음)')
+      for (let i = 1; i <= 5; i++) {
+        const f = zip.file(`ppt/slides/slide${i}.xml`)
+        if (!f) continue
+        const x = await f.async('string')
+        const latinMatches = (x.match(/<a:latin[^/>]*\/>/g) || []).slice(0, 3)
+        const firstText = x.match(/<a:t>([\s\S]*?)<\/a:t>/)
+        console.log(`[buildDesignedPptx] slide${i}: 첫 텍스트="${firstText ? firstText[1].slice(0, 30) : ''}", latin 슬롯 샘플:`, latinMatches)
       }
     } catch {}
 
