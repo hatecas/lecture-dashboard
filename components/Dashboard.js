@@ -260,8 +260,12 @@ function parseToneMd(md) {
   const soft = findColor(['soft', 'soft-cloud', 'cloud']); if (soft) result.soft = soft
   const sale = findColor(['sale', 'warning', 'error', '경고']); if (sale) result.sale = sale
 
-  // 폰트 추출 — 유명 한글 폰트 우선
-  const knownFonts = ['Pretendard', 'Noto Sans KR', 'Noto Sans', 'Malgun Gothic', 'Spoqa Han Sans', 'Nanum Gothic', 'Inter', 'Roboto', 'Poppins', 'Montserrat']
+  // 폰트 추출 — 한국어 글리프를 가진 폰트만 매칭.
+  //   영문 전용 폰트(Inter, Roboto, Poppins, Montserrat 등)는 한글 글리프가 없어
+  //   PowerPoint가 한국어 부분을 시스템 fallback(맑은 고딕/궁서체 등)으로 대체함.
+  //   시스템마다 fallback이 달라 다른 PC에서 깨져 보이는 원인이라 의도적으로 제외.
+  //   디자인 톤 마크다운에 "Inter"라 적혀있어도 무시하고 Pretendard 유지.
+  const knownFonts = ['Pretendard', 'Noto Sans KR', 'Noto Sans', 'Malgun Gothic', 'Spoqa Han Sans', 'Nanum Gothic']
   for (const f of knownFonts) {
     if (lower.includes(f.toLowerCase())) { result.fontMain = f; break }
   }
