@@ -237,28 +237,64 @@ function parseToneMd(md) {
     sale: 'D30005',       // 경고
     fontMain: 'Pretendard',
   }
-  if (!md || typeof md !== 'string') return DEFAULTS
+  if (!md || typeof md !== 'string') return { ...DEFAULTS, _detected: {} }
 
   const result = { ...DEFAULTS }
+  const detected = {} // 어떤 키가 MD에서 실제 추출됐는지 (UI 경고용)
   const lower = md.toLowerCase()
 
   // 키워드별 색상 매칭 — 라벨 옆 hex 추출
   const findColor = (keywords) => {
     for (const kw of keywords) {
-      const rx = new RegExp(`${kw}\\s*[:\\-\\|]?\\s*\`?#?([0-9A-Fa-f]{6})`, 'i')
+      const rx = new RegExp(`${kw}\\s*[:\\-\\|\\(\\)]?\\s*\`?#?([0-9A-Fa-f]{6})\\b`, 'i')
       const m = md.match(rx)
       if (m) return m[1].toUpperCase()
     }
     return null
   }
 
-  const primary = findColor(['primary', 'main', '메인', '주요']); if (primary) result.primary = primary
-  const secondary = findColor(['secondary', 'sub', '보조', 'charcoal']); if (secondary) result.secondary = secondary
-  const background = findColor(['background', 'bg', '배경', 'canvas']); if (background) result.background = background
-  const text = findColor(['text', 'foreground', 'fg', '글씨', '텍스트', 'ink']); if (text) result.text = text
-  const accent = findColor(['accent', '강조', 'highlight', 'mute']); if (accent) result.accent = accent
-  const soft = findColor(['soft', 'soft-cloud', 'cloud']); if (soft) result.soft = soft
-  const sale = findColor(['sale', 'warning', 'error', '경고']); if (sale) result.sale = sale
+  // 색상 이름 기반 추론 — MD에 hex가 없고 색상 이름만 있는 경우(예: Meta tone "Cobalt", "Facebook Blue")
+  // 디자인 시스템 토큰 참조 형식({colors.primary} 등)만 있을 때 폴백.
+  const COLOR_NAMES = {
+    cobalt: '0064E0', blue: '1877F2', 'facebook blue': '1877F2',
+    indigo: '4F46E5', purple: '8B5CF6', violet: '7C3AED', oculus: '6E48AA',
+    red: 'D30005', crimson: 'B91C1C', pink: 'EC4899',
+    green: '007D48', emerald: '059669', success: '007D48',
+    yellow: 'FBBF24', amber: 'F59E0B', orange: 'F97316',
+    black: '111111', ink: '111111', charcoal: '39393B', slate: '64748B', steel: '6B7280', stone: '9E9EA0',
+    white: 'FFFFFF', canvas: 'FFFFFF', cloud: 'F5F5F5',
+    teal: '0D9488', cyan: '06B6D4',
+  }
+  const findColorByName = (sectionKeywords) => {
+    for (const kw of sectionKeywords) {
+      // 해당 키워드를 포함한 한 줄 또는 짧은 구간 추출 (앞뒤 80자)
+      const rx = new RegExp(`(.{0,80}${kw}.{0,80})`, 'i')
+      const m = md.match(rx)
+      if (!m) continue
+      const snippet = m[1].toLowerCase()
+      // 색상 이름 매칭 (긴 이름부터 — "facebook blue"가 "blue"보다 우선)
+      const names = Object.keys(COLOR_NAMES).sort((a, b) => b.length - a.length)
+      for (const name of names) {
+        if (snippet.includes(name)) return COLOR_NAMES[name]
+      }
+    }
+    return null
+  }
+
+  const tryExtract = (key, keywords, nameKeywords) => {
+    const hex = findColor(keywords)
+    if (hex) { result[key] = hex; detected[key] = 'hex'; return }
+    const named = findColorByName(nameKeywords || keywords)
+    if (named) { result[key] = named; detected[key] = 'named'; return }
+  }
+
+  tryExtract('primary', ['primary', 'main', '메인', '주요'], ['primary', 'main', 'brand', 'cta'])
+  tryExtract('secondary', ['secondary', 'sub', '보조', 'charcoal'], ['secondary', 'sub'])
+  tryExtract('background', ['background', 'bg', '배경', 'canvas'], ['background', 'canvas', 'surface'])
+  tryExtract('text', ['text', 'foreground', 'fg', '글씨', '텍스트', 'ink'], ['text', 'ink', 'foreground'])
+  tryExtract('accent', ['accent', '강조', 'highlight', 'mute'], ['accent', 'highlight'])
+  tryExtract('soft', ['soft', 'soft-cloud', 'cloud'], ['soft', 'cloud'])
+  tryExtract('sale', ['sale', 'warning', 'error', '경고'], ['warning', 'error', 'critical', 'sale'])
 
   // 폰트 추출 — 한국어 글리프를 가진 폰트만 매칭.
   //   영문 전용 폰트(Inter, Roboto, Poppins, Montserrat 등)는 한글 글리프가 없어
@@ -267,10 +303,64 @@ function parseToneMd(md) {
   //   디자인 톤 마크다운에 "Inter"라 적혀있어도 무시하고 Pretendard 유지.
   const knownFonts = ['Pretendard', 'Noto Sans KR', 'Noto Sans', 'Malgun Gothic', 'Spoqa Han Sans', 'Nanum Gothic']
   for (const f of knownFonts) {
-    if (lower.includes(f.toLowerCase())) { result.fontMain = f; break }
+    if (lower.includes(f.toLowerCase())) { result.fontMain = f; detected.fontMain = 'matched'; break }
   }
 
+  result._detected = detected
   return result
+}
+
+// 사용자가 칩에서 직접 입력한 hex 오버라이드를 parsed 톤에 병합.
+// overrides의 hex 값 중 6자리 유효한 것만 반영.
+function applyToneOverrides(parsed, overrides) {
+  if (!parsed) return parsed
+  if (!overrides || typeof overrides !== 'object') return parsed
+  const out = { ...parsed }
+  for (const key of ['primary', 'secondary', 'background', 'text', 'accent', 'soft', 'sale']) {
+    const v = overrides[key]
+    if (typeof v === 'string' && /^[0-9A-Fa-f]{6}$/.test(v)) {
+      out[key] = v.toUpperCase()
+    }
+  }
+  if (typeof overrides.fontMain === 'string' && overrides.fontMain.trim()) {
+    out.fontMain = overrides.fontMain.trim()
+  }
+  return out
+}
+
+// ─────────────────────────────────────────────────────────
+// 봇 완료 알림 (Browser Notification API)
+// 사용자가 다른 탭/창에 가있을 때 작업 완료 알려줌.
+// 권한 없으면 조용히 패스. 페이지가 보이는 상태면 굳이 알림 안 띄움 (이미 사용자가 보고 있으니).
+// ─────────────────────────────────────────────────────────
+async function requestNotifyPermission() {
+  if (typeof window === 'undefined' || !('Notification' in window)) return false
+  if (Notification.permission === 'granted') return true
+  if (Notification.permission === 'denied') return false
+  try {
+    const r = await Notification.requestPermission()
+    return r === 'granted'
+  } catch { return false }
+}
+
+function notifyBotComplete(title, body) {
+  if (typeof window === 'undefined' || !('Notification' in window)) return
+  if (Notification.permission !== 'granted') return
+  // 페이지 보이면 알림 안 띄움 (이미 사용자가 화면 보고 있음)
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') return
+  try {
+    const n = new Notification(title || '🪄 작업 완료', {
+      body: body || '봇 작업이 완료되었습니다. 결과를 확인하세요.',
+      icon: '/favicon.ico',
+      tag: 'lecture-dashboard-bot',  // 같은 tag면 알림 덮어쓰기 (스팸 방지)
+      requireInteraction: false,
+    })
+    n.onclick = () => {
+      try { window.focus() } catch {}
+      n.close()
+    }
+    setTimeout(() => { try { n.close() } catch {} }, 12000)
+  } catch {}
 }
 
 // 어두운 배경인지 — text 색상 자동 보정용
@@ -1463,6 +1553,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [pp_dragOverIndex, setPpDragOverIndex] = useState(null) // hover 중인 drop target idx
   // PPT 디자인 톤 (기획 생성 시 한 번 묻고 결과에 적용)
   const [pp_designToneMd, setPpDesignToneMd] = useState(DEFAULT_DESIGN_TONE_MD)
+  const [pp_designToneOverrides, setPpDesignToneOverrides] = useState({}) // 사용자가 칩에서 직접 입력한 hex/폰트
   const [pp_toneModalOpen, setPpToneModalOpen] = useState(false)
   const [pp_pendingGenerate, setPpPendingGenerate] = useState(null) // 톤 모달에서 진행 시 실행할 함수
 
@@ -1481,6 +1572,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       const toneRaw = localStorage.getItem(`pp_designToneMd:${loginId}`)
       if (toneRaw && typeof toneRaw === 'string' && toneRaw.length > 10) {
         setPpDesignToneMd(toneRaw)
+      }
+      const overridesRaw = localStorage.getItem(`pp_designToneOverrides:${loginId}`)
+      if (overridesRaw) {
+        const ov = JSON.parse(overridesRaw)
+        if (ov && typeof ov === 'object') setPpDesignToneOverrides(ov)
       }
     } catch (e) {
       console.warn('[pptStructure] localStorage 복원 실패:', e?.message)
@@ -9930,6 +10026,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     }
                   } else if (event === 'done') {
                     setPpPhase('done')
+                    // 사용자가 다른 탭/창에 가있으면 브라우저 알림 띄움
+                    notifyBotComplete(
+                      '🪄 기획 생성 완료',
+                      firstSuccess
+                        ? `${selectedInstructor || ''} 강사 — 결과를 확인하세요.`
+                        : '봇 작업이 끝났습니다.'
+                    )
                   } else if (event === 'fatal') {
                     setPpError(data?.message || '서버 스트림 오류')
                   }
@@ -9995,6 +10098,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 setPpError('주제와 최소 1개 항목이 필요합니다.')
                 return
               }
+              // 봇 작업이 1분 이상 걸리므로 완료 시 브라우저 알림 띄움.
+              // 사용자가 다른 탭/창에 가있을 때 알려주려면 권한 필요. 클릭 직후 요청.
+              requestNotifyPermission()
               // 전자책 사전 검증은 precheck 전에도 한 번 더 (서버 round-trip 절약)
               if (pp_enabledTasks.includes('ebook')) {
                 const ebookCount = attachments.filter(a => a.file_role === 'ebook').length
@@ -10196,7 +10302,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   setPpExportBusy(prev => ({ ...prev, [taskKey]: 'pptx' }))
                   try {
                     const parsed = parseToneMd(pp_designToneMd || DEFAULT_DESIGN_TONE_MD)
-                    await buildDesignedPptx(plan, parsed, safeFileName)
+                    // 사용자가 모달 칩에서 직접 입력한 hex 오버라이드 적용
+                    const finalTone = applyToneOverrides(parsed, pp_designToneOverrides)
+                    await buildDesignedPptx(plan, finalTone, safeFileName)
                   } catch (e) {
                     alert('.pptx 생성 실패: ' + (e?.message || e))
                   } finally {
@@ -11630,7 +11738,25 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     PPT 체크돼있을 때 [🪄 기획 생성] 클릭 시 자동 표시.
                     사용자가 design.md 톤 복붙하거나 기본 톤으로 진행. */}
                 {pp_toneModalOpen && (() => {
-                  const T = parseToneMd(pp_designToneMd)
+                  const parsed = parseToneMd(pp_designToneMd)
+                  const T = applyToneOverrides(parsed, pp_designToneOverrides)
+                  // 추출 결과가 모두 기본값과 동일하면 = 추출 실패 (hex 없는 MD)
+                  const detected = parsed._detected || {}
+                  const overrideKeys = Object.keys(pp_designToneOverrides || {}).filter(k => /^[0-9A-Fa-f]{6}$/.test(pp_designToneOverrides[k] || ''))
+                  const colorKeys = ['primary', 'secondary', 'background', 'text', 'accent']
+                  const detectedCount = colorKeys.filter(k => detected[k]).length
+                  const extractionFailed = detectedCount === 0 && overrideKeys.length === 0
+                  // 칩에서 hex 직접 수정
+                  const updateOverride = (key, value) => {
+                    const clean = (value || '').replace(/^#/, '').trim().toUpperCase()
+                    setPpDesignToneOverrides(prev => {
+                      const next = { ...prev, [key]: clean }
+                      if (typeof window !== 'undefined' && loginId) {
+                        try { localStorage.setItem(`pp_designToneOverrides:${loginId}`, JSON.stringify(next)) } catch {}
+                      }
+                      return next
+                    })
+                  }
                   return (
                     <div onClick={(e) => { if (e.target === e.currentTarget) cancelToneAndAbort() }}
                       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
@@ -11654,9 +11780,29 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           placeholder="# Brand Tone\nModern, minimal, bold typography...\n\n## Colors\n- Primary: #6366F1\n- Background: #0F0F23\n..."
                           style={{ width: '100%', padding: '12px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '8px', color: '#cbd5e1', fontSize: '12.5px', fontFamily: 'monospace', lineHeight: 1.6, boxSizing: 'border-box', resize: 'vertical', minHeight: '220px' }} />
 
-                        {/* 추출된 톤 미리보기 — 사용자가 입력한 MD에서 자동 파싱 결과 */}
+                        {/* 추출 실패 경고 — MD에 hex가 없는 경우 (예: Meta 톤은 토큰 참조만 있어 추출 불가) */}
+                        {extractionFailed && (
+                          <div style={{ marginTop: '14px', padding: '12px 14px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '10px', fontSize: '12px', color: '#fca5a5', lineHeight: 1.6 }}>
+                            ⚠️ <b style={{ color: '#fecaca' }}>MD에서 색상 hex를 찾지 못했습니다.</b> 이 MD는 <code style={{ color: '#fde68a' }}>{`{colors.primary}`}</code> 같은 토큰 참조만 있거나 색상 이름만 있어 자동 추출이 불가능합니다.
+                            아래 칩의 hex 값을 직접 입력하거나, MD에 <code style={{ color: '#fde68a' }}>Primary: #0064E0</code> 같이 hex를 명시한 라인을 추가하세요. 그대로 진행하면 <b>기본 검정 톤</b>으로 생성됩니다.
+                          </div>
+                        )}
+
+                        {/* 추출된 톤 미리보기 — 사용자가 입력한 MD에서 자동 파싱 결과 + 인라인 hex 편집 */}
                         <div style={{ marginTop: '14px', padding: '12px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: '10px' }}>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '8px', letterSpacing: '0.05em' }}>🔍 자동 추출 결과 (디자인 적용에 사용됨)</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.05em' }}>🔍 자동 추출 결과 (클릭해서 직접 수정 가능)</div>
+                            {(overrideKeys.length > 0 || (pp_designToneOverrides.fontMain && pp_designToneOverrides.fontMain.trim())) && (
+                              <button onClick={() => {
+                                setPpDesignToneOverrides({})
+                                if (typeof window !== 'undefined' && loginId) {
+                                  try { localStorage.removeItem(`pp_designToneOverrides:${loginId}`) } catch {}
+                                }
+                              }} style={{ fontSize: '10.5px', padding: '3px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '6px', color: '#94a3b8', cursor: 'pointer' }}>
+                                ↺ 수동 입력 초기화
+                              </button>
+                            )}
+                          </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
                             {[
                               { key: 'primary', label: 'Primary' },
@@ -11664,22 +11810,44 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               { key: 'background', label: 'Background' },
                               { key: 'text', label: 'Text' },
                               { key: 'accent', label: 'Accent' },
-                            ].map(c => (
-                              <div key={c.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(0,0,0,0.30)', borderRadius: '7px', border: '1px solid var(--border)' }}>
-                                <span style={{ width: '18px', height: '18px', borderRadius: '4px', background: `#${T[c.key]}`, border: '1px solid rgba(255,255,255,0.18)' }} />
-                                <span style={{ fontSize: '11px', color: '#cbd5e1' }}>{c.label}</span>
-                                <code style={{ fontSize: '10.5px', color: '#94a3b8' }}>#{T[c.key]}</code>
-                              </div>
-                            ))}
+                            ].map(c => {
+                              const isOverride = /^[0-9A-Fa-f]{6}$/.test(pp_designToneOverrides[c.key] || '')
+                              const source = isOverride ? '✏️' : (detected[c.key] === 'hex' ? '🔍' : detected[c.key] === 'named' ? '🧠' : '⚙️')
+                              return (
+                                <div key={c.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 8px 4px 10px', background: 'rgba(0,0,0,0.30)', borderRadius: '7px', border: isOverride ? '1px solid rgba(168,85,247,0.45)' : '1px solid var(--border)' }}>
+                                  <span style={{ width: '18px', height: '18px', borderRadius: '4px', background: `#${T[c.key]}`, border: '1px solid rgba(255,255,255,0.18)' }} />
+                                  <span style={{ fontSize: '11px', color: '#cbd5e1' }}>{c.label}</span>
+                                  <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>#</span>
+                                  <input
+                                    type="text"
+                                    maxLength={7}
+                                    value={T[c.key]}
+                                    onChange={(e) => updateOverride(c.key, e.target.value)}
+                                    title={isOverride ? '수동 입력값' : detected[c.key] === 'hex' ? 'MD에서 hex 추출' : detected[c.key] === 'named' ? 'MD의 색상 이름으로 추론' : '기본값'}
+                                    style={{ width: '64px', padding: '2px 4px', background: 'transparent', border: 'none', color: isOverride ? '#fbcfe8' : '#cbd5e1', fontSize: '10.5px', fontFamily: 'monospace', outline: 'none', textTransform: 'uppercase' }}
+                                  />
+                                  <span style={{ fontSize: '10px', opacity: 0.6 }}>{source}</span>
+                                </div>
+                              )
+                            })}
                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(99,102,241,0.10)', borderRadius: '7px', border: '1px solid rgba(99,102,241,0.30)' }}>
                               <span style={{ fontSize: '11px', color: '#a5b4fc' }}>🔤 폰트</span>
                               <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>{T.fontMain}</span>
                             </div>
                           </div>
+                          <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '8px' }}>
+                            🔍 MD에서 hex 추출 · 🧠 색상 이름으로 추론 · ⚙️ 기본값 · ✏️ 직접 입력
+                          </div>
                         </div>
 
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
-                          <button onClick={() => setPpDesignToneMd(DEFAULT_DESIGN_TONE_MD)}
+                          <button onClick={() => {
+                            setPpDesignToneMd(DEFAULT_DESIGN_TONE_MD)
+                            setPpDesignToneOverrides({})
+                            if (typeof window !== 'undefined' && loginId) {
+                              try { localStorage.removeItem(`pp_designToneOverrides:${loginId}`) } catch {}
+                            }
+                          }}
                             style={{ padding: '8px 14px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '8px', color: '#94a3b8', fontSize: '12px', cursor: 'pointer' }}>
                             🔄 기본 톤으로
                           </button>
