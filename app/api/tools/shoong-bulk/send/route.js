@@ -293,7 +293,12 @@ export async function POST(request) {
       }
     }
 
-    const results = await runWithConcurrency(recipients, 5, sendOne)
+    // 동시 호출 수 — 슝 단건 API의 대량 발송 보완책.
+    //   슝은 외부 REST 대량 API를 제공하지 않음(어드민 UI Next.js Server Action만 존재).
+    //   단건 호출의 처리량을 늘리려면 동시성 증가가 가장 단순한 방법.
+    //   5 → 20: 슝 API rate limit 한도 내에서 약 4배 빠른 처리.
+    //   2만 건 발송 기준 약 30분 → 8~10분 단축 기대.
+    const results = await runWithConcurrency(recipients, 20, sendOne)
 
     return NextResponse.json({
       via: 'vercel-server-bulk',
