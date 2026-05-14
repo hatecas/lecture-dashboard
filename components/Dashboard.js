@@ -1,7 +1,19 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import dynamic from 'next/dynamic'
+
+// recharts와 xlsx는 첫 로드를 가볍게 하려고 동적 import.
+//   recharts: 차트 보일 때만 로드 (대시보드 구매 추이, 강사 비교 모달)
+//   xlsx: CSV/엑셀 업로드 동작 직전에 로드
+const PurchaseTimelineChart = dynamic(() => import('./charts/PurchaseTimelineChart'), {
+  ssr: false,
+  loading: () => <div style={{ height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 12 }}>차트 로딩 중…</div>,
+})
+const CompareMetricBarChart = dynamic(() => import('./charts/CompareMetricBarChart'), {
+  ssr: false,
+  loading: () => <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 12 }}>차트 로딩 중…</div>,
+})
 import {
   LayoutDashboard,
   ChevronLeft,
@@ -26,7 +38,10 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import HelpTooltip from './HelpTooltip'
-import * as XLSX from 'xlsx'
+// xlsx는 더 이상 정적 import 하지 않음 — 업로드 핸들러 안에서 await import('xlsx')로 lazy load
+import { formatKST } from '@/lib/utils/dateUtils'
+import { getAuthHeaders, getAuthToken, clearAuthToken } from '@/lib/authClient'
+import ErrorLogsTab from './tabs/ErrorLogsTab'
 
 // PPT outline kind별 시각화 메타 — 프로젝트 기획 탭과 생성된 기획안 탭 양쪽에서 공유.
 // 변경하려면 한 곳만.
@@ -1536,11 +1551,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // 봇 결과 노션 페이지 생성 결과: { [taskKey]: { url, title } | null }
   const [pp_planNotionResult, setPpPlanNotionResult] = useState({})
   // 에러 로그 (개발자 전용 — localhost 또는 jinwoo만)
-  const [errorLogs, setErrorLogs] = useState([])
-  const [errorLogsLoading, setErrorLogsLoading] = useState(false)
-  const [errorLogsFilter, setErrorLogsFilter] = useState({ route: '', code: '', username: '' })
-  const [errorLogsStats, setErrorLogsStats] = useState({}) // { [code]: count 최근 24시간 }
-  const [errorLogDetail, setErrorLogDetail] = useState(null) // 클릭 시 상세
+  // errorLogs* state는 components/tabs/ErrorLogsTab.js 안으로 이동됨 (2026-05-14 분리)
 
   // PPT outline 구조 설정 (사용자가 직접 단계 순서 변경 + ON/OFF).
   // 11개 kind 중 사용할 것만 + 원하는 순서로 배열. localStorage에 사용자별 저장.
@@ -2198,13 +2209,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   }
 
   // API 호출용 인증 헤더 생성
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('authToken')
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Bearer ${token}` : ''
-    }
-  }
+  // 인증 토큰 헬퍼는 lib/authClient.js로 통합됨 (위 import 참조).
+  // 기존 호출부는 getAuthHeaders() 그대로 사용 가능.
 
   useEffect(() => {
     // loadInstructors/loadSessions는 같은 endpoint(/api/admin/instructors)를 호출하는 별칭.
@@ -2277,51 +2283,19 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     // 처음 로드 시점에는 dirty=false (초기 로드 useEffect에서 false로 명시 세팅)
   }, [pp_topic, pp_additionalContext]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 사용자가 입력 멈춘 후 1.5초 뒤 자동 저장 (디바운스).
-  // 수동 💾 저장 버튼은 여전히 즉시 저장용으로 유지.
-  // 예전에는 저장 버튼을 안 누르고 페이지 나가면 입력값이 날아가는 사고가 있어서 자동 저장 도입.
-  // 실패 시 (예: RLS 차단·네트워크 끊김) UI에 명확히 표시해서 사용자가 "저장됐다"고 착각하지 않게.
+  // 자동 저장 제거 — 빠른 강사 전환 시 자동저장이 엉뚱한 기수에 덮어쓰는 사고를 막기 위해
+  //   2026-05 디바운스 자동저장 useEffect를 제거. 명시적 💾 저장 버튼만 사용.
+  //   미저장 변경이 있을 때 브라우저 닫기/새로고침/탭 전환 시 경고를 띄워 데이터 보호.
   useEffect(() => {
     if (!pp_inputsDirty) return
-    if (!selectedSessionId) return
-    if (currentTab !== 'project-planner') return
-    const timeoutId = setTimeout(async () => {
-      try {
-        setPpInputsSaving(true)
-        const res = await fetch('/api/tools/project-planner/inputs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({
-            sessionId: selectedSessionId,
-            topic: pp_topic,
-            additionalContext: pp_additionalContext,
-          }),
-        })
-        const data = await res.json().catch(() => ({}))
-        if (res.ok && data.success) {
-          setPpInputsSavedAt(new Date(data.inputs?.updated_at || Date.now()))
-          setPpInputsDirty(false)
-          setPpError('')
-        } else {
-          const msg = data.error || `HTTP ${res.status}`
-          console.warn('[planner-inputs] 자동 저장 실패:', msg)
-          // RLS 정책 위반 같은 DB 에러는 사용자에게 명확히 알림.
-          // 사용자는 데이터가 저장됐다고 오해하지 않게 dirty 플래그 유지.
-          if (msg.includes('row-level security') || msg.includes('42501')) {
-            setPpError('자동 저장 실패: DB의 session_planner_inputs 테이블 RLS 정책이 막고 있습니다. Supabase SQL Editor에서 `ALTER TABLE session_planner_inputs DISABLE ROW LEVEL SECURITY;` 한 줄 실행해주세요. (또는 supabase/fix_session_planner_inputs_rls.sql)')
-          } else {
-            setPpError(`자동 저장 실패: ${msg}`)
-          }
-        }
-      } catch (e) {
-        console.warn('[planner-inputs] 자동 저장 네트워크 오류:', e?.message)
-        setPpError(`자동 저장 네트워크 오류: ${e?.message}`)
-      } finally {
-        setPpInputsSaving(false)
-      }
-    }, 1500)
-    return () => clearTimeout(timeoutId)
-  }, [pp_inputsDirty, pp_topic, pp_additionalContext, selectedSessionId, currentTab]) // eslint-disable-line react-hooks/exhaustive-deps
+    const handler = (e) => {
+      e.preventDefault()
+      e.returnValue = '' // 크롬: 빈 문자열이어도 표준 확인 다이얼로그가 뜸
+      return ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [pp_inputsDirty])
 
   // 개발자 환경 감지 (mount 시 한 번). hostname이 localhost/127.x/사설IP면 dev.
   useEffect(() => {
@@ -2333,28 +2307,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     setIsDevEnv(dev)
   }, [])
 
-  // 에러 로그 탭 진입 시 자동 로드. 필터 변경 시도 자동 재조회.
-  useEffect(() => {
-    if (currentTab !== 'error-logs') return
-    if (!isDevEnv && loginId !== 'jinwoo') return // 접근 안 됨
-    let cancelled = false
-    setErrorLogsLoading(true)
-    const params = new URLSearchParams()
-    if (errorLogsFilter.route) params.set('route', errorLogsFilter.route)
-    if (errorLogsFilter.code) params.set('code', errorLogsFilter.code)
-    if (errorLogsFilter.username) params.set('username', errorLogsFilter.username)
-    params.set('limit', '200')
-    fetch(`/api/dev/error-logs?${params.toString()}`, { headers: { ...getAuthHeaders() } })
-      .then(r => r.json())
-      .then(data => {
-        if (cancelled) return
-        if (Array.isArray(data?.logs)) setErrorLogs(data.logs)
-        if (data?.codeStats24h) setErrorLogsStats(data.codeStats24h)
-      })
-      .catch(e => console.warn('[error-logs] 로드 실패:', e?.message))
-      .finally(() => { if (!cancelled) setErrorLogsLoading(false) })
-    return () => { cancelled = true }
-  }, [currentTab, errorLogsFilter.route, errorLogsFilter.code, errorLogsFilter.username, isDevEnv, loginId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 에러 로그 자동 로드 useEffect는 components/tabs/ErrorLogsTab.js 안으로 이동됨
 
   // 생성된 기획안 탭 진입 시 목록 자동 로드. 필터 변경 시도 자동 재조회.
   // savedPlansDirty가 true이면 (새 기획안 저장 직후) 강제 재조회.
@@ -2412,7 +2365,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // 슝 툴 진입 시 서버 .env 기본값(SHOONG_API_KEY, SHOONG_SENDER_KEY) 로드해서 폼/curl 자동 채움
   useEffect(() => {
     if (currentTool !== 'shoong' || shoongDefaultsLoaded) return
-    const token = localStorage.getItem('authToken')
+    const token = getAuthToken()
     if (!token) return
     fetch('/api/tools/shoong-send/defaults', {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -2962,7 +2915,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
       try {
         const response = await fetch('/api/files', {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
           body: formData,
         })
         const result = await response.json()
@@ -2980,7 +2933,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+            'Authorization': `Bearer ${getAuthToken()}`,
           },
           body: JSON.stringify({
             instructor_id: instructorId,
@@ -3021,7 +2974,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         metaForm.append('mime_type', file.type || '')
         const metaRes = await fetch('/api/files', {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
           body: metaForm,
         })
         const metaData = await metaRes.json()
@@ -3162,7 +3115,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     try {
       const response = await fetch('/api/files', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
         body: formData
       })
       const result = await response.json()
@@ -4234,42 +4187,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   {purchaseTimeline.length > 0 ? (() => {
                     const groupedData = getGroupedTimelineData()
                     const total = groupedData.reduce((sum, p) => sum + p.purchases, 0)
-                    return (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={groupedData.map(item => ({
-                          name: getIntervalLabel(item.hour) + '분',
-                          shortName: item.hour + '',
-                          purchases: item.purchases,
-                          pct: total > 0 ? ((item.purchases / total) * 100).toFixed(1) : 0
-                        }))}>
-                        <defs>
-                          <linearGradient id="purchaseGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
-                            <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <XAxis
-                          dataKey="shortName"
-                          tick={{ fill: '#94a3b8', fontSize: 10 }}
-                          interval={2}
-                          tickFormatter={(value) => {
-                            const min = parseInt(value)
-                            if (min === 0) return '0분'
-                            if (min % 60 === 0) return `${min / 60}시간`
-                            if (min > 60) return `${Math.floor(min / 60)}시간${min % 60}분`
-                            return `${min}분`
-                          }}
-                        />
-                        <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                        <Tooltip
-                          contentStyle={{ background: '#1e1e2e', border: '1px solid #4c4c6d', borderRadius: '8px', color: '#e2e8f0' }}
-                          formatter={(value, name, props) => [`${value}건 (${props.payload.pct}%)`, '구매건수']}
-                          labelFormatter={(label, payload) => payload?.[0]?.payload?.name || label}
-                        />
-                        <Area type="monotone" dataKey="purchases" stroke="#6366f1" fill="url(#purchaseGradient)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                    )
+                    return <PurchaseTimelineChart groupedData={groupedData} getIntervalLabel={getIntervalLabel} total={total} />
                   })() : (
                     <div style={{ height: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
                       아직 판매 데이터가 없습니다
@@ -5043,6 +4961,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           return null
                         }
 
+                        const XLSX = await import('xlsx')
                         for (const file of toolFiles1) {
                           const buffer = await file.arrayBuffer()
                           const wb = XLSX.read(buffer)
@@ -5369,7 +5288,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       formData.append('tabName', kakaoSelectedTab.raw)
 
                       try {
-                        const token = localStorage.getItem('authToken')
+                        const token = getAuthToken()
                         const res = await fetch('/api/tools/kakao-match-sheet', {
                           method: 'POST',
                           headers: { 'Authorization': token ? `Bearer ${token}` : '' },
@@ -5957,7 +5876,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           setOrderSyncCommitResult(null)
 
                           try {
-                            const token = localStorage.getItem('authToken')
+                            const token = getAuthToken()
                             let res
                             if (orderSyncMode === 'supabase') {
                               res = await fetch('/api/tools/order-sync', {
@@ -6671,6 +6590,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   setShoongManualRows([])
                   setShoongManualFileName(file.name)
                   try {
+                    const XLSX = await import('xlsx')
                     const buffer = await file.arrayBuffer()
                     const wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
                     const sheet = wb.Sheets[wb.SheetNames[0]]
@@ -6906,7 +6826,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                   method: 'POST',
                                   headers: {
                                     'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+                                    'Authorization': `Bearer ${getAuthToken() || ''}`
                                   },
                                   body: JSON.stringify(payload)
                                 })
@@ -6996,7 +6916,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                   if (!shoongBulkKeyword.trim()) return
                                   setShoongBulkSearching(true)
                                   try {
-                                    const token = localStorage.getItem('authToken') || ''
+                                    const token = getAuthToken() || ''
                                     const res = await fetch(`/api/tools/shoong-bulk/courses?keyword=${encodeURIComponent(shoongBulkKeyword.trim())}`, {
                                       headers: { 'Authorization': `Bearer ${token}` }
                                     })
@@ -7028,7 +6948,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 onClick={async () => {
                                   setShoongBulkSearching(true)
                                   try {
-                                    const token = localStorage.getItem('authToken') || ''
+                                    const token = getAuthToken() || ''
                                     const res = await fetch(`/api/tools/shoong-bulk/courses?keyword=${encodeURIComponent(shoongBulkKeyword.trim())}`, {
                                       headers: { 'Authorization': `Bearer ${token}` }
                                     })
@@ -7400,7 +7320,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     setShoongBulkSending(true)
                                     setShoongBulkResult(null)
                                     try {
-                                      const token = localStorage.getItem('authToken') || ''
+                                      const token = getAuthToken() || ''
                                       const tplVarsForSend = BULK_TPL[shoongBulkTplCode] || []
                                       const variables = {}
                                       for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
@@ -7460,7 +7380,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     setShoongBulkResult(null)
                                     setShoongBulkProgress(null)
                                     try {
-                                      const token = localStorage.getItem('authToken') || ''
+                                      const token = getAuthToken() || ''
                                       const tplVarsForSend = BULK_TPL[shoongBulkTplCode] || []
                                       const variables = {}
                                       for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
@@ -7693,11 +7613,108 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                   성공 <b style={{ color: '#34d399' }}>{shoongBulkResult.sent}</b> ·
                                   실패 <b style={{ color: '#f87171' }}>{shoongBulkResult.failed}</b>
                                   {shoongBulkResult.reservedTime && <><br/>• 예약 시간: <b>{shoongBulkResult.reservedTime}</b></>}
-                                  {shoongBulkResult.errors?.length > 0 && (
-                                    <details style={{ marginTop: '8px' }}>
-                                      <summary style={{ cursor: 'pointer', color: '#fbbf24' }}>실패 샘플 ({shoongBulkResult.errors.length}건)</summary>
-                                      <pre style={{ fontSize: '11px', color: '#fca5a5', background: 'rgba(0,0,0,0.4)', padding: '8px', borderRadius: '6px', overflow: 'auto', maxHeight: '200px', margin: '6px 0 0 0' }}>{JSON.stringify(shoongBulkResult.errors, null, 2)}</pre>
-                                    </details>
+
+                                  {/* 실패 목록 + 재발송 — testMode가 아니고 실패가 있을 때만 */}
+                                  {!shoongBulkResult.testMode && shoongBulkResult.errors?.length > 0 && (() => {
+                                    // 원인별 그룹핑
+                                    const byReason = {}
+                                    for (const e of shoongBulkResult.errors) {
+                                      const key = e.error
+                                        ? `네트워크: ${e.error.slice(0, 60)}`
+                                        : `HTTP ${e.status || '?'}: ${(e.response?.message || e.response?.code || e.response?.raw || '슝 응답 오류').toString().slice(0, 60)}`
+                                      if (!byReason[key]) byReason[key] = []
+                                      byReason[key].push(e)
+                                    }
+                                    const reasons = Object.entries(byReason).sort((a, b) => b[1].length - a[1].length)
+                                    // 재발송 가능한 실패자: 전화번호가 있는 케이스만 (수동 모드 recipients로 재호출)
+                                    const retryable = shoongBulkResult.errors.filter(e => e.phone)
+                                    return (
+                                      <div style={{ marginTop: '12px', padding: '10px 12px', background: 'rgba(0,0,0,0.25)', borderRadius: '8px', border: '1px solid rgba(248,113,113,0.25)' }}>
+                                        <div style={{ fontSize: '12px', color: '#fca5a5', fontWeight: 700, marginBottom: '8px' }}>
+                                          ❌ 실패 {shoongBulkResult.errors.length}건 — 원인별
+                                        </div>
+                                        <div style={{ fontSize: '11.5px', color: '#fbbf24', marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                          {reasons.map(([reason, items]) => (
+                                            <div key={reason}>• <b style={{ color: '#fca5a5' }}>{items.length}건</b> — {reason}</div>
+                                          ))}
+                                        </div>
+                                        <details style={{ marginBottom: '10px' }}>
+                                          <summary style={{ cursor: 'pointer', color: '#94a3b8', fontSize: '11px' }}>실패자 상세 ({shoongBulkResult.errors.length}건)</summary>
+                                          <div style={{ maxHeight: '220px', overflow: 'auto', marginTop: '6px', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px' }}>
+                                            <table style={{ width: '100%', fontSize: '11px', color: '#cbd5e1', borderCollapse: 'collapse' }}>
+                                              <thead style={{ background: 'rgba(255,255,255,0.04)', position: 'sticky', top: 0 }}>
+                                                <tr>
+                                                  <th style={{ padding: '6px 8px', textAlign: 'left' }}>이름</th>
+                                                  <th style={{ padding: '6px 8px', textAlign: 'left' }}>전화번호</th>
+                                                  <th style={{ padding: '6px 8px', textAlign: 'left' }}>실패 원인</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {shoongBulkResult.errors.map((e, i) => (
+                                                  <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                                                    <td style={{ padding: '5px 8px' }}>{e.name || '-'}</td>
+                                                    <td style={{ padding: '5px 8px', fontFamily: 'monospace' }}>{e.phone || '-'}</td>
+                                                    <td style={{ padding: '5px 8px', color: '#fca5a5' }}>
+                                                      {e.error || `HTTP ${e.status}: ${(e.response?.message || e.response?.code || e.response?.raw || '').toString().slice(0, 80)}`}
+                                                    </td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </details>
+                                        {retryable.length > 0 && (
+                                          <button
+                                            onClick={async () => {
+                                              if (!confirm(`실패한 ${retryable.length}명에게 재발송하시겠습니까?\n(같은 템플릿/변수로 전화번호만 다시 전송)`)) return
+                                              try {
+                                                setShoongBulkSending(true)
+                                                setShoongBulkResult(null)
+                                                const tplVarsForSend = SHOONG_TEMPLATE_VARS[shoongBulkTplCode] || []
+                                                const variables = {}
+                                                for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
+                                                const recipients = retryable.map(e => ({ name: e.name || '고객', phone: e.phone }))
+                                                const token = getAuthToken() || ''
+                                                const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
+                                                  method: 'POST',
+                                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                                  body: JSON.stringify({
+                                                    recipients,
+                                                    templatecode: shoongBulkTplCode,
+                                                    variables,
+                                                  }),
+                                                })
+                                                setShoongBulkResult({ ...data, _httpStatus: status, _isRetry: true })
+                                              } catch (err) {
+                                                setShoongBulkResult({ error: `재발송 실패: ${err.message}` })
+                                              } finally {
+                                                setShoongBulkSending(false)
+                                              }
+                                            }}
+                                            disabled={shoongBulkSending}
+                                            style={{
+                                              padding: '8px 14px',
+                                              background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                                              border: 'none',
+                                              borderRadius: '7px',
+                                              color: '#fff',
+                                              fontSize: '12px',
+                                              fontWeight: 700,
+                                              cursor: shoongBulkSending ? 'not-allowed' : 'pointer',
+                                              opacity: shoongBulkSending ? 0.6 : 1,
+                                            }}
+                                          >
+                                            🔄 실패자 {retryable.length}명만 재발송
+                                          </button>
+                                        )}
+                                      </div>
+                                    )
+                                  })()}
+
+                                  {shoongBulkResult._isRetry && (
+                                    <div style={{ marginTop: '6px', padding: '4px 8px', background: 'rgba(245,158,11,0.15)', borderRadius: '4px', fontSize: '11px', color: '#fbbf24', display: 'inline-block' }}>
+                                      🔄 재발송 결과
+                                    </div>
                                   )}
                                 </div>
                               )}
@@ -8008,7 +8025,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     setShoongManualSending(true)
                                     setShoongManualResult(null)
                                     try {
-                                      const token = localStorage.getItem('authToken') || ''
+                                      const token = getAuthToken() || ''
                                       const tplVarsForSend = BULK_TPL[shoongBulkTplCode] || []
                                       const variables = {}
                                       for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
@@ -8062,7 +8079,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     setShoongManualSending(true)
                                     setShoongManualResult(null)
                                     try {
-                                      const token = localStorage.getItem('authToken') || ''
+                                      const token = getAuthToken() || ''
                                       const tplVarsForSend = BULK_TPL[shoongBulkTplCode] || []
                                       const variables = {}
                                       for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
@@ -9444,7 +9461,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
                     setLaProgress({ step: '서버 전송 중...', percent: 10, detail: timeEstimate ? `YouTube URL을 서버에 전달합니다... (${timeEstimate})` : 'YouTube URL을 서버에 전달합니다...' })
 
-                    const token = localStorage.getItem('authToken')
+                    const token = getAuthToken()
                     const response = await fetch('/api/lecture-analyze-gemini', {
                       method: 'POST',
                       headers: { 'Authorization': token ? `Bearer ${token}` : '' },
@@ -9734,7 +9751,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             {item.video_title || item.youtube_url}
                           </div>
                           <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                            <span>{new Date(item.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</span>
+                            <span>{formatKST(item.created_at, 'full')}</span>
                             {item.video_duration && (
                               <span>· {Math.floor(item.video_duration / 3600) > 0 ? `${Math.floor(item.video_duration / 3600)}시간 ` : ''}{Math.floor((item.video_duration % 3600) / 60)}분</span>
                             )}
@@ -9776,7 +9793,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 const data = await res.json()
                                 if (data.success) {
                                   const fullItem = data.item
-                                  const text = `--- 무료강의 분석 결과 ---\n영상: ${fullItem.video_title || ''}\nURL: ${fullItem.youtube_url || ''}\n분석일: ${new Date(fullItem.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n${fullItem.analysis}`
+                                  const text = `--- 무료강의 분석 결과 ---\n영상: ${fullItem.video_title || ''}\nURL: ${fullItem.youtube_url || ''}\n분석일: ${formatKST(fullItem.created_at, 'full')}\n\n${fullItem.analysis}`
                                   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
                                   const url = URL.createObjectURL(blob)
                                   const a = document.createElement('a')
@@ -10731,16 +10748,24 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
                         <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontSize: '15px' }}>🎯</span> 무료 강의 주제 · 추가 컨텍스트
-                          <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 1.5초 뒤 자동 저장 (수동 💾도 가능)</span>
+                          <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 💾 저장 버튼을 눌러야 저장됩니다</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           {pp_inputsSavedAt && !pp_inputsDirty && (
                             <span style={{ fontSize: '11px', color: '#86efac' }}>
-                              ✅ {new Date(pp_inputsSavedAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })} 저장됨
+                              ✅ {formatKST(pp_inputsSavedAt)} 저장됨
                             </span>
                           )}
                           {pp_inputsDirty && (
-                            <span style={{ fontSize: '11px', color: '#fbbf24' }}>● 미저장 변경</span>
+                            <span style={{
+                              fontSize: '11px',
+                              color: '#fff',
+                              background: 'rgba(239,68,68,0.85)',
+                              padding: '3px 9px',
+                              borderRadius: '6px',
+                              fontWeight: 700,
+                              animation: 'laPulse 1.5s ease-in-out infinite',
+                            }}>⚠️ 저장 안 됨 — 💾 저장 클릭</span>
                           )}
                           <button onClick={saveInputs} disabled={!ready || pp_inputsSaving}
                             style={{
@@ -11096,7 +11121,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             marginBottom: '10px', flexWrap: 'wrap', gap: '8px',
                           }}>
                             <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                              v{pp_summary.version} · {new Date(pp_summary.updated_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
+                              v{pp_summary.version} · {formatKST(pp_summary.updated_at)}
                               {pp_summary.updated_by ? ` · ${pp_summary.updated_by}` : ''}
                             </div>
                             <button
@@ -12763,7 +12788,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         formData.append('tabName', payerSheetSelectedTab.raw)
 
                         try {
-                          const token = localStorage.getItem('authToken')
+                          const token = getAuthToken()
                           const res = await fetch('/api/tools/payer-match', {
                             method: 'POST',
                             headers: { 'Authorization': token ? `Bearer ${token}` : '' },
@@ -13011,7 +13036,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             <span style={{ fontSize: '13px' }}>{meta?.icon || '🪄'}</span>
                             <span style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>{meta?.label || p.task_key}</span>
                             <span style={{ marginLeft: 'auto', fontSize: '10.5px', color: '#94a3b8' }}>
-                              {new Date(p.created_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
+                              {formatKST(p.created_at)}
                             </span>
                           </div>
                           <div style={{ fontSize: '12.5px', color: '#cbd5e1', marginBottom: '2px' }}>
@@ -13123,7 +13148,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                 {PLANNER_META_LOCAL[taskKey]?.label || taskKey}
                               </span>
                               <span style={{ fontSize: '11px', color: '#94a3b8', marginLeft: 'auto' }}>
-                                {new Date(savedPlanDetail.created_at).toLocaleString('ko-KR')}
+                                {formatKST(savedPlanDetail.created_at, 'full')}
                               </span>
                             </div>
                             <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
@@ -13247,219 +13272,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
           {/* 🐞 에러 로그 탭 — localhost(DEV) 또는 jinwoo만.
               사용자에겐 친절한 메시지로 숨기고 원문/스택/컨텍스트를 여기서 조회. */}
-          {currentTab === 'error-logs' && (isDevEnv || loginId === 'jinwoo') && (() => {
-            const CODE_COLOR = {
-              VALIDATION:   { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
-              AUTH:         { bg: 'rgba(239,68,68,0.15)',  color: '#fca5a5' },
-              NOT_FOUND:    { bg: 'rgba(148,163,184,0.15)', color: '#cbd5e1' },
-              RATE_LIMIT:   { bg: 'rgba(249,115,22,0.15)', color: '#fdba74' },
-              EXTERNAL_API: { bg: 'rgba(168,85,247,0.15)', color: '#c4b5fd' },
-              DB:           { bg: 'rgba(14,165,233,0.15)', color: '#7dd3fc' },
-              TIMEOUT:      { bg: 'rgba(244,114,182,0.15)', color: '#f9a8d4' },
-              TOKEN_LIMIT:  { bg: 'rgba(99,102,241,0.15)', color: '#a5b4fc' },
-              INTERNAL:     { bg: 'rgba(239,68,68,0.20)',  color: '#f87171' },
-            }
-
-            const deleteOne = async (id) => {
-              if (!confirm('이 로그를 삭제할까요?')) return
-              try {
-                const res = await fetch(`/api/dev/error-logs?id=${id}`, {
-                  method: 'DELETE',
-                  headers: { ...getAuthHeaders() },
-                })
-                if (res.ok) {
-                  setErrorLogs(prev => prev.filter(l => l.id !== id))
-                  if (errorLogDetail?.id === id) setErrorLogDetail(null)
-                }
-              } catch (e) {
-                alert('삭제 실패: ' + e.message)
-              }
-            }
-
-            const clearOld = async () => {
-              if (!confirm('7일 이상 지난 로그를 일괄 삭제할까요?')) return
-              const before = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-              try {
-                const res = await fetch(`/api/dev/error-logs?before=${encodeURIComponent(before)}`, {
-                  method: 'DELETE',
-                  headers: { ...getAuthHeaders() },
-                })
-                const data = await res.json()
-                if (res.ok) {
-                  alert(`${data.deletedCount}건 삭제됨`)
-                  // 새로고침 트리거
-                  setErrorLogsFilter(prev => ({ ...prev }))
-                } else {
-                  alert(data?.error || '삭제 실패')
-                }
-              } catch (e) {
-                alert('네트워크 오류: ' + e.message)
-              }
-            }
-
-            const totalStats = Object.values(errorLogsStats).reduce((a, b) => a + b, 0)
-
-            return (
-              <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: '1500px', margin: '0 auto' }}>
-                <div style={{ marginBottom: '20px' }}>
-                  <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #f87171, #ef4444)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(239,68,68,0.25), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
-                      <AlertCircle size={18} color="#fff" strokeWidth={2.2} />
-                    </span>
-                    에러 로그 {isDevEnv && <span style={{ fontSize: '11px', padding: '3px 8px', background: 'rgba(251,191,36,0.15)', color: '#fbbf24', borderRadius: '999px', fontWeight: 700 }}>DEV</span>}
-                  </h2>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.55 }}>
-                    엔드유저에겐 친절한 메시지가, 여기엔 원문/스택/컨텍스트가. <b style={{ color: '#cbd5e1' }}>localhost</b> 또는 <b style={{ color: '#cbd5e1' }}>jinwoo</b>만 접근 가능.
-                  </p>
-                </div>
-
-                {/* 최근 24시간 코드별 카운트 */}
-                {totalStats > 0 && (
-                  <div style={{ marginBottom: '16px', padding: '12px 14px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '10px' }}>
-                    <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, marginBottom: '6px' }}>📊 최근 24시간 (총 {totalStats}건)</div>
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {Object.entries(errorLogsStats).sort((a, b) => b[1] - a[1]).map(([code, n]) => {
-                        const c = CODE_COLOR[code] || CODE_COLOR.INTERNAL
-                        return (
-                          <button key={code} onClick={() => setErrorLogsFilter(prev => ({ ...prev, code: prev.code === code ? '' : code }))}
-                            style={{ padding: '4px 10px', borderRadius: '999px', background: c.bg, color: c.color, fontSize: '11.5px', fontWeight: 600, border: '1px solid ' + (errorLogsFilter.code === code ? c.color : 'transparent'), cursor: 'pointer' }}>
-                            {code} {n}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* 필터 */}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <input type="text" value={errorLogsFilter.route} onChange={(e) => setErrorLogsFilter(prev => ({ ...prev, route: e.target.value }))}
-                    placeholder="라우트 필터 (예: /api/tools)"
-                    style={{ padding: '7px 10px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '12px', minWidth: '220px' }} />
-                  <select value={errorLogsFilter.code} onChange={(e) => setErrorLogsFilter(prev => ({ ...prev, code: e.target.value }))}
-                    style={{ padding: '7px 10px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '12px' }}>
-                    <option value="">전체 코드</option>
-                    {Object.keys(CODE_COLOR).map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <input type="text" value={errorLogsFilter.username} onChange={(e) => setErrorLogsFilter(prev => ({ ...prev, username: e.target.value }))}
-                    placeholder="사용자 ID"
-                    style={{ padding: '7px 10px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '12px', width: '140px' }} />
-                  {errorLogsLoading && <span style={{ fontSize: '11px', color: '#94a3b8' }}>불러오는 중…</span>}
-                  <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#64748b' }}>{errorLogs.length}건</span>
-                  <button onClick={clearOld}
-                    style={{ padding: '6px 12px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '7px', color: '#f87171', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-                    🗑️ 7일↑ 일괄 정리
-                  </button>
-                </div>
-
-                {/* 좌측 목록 + 우측 상세 */}
-                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '420px 1fr', gap: '14px' }}>
-                  {/* 좌측: 목록 */}
-                  <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '10px', border: '1px solid var(--border)', maxHeight: '70vh', overflowY: 'auto' }}>
-                    {errorLogs.length === 0 && !errorLogsLoading && (
-                      <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '12.5px' }}>
-                        에러 로그가 없습니다. 👍
-                      </div>
-                    )}
-                    {errorLogs.map(l => {
-                      const c = CODE_COLOR[l.error_code] || CODE_COLOR.INTERNAL
-                      const isOpen = errorLogDetail?.id === l.id
-                      return (
-                        <div key={l.id} onClick={() => setErrorLogDetail(l)}
-                          style={{
-                            padding: '10px 12px', marginBottom: '5px',
-                            background: isOpen ? 'rgba(99,102,241,0.10)' : 'rgba(255,255,255,0.03)',
-                            border: '1px solid ' + (isOpen ? 'rgba(129,140,248,0.40)' : 'var(--border)'),
-                            borderRadius: '9px', cursor: 'pointer',
-                          }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                            <span style={{ fontSize: '10.5px', padding: '2px 7px', borderRadius: '999px', background: c.bg, color: c.color, fontWeight: 700 }}>
-                              {l.error_code || '?'}
-                            </span>
-                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>{l.method} {l.route}</span>
-                            <span style={{ marginLeft: 'auto', fontSize: '10.5px', color: '#64748b' }}>
-                              {new Date(l.created_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' })}
-                            </span>
-                          </div>
-                          <div style={{ fontSize: '12.5px', color: '#fca5a5', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                            {l.error_message}
-                          </div>
-                          {l.username && (
-                            <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>by {l.username}</div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  {/* 우측: 상세 */}
-                  <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '20px', border: '1px solid var(--border)', minHeight: '300px' }}>
-                    {!errorLogDetail && (
-                      <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
-                        왼쪽에서 로그를 선택하세요.
-                      </div>
-                    )}
-                    {errorLogDetail && (
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '999px', background: (CODE_COLOR[errorLogDetail.error_code] || CODE_COLOR.INTERNAL).bg, color: (CODE_COLOR[errorLogDetail.error_code] || CODE_COLOR.INTERNAL).color, fontWeight: 700 }}>
-                            {errorLogDetail.error_code || 'INTERNAL'}
-                          </span>
-                          <code style={{ fontSize: '12px', color: '#cbd5e1' }}>{errorLogDetail.method} {errorLogDetail.route}</code>
-                          <span style={{ fontSize: '11px', color: '#94a3b8', marginLeft: 'auto' }}>
-                            {new Date(errorLogDetail.created_at).toLocaleString('ko-KR')}
-                          </span>
-                          <button onClick={() => deleteOne(errorLogDetail.id)}
-                            style={{ padding: '4px 10px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '6px', color: '#f87171', fontSize: '11px', cursor: 'pointer' }}>
-                            🗑️
-                          </button>
-                        </div>
-                        {errorLogDetail.username && (
-                          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>사용자: <b style={{ color: '#cbd5e1' }}>{errorLogDetail.username}</b></div>
-                        )}
-                        {errorLogDetail.user_message && (
-                          <div style={{ marginBottom: '8px' }}>
-                            <div style={{ fontSize: '10.5px', color: '#86efac', fontWeight: 600, marginBottom: '2px' }}>↳ 사용자에게 표시된 메시지</div>
-                            <div style={{ fontSize: '12.5px', color: '#cbd5e1', padding: '8px 10px', background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.20)', borderRadius: '7px' }}>
-                              {errorLogDetail.user_message}
-                            </div>
-                          </div>
-                        )}
-                        <div style={{ marginBottom: '8px' }}>
-                          <div style={{ fontSize: '10.5px', color: '#fca5a5', fontWeight: 600, marginBottom: '2px' }}>↳ 원문 에러 메시지 (DB)</div>
-                          <pre style={{ fontSize: '12px', color: '#fca5a5', padding: '8px 10px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.20)', borderRadius: '7px', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                            {errorLogDetail.error_message}
-                          </pre>
-                        </div>
-                        {errorLogDetail.context && (
-                          <details style={{ marginBottom: '8px' }}>
-                            <summary style={{ fontSize: '11px', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}>📦 컨텍스트</summary>
-                            <pre style={{ fontSize: '11.5px', color: '#cbd5e1', padding: '8px 10px', background: 'rgba(0,0,0,0.30)', borderRadius: '7px', margin: '4px 0 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '200px', overflow: 'auto' }}>
-                              {JSON.stringify(errorLogDetail.context, null, 2)}
-                            </pre>
-                          </details>
-                        )}
-                        {errorLogDetail.stack && (
-                          <details>
-                            <summary style={{ fontSize: '11px', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}>📋 스택 트레이스</summary>
-                            <pre style={{ fontSize: '11px', color: '#94a3b8', padding: '8px 10px', background: 'rgba(0,0,0,0.30)', borderRadius: '7px', margin: '4px 0 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '300px', overflow: 'auto' }}>
-                              {errorLogDetail.stack}
-                            </pre>
-                          </details>
-                        )}
-                        {(errorLogDetail.user_agent || errorLogDetail.ip) && (
-                          <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
-                            {errorLogDetail.ip && <span>IP: {errorLogDetail.ip}</span>}
-                            {errorLogDetail.user_agent && <span style={{ marginLeft: '12px' }}>UA: {errorLogDetail.user_agent.slice(0, 100)}</span>}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })()}
+          {currentTab === 'error-logs' && (isDevEnv || loginId === 'jinwoo') && (
+            <ErrorLogsTab isMobile={isMobile} isDevEnv={isDevEnv} loginId={loginId} />
+          )}
 
           {/* 🛠️ 기획 봇 설정 탭 (jinwoo 전용)
               ※ 여기서는 모든 봇을 enabled=true로 풀어 지침/레퍼런스 사전 작성 가능.
@@ -13630,7 +13445,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                 fd.append('file', file)
                 // ⚠️ FormData 사용 시 Content-Type을 명시하면 boundary 자동 설정이 깨짐 →
                 // getAuthHeaders() 대신 Authorization 만 직접 세팅
-                const token = localStorage.getItem('authToken')
+                const token = getAuthToken()
                 const res = await fetch('/api/admin/planner-config/extract-file', {
                   method: 'POST',
                   headers: { 'Authorization': token ? `Bearer ${token}` : '' },
@@ -13838,7 +13653,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           </div>
                           {promptForFeature?.updated_at && (
                             <div style={{ fontSize: '10px', color: '#64748b' }}>
-                              마지막 수정: {new Date(promptForFeature.updated_at).toLocaleString('ko-KR')}
+                              마지막 수정: {formatKST(promptForFeature.updated_at, 'full')}
                               {promptForFeature.updated_by ? ` · ${promptForFeature.updated_by}` : ''}
                             </div>
                           )}
@@ -14338,15 +14153,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
           { key: 'conversionCost', title: '전환단가 (낮을수록 좋음)', color: '#f59e0b', gradient: ['#f59e0b', '#d97706'], format: v => formatNumber(v) + '원', yFormat: v => v >= 1e4 ? Math.round(v / 1e4) + '만' : formatNumber(v), lowerIsBetter: true },
           { key: 'operatingProfit', title: '영업이익', color: '#a78bfa', gradient: ['#8b5cf6', '#6d28d9'], format: v => formatMoney(v), yFormat: v => v >= 1e8 ? (v / 1e8).toFixed(1) + '억' : Math.round(v / 1e4) + '만' },
         ]
-        const CustomChartTooltip = ({ active, payload, label, chartConfig }) => {
-          if (!active || !payload?.length) return null
-          return (
-            <div style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', padding: '12px 16px', backdropFilter: 'blur(12px)' }}>
-              <div style={{ fontSize: '13px', fontWeight: '600', color: '#fff', marginBottom: '6px' }}>{label}</div>
-              <div style={{ fontSize: '13px', color: chartConfig.color, fontWeight: '600' }}>{chartConfig.format(payload[0]?.value)}</div>
-            </div>
-          )
-        }
+        // CustomChartTooltip은 CompareMetricBarChart 내부로 이동됨
         return (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(4px)' }} onClick={() => setShowSessionChart(false)}>
             <div onClick={e => e.stopPropagation()} style={{ background: 'linear-gradient(135deg, #1e293b 0%, #1a1f35 100%)', borderRadius: '20px', width: '900px', maxWidth: '95vw', maxHeight: '90vh', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 60px rgba(0,0,0,0.5)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -14381,26 +14188,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             <h3 style={{ fontSize: '15px', fontWeight: '600', color: metric.color, margin: 0 }}>{metric.title}</h3>
                             <span style={{ fontSize: '11px', color: '#64748b' }}>평균: {metric.format(avgVal)}</span>
                           </div>
-                          <ResponsiveContainer width="100%" height={220}>
-                            <BarChart data={validData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-                              <defs>
-                                <linearGradient id={`cg-${metric.key}`} x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="0%" stopColor={metric.gradient[0]} stopOpacity={0.9} />
-                                  <stop offset="100%" stopColor={metric.gradient[1]} stopOpacity={0.6} />
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                              <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={{ stroke: 'rgba(255,255,255,0.1)' }} tickLine={false} interval={0} />
-                              <YAxis tickFormatter={metric.yFormat} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} width={50} />
-                              <Tooltip content={<CustomChartTooltip chartConfig={metric} />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
-                              <Bar dataKey={metric.key} fill={`url(#cg-${metric.key})`} radius={[4, 4, 0, 0]} maxBarSize={52}>
-                                {validData.map((d, idx) => {
-                                  const isBest = d[metric.key] === bestVal
-                                  return <Cell key={idx} fill={isBest ? metric.gradient[0] : `url(#cg-${metric.key})`} stroke={isBest ? metric.color : 'none'} strokeWidth={isBest ? 2 : 0} />
-                                })}
-                              </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
+                          <CompareMetricBarChart validData={validData} metric={metric} bestVal={bestVal} />
                         </div>
                       )
                     })}
@@ -14423,7 +14211,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{laViewItem.video_title || '분석 결과'}</h3>
                 <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  <span>{new Date(laViewItem.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} 완료</span>
+                  <span>{formatKST(laViewItem.created_at, 'full')} 완료</span>
                   {laViewItem.video_duration && (
                     <span>· 영상 {Math.floor(laViewItem.video_duration / 3600) > 0 ? `${Math.floor(laViewItem.video_duration / 3600)}시간 ` : ''}{Math.floor((laViewItem.video_duration % 3600) / 60)}분</span>
                   )}
@@ -14437,7 +14225,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
                 <button
                   onClick={() => {
-                    const text = `--- 무료강의 분석 결과 ---\n영상: ${laViewItem.video_title || ''}\nURL: ${laViewItem.youtube_url || ''}\n분석일: ${new Date(laViewItem.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n\n${laViewItem.analysis}`
+                    const text = `--- 무료강의 분석 결과 ---\n영상: ${laViewItem.video_title || ''}\nURL: ${laViewItem.youtube_url || ''}\n분석일: ${formatKST(laViewItem.created_at, 'full')}\n\n${laViewItem.analysis}`
                     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
                     const url = URL.createObjectURL(blob)
                     const a = document.createElement('a')

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { validateSession, deleteSession, extendSession } from '@/lib/auth'
+import { getAuthToken, clearAuthToken, setAuthToken } from '@/lib/authClient'
 import Login from '@/components/Login'
 import Dashboard from '@/components/Dashboard'
 
@@ -71,7 +72,7 @@ export default function Home() {
 
   // 세션 연장 처리
   const handleExtendSession = useCallback(async () => {
-    const token = localStorage.getItem('authToken')
+    const token = getAuthToken()
     if (token) {
       const result = await extendSession(token)
       if (result.success) {
@@ -123,7 +124,7 @@ export default function Home() {
   useEffect(() => {
     // 세션 토큰 검증
     const checkSession = async () => {
-      const token = localStorage.getItem('authToken')
+      const token = getAuthToken()
       const loggedIn = localStorage.getItem('isLoggedIn')
       const storedName = localStorage.getItem('userName')
 
@@ -151,7 +152,7 @@ export default function Home() {
           // 세션 만료 또는 무효 - 로그아웃 처리
           localStorage.removeItem('isLoggedIn')
           localStorage.removeItem('userName')
-          localStorage.removeItem('authToken')
+          clearAuthToken()
           setIsLoggedIn(false)
           setShowExpiryModal(false)
         }
@@ -194,13 +195,13 @@ export default function Home() {
     sessionStartRef.current = null
 
     // 세션 토큰 삭제
-    const token = localStorage.getItem('authToken')
+    const token = getAuthToken()
     if (token) {
       await deleteSession(token)
     }
     localStorage.removeItem('isLoggedIn')
     localStorage.removeItem('userName')
-    localStorage.removeItem('authToken')
+    clearAuthToken()
     localStorage.removeItem('userPermissions')
     setUserName('')
     setUserPermissions({})

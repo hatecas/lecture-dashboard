@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getGoogleAccessToken } from '@/lib/googleAuth'
 import { getNlabSupabase } from '@/lib/nlabSupabase'
+import { extractInstructorName } from '@/lib/utils/instructorName'
 import * as XLSX from 'xlsx'
 
 // PM 결제자 관리 시트 ID (payer-sheets/route.js 와 동일)
@@ -259,27 +260,6 @@ async function buildPreview({ orders, year, tabName, logs, sourceTotal, sourceLa
       logs
     }
   }
-}
-
-// productTitle/orderName 첫 대괄호 안에서 강사명 추출.
-// 패턴: [N잡연구소X홍시삼분]2기..., [N잡연구소x토리맘]..., [사뚜xN잡연구소]...,
-//       [현우 2기]..., [김탄생]..., [N잡연구소X에어3기]..., [노바작가x]...,
-//       [온비전x머니탱크]... (x는 콜라보 마커 → x 이후는 모두 제거)
-function extractInstructorName(title) {
-  if (!title) return null
-  const m = String(title).match(/^\s*\[([^\]]+)\]/)
-  if (!m) return null
-  let name = m[1]
-  // 1) N잡연구소 + 연결자(x/X/×) 제거 (앞/뒤 양쪽)
-  name = name.replace(/N\s*잡\s*연구소\s*[xX×]?/gi, '')
-  name = name.replace(/[xX×]\s*N\s*잡\s*연구소/gi, '')
-  // 2) "강사명x콜라보/기타" 패턴: 첫 x(대소문자/×) 이후 전부 제거
-  name = name.replace(/\s*[xX×].*$/, '')
-  // 3) 기수 제거: " 2기", "3기" 등 (이름 끝의 숫자기)
-  name = name.replace(/\s*\d+\s*기\s*$/, '')
-  // 4) 양옆 공백/특수문자 정리
-  name = name.replace(/^[\s\-:·,]+|[\s\-:·,]+$/g, '').trim()
-  return name || null
 }
 
 // PostgREST 기본 응답 한계(1000행) 회피용 페이지네이션 헬퍼.

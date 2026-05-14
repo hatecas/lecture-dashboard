@@ -1,5 +1,6 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getNlabSupabase } from '@/lib/nlabSupabase'
+import { extractInstructorName, isRefunded } from '@/lib/utils/instructorName'
 
 // 무료특강 후 시간별 구매 추이 분석
 //
@@ -12,32 +13,6 @@ import { getNlabSupabase } from '@/lib/nlabSupabase'
 //   tabName       : (선택) 레거시 호환. instructor 없으면 첫 공백 앞 토큰을 사용
 // 출력:
 //   { success, intervals: [{ hour, purchases, label, percentage }], firstPurchase, totalInRange, totalAll }
-
-// productTitle 첫 [...] 안에서 강사명 추출 (order-sync route와 동일 로직)
-function extractInstructorName(title) {
-  if (!title) return null
-  const m = String(title).match(/^\s*\[([^\]]+)\]/)
-  if (!m) return null
-  let name = m[1]
-  // 1) N잡연구소 + 연결자(x/X/×) 제거 (앞/뒤 양쪽)
-  name = name.replace(/N\s*잡\s*연구소\s*[xX×]?/gi, '')
-  name = name.replace(/[xX×]\s*N\s*잡\s*연구소/gi, '')
-  // 2) 첫 x(대소문자/×) 이후 전부 제거 (콜라보 마커)
-  name = name.replace(/\s*[xX×].*$/, '')
-  // 3) 끝의 "N기" 제거
-  name = name.replace(/\s*\d+\s*기\s*$/, '')
-  // 4) 양옆 공백/특수문자 정리
-  name = name.replace(/^[\s\-:·,]+|[\s\-:·,]+$/g, '').trim()
-  return name || null
-}
-
-function isRefunded(row) {
-  if (row.cancelAmount && row.cancelAmount > 0) return true
-  if (row.canceledAt) return true
-  const status = row.paymentStatus || ''
-  if (/CANCEL|REFUND|FAIL|ABORT/i.test(status)) return true
-  return false
-}
 
 // PostgREST 1000행 한계 우회: 페이지네이션
 async function fetchAllInRange(nlab, instructor, startISO, endISO) {

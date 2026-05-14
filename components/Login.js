@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { LayoutDashboard, User, Lock, Loader2, AlertCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { checkLoginAttempts, recordLoginAttempt, createSession } from '@/lib/auth'
+import { setAuthToken } from '@/lib/authClient'
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -44,7 +45,7 @@ export default function Login({ onLogin }) {
 
         const token = await createSession(data.id)
         if (token) {
-          localStorage.setItem('authToken', token)
+          setAuthToken(token)
         }
 
         if ('Notification' in window && Notification.permission === 'default') {
