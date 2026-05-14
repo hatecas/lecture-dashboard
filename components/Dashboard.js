@@ -461,14 +461,17 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         //   짧은 숫자(예: "116억"): 64pt 유지.
         //   중간 길이(예: "월 80만원"): 56pt.
         //   긴 한글(예: "숏폼+구매대행 월 매출 4,400만원"): 44pt.
-        //   후처리에서 normAutofit도 추가로 박혀 박스 초과 시 추가 자동 축소.
+        //   fit:'shrink' 옵션이 박스 초과 시 자동 축소 처리 (normAutofit 1개 박힘).
+        //   ※ shrinkText:true + fit:'shrink' 동시 지정 금지 — pptxgenjs가
+        //     <a:normAutofit/>를 두 번 박아 OOXML 스키마 위반 → PowerPoint
+        //     "프레젠테이션 복구" 다이얼로그 발생. 둘 중 하나만 사용.
         const titleLen = String(s.title || '').length
         const titleFontSize = titleLen > 14 ? 44 : titleLen > 10 ? 52 : 64
         slide.addText(s.title || '', {
           x: MARGIN_X, y: 2.0, w: CONTENT_W, h: 2.3,
           fontSize: titleFontSize, bold: true, color: onBg, fontFace: T.fontMain,
           align: 'left', charSpacing: -1, valign: 'middle',
-          shrinkText: true, fit: 'shrink', wrap: true,
+          fit: 'shrink', wrap: true,
         })
         // 강조 라인 (제목 아래)
         slide.addShape(pptx.ShapeType.rect, {
