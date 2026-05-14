@@ -457,11 +457,14 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
       case 'proof': {
         drawChapterMarker(slide, 'Proof')
         drawTopHairline(slide)
-        // 큰 숫자/메시지 — 96 → 64
+        // 큰 숫자/메시지 — 긴 한글 문장(예: "숏폼+구매대행 월 매출 4,400만원")에
+        // 자동으로 폰트 크기가 줄어들도록 shrinkText 사용. h를 2.3으로 늘려
+        // 줄바꿈 발생 시에도 들어갈 여유 확보.
         slide.addText(s.title || '', {
-          x: MARGIN_X, y: 2.0, w: CONTENT_W, h: 2.0,
-          fontSize: 64, bold: true, color: onBg, fontFace: T.fontMain,
+          x: MARGIN_X, y: 2.0, w: CONTENT_W, h: 2.3,
+          fontSize: 60, bold: true, color: onBg, fontFace: T.fontMain,
           align: 'left', charSpacing: -1, valign: 'middle',
+          shrinkText: true, fit: 'shrink', wrap: true,
         })
         // 강조 라인 (제목 아래)
         slide.addShape(pptx.ShapeType.rect, {
@@ -861,18 +864,24 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
           }
         }
 
-        // [Content_Types].xml에 .fntdata Content-Type 등록
+        // [Content_Types].xml에 .fntdata Content-Type 등록.
+        //   "application/x-fontdata"는 비표준이라 PowerPoint가 폰트 part를 해석하지 못해
+        //   "프레젠테이션 복구가 시도될 수 있습니다" 다이얼로그 발생.
+        //   OOXML 표준(ECMA-376 §13.3.4) Content-Type "application/vnd.openxmlformats-
+        //   officedocument.obfuscatedFont"로 변경. 폰트는 obfuscation 없이 raw OTF지만
+        //   PowerPoint는 표준 ContentType만 만족하면 raw OTF도 best-effort로 처리.
+        //   이미 박힌 비표준 값이 있으면 교체.
         const ctFile = zip.file('[Content_Types].xml')
         if (ctFile) {
           let ctXml = await ctFile.async('string')
-          if (!ctXml.includes('Extension="fntdata"')) {
-            // <Default ...> 형태로 추가
-            ctXml = ctXml.replace(
-              '</Types>',
-              `<Default Extension="fntdata" ContentType="application/x-fontdata"/></Types>`
-            )
-            zip.file('[Content_Types].xml', ctXml)
+          const standardEntry = `<Default Extension="fntdata" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/>`
+          if (ctXml.includes('Extension="fntdata"')) {
+            // 기존 잘못된 ContentType이 박혀있으면 교체
+            ctXml = ctXml.replace(/<Default Extension="fntdata"[^/]*\/>/, standardEntry)
+          } else {
+            ctXml = ctXml.replace('</Types>', `${standardEntry}</Types>`)
           }
+          zip.file('[Content_Types].xml', ctXml)
         }
 
         console.log(`[buildDesignedPptx] 폰트 임베드 완료: Pretendard Regular + Bold (~3MB)`)
