@@ -89,6 +89,29 @@ export default function ErrorLogsTab({ isMobile, isDevEnv, loginId }) {
     }
   }
 
+  const [testingError, setTestingError] = useState(false)
+  const generateTestError = async () => {
+    setTestingError(true)
+    try {
+      const res = await fetch('/api/dev/error-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      if (res.ok && data?.success) {
+        // 새로고침 트리거
+        setErrorLogsFilter(prev => ({ ...prev }))
+      } else {
+        alert(data?.error || '테스트 에러 생성 실패')
+      }
+    } catch (e) {
+      alert('네트워크 오류: ' + e.message)
+    } finally {
+      setTestingError(false)
+    }
+  }
+
   const totalStats = Object.values(errorLogsStats).reduce((a, b) => a + b, 0)
 
   return (
@@ -138,6 +161,11 @@ export default function ErrorLogsTab({ isMobile, isDevEnv, loginId }) {
           style={{ padding: '7px 10px', background: 'rgba(0,0,0,0.40)', border: '1px solid var(--border)', borderRadius: '7px', color: '#fff', fontSize: '12px', width: '140px' }} />
         {errorLogsLoading && <span style={{ fontSize: '11px', color: '#94a3b8' }}>불러오는 중…</span>}
         <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#64748b' }}>{errorLogs.length}건</span>
+        <button onClick={generateTestError} disabled={testingError}
+          title="에러 로그 파이프라인 정상 동작 확인용. 더미 에러 1건을 생성합니다."
+          style={{ padding: '6px 12px', background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.30)', borderRadius: '7px', color: '#c4b5fd', fontSize: '11px', fontWeight: 600, cursor: testingError ? 'wait' : 'pointer' }}>
+          {testingError ? '생성 중…' : '🧪 테스트 에러 발생'}
+        </button>
         <button onClick={clearOld}
           style={{ padding: '6px 12px', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: '7px', color: '#f87171', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
           🗑️ 7일↑ 일괄 정리

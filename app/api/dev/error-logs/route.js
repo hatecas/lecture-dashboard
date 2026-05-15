@@ -17,6 +17,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { logError } from '@/lib/errorLog'
 
 export const runtime = 'nodejs'
 
@@ -90,6 +91,42 @@ export async function GET(request) {
     logs: data || [],
     codeStats24h: codeStats,
     env: process.env.NODE_ENV || 'unknown',
+  })
+}
+
+// POST /api/dev/error-logs (action: 'test')
+// 에러 로그 파이프라인 자가진단 — 인위적 에러 1건을 logError로 기록.
+// 사이드바 '에러 로그' 탭에서 즉시 보이면 정상 동작.
+export async function POST(request) {
+  const guard = await ensureDevAccess(request)
+  if (!guard.ok) return guard.response
+
+  const auth = await verifyApiAuth(request)
+  const username = auth?.user?.username || null
+
+  const body = await request.json().catch(() => ({}))
+  const codeChoice = ['VALIDATION', 'EXTERNAL_API', 'DB', 'TIMEOUT', 'INTERNAL'][
+    Math.floor(Math.random() * 5)
+  ]
+
+  const logged = await logError({
+    request,
+    error: new Error(`[테스트] ${codeChoice} 분류 — ${new Date().toISOString()}`),
+    route: '/api/dev/error-logs',
+    errorCode: body?.errorCode || codeChoice,
+    username,
+    context: {
+      synthetic: true,
+      note: '에러 로그 파이프라인 자가진단으로 의도적으로 생성된 더미 에러입니다.',
+      requestedBy: username,
+    },
+  })
+
+  return Response.json({
+    success: true,
+    errorId: logged.id,
+    userMessage: logged.userMessage,
+    errorCode: codeChoice,
   })
 }
 
