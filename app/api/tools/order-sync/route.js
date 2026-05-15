@@ -3,6 +3,7 @@ import { verifyApiAuth } from '@/lib/apiAuth'
 import { getGoogleAccessToken } from '@/lib/googleAuth'
 import { getNlabSupabase } from '@/lib/nlabSupabase'
 import { extractInstructorName } from '@/lib/utils/instructorName'
+import { logError, errorResponse } from '@/lib/errorLog'
 import * as XLSX from 'xlsx'
 
 // PM 결제자 관리 시트 ID (payer-sheets/route.js 와 동일)
@@ -380,9 +381,13 @@ export async function POST(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let yearForCtx = null
+  let tabNameForCtx = null
+  let modeForCtx = null
   try {
     const contentType = request.headers.get('content-type') || ''
     const isJson = contentType.includes('application/json')
+    modeForCtx = isJson ? 'supabase' : 'csv'
 
     let year, tabName, orders, logs, sourceTotal, sourceLabel
 
@@ -455,6 +460,9 @@ export async function POST(request) {
       sourceLabel = `csv:${file.name}`
     }
 
+    yearForCtx = year
+    tabNameForCtx = tabName
+
     const result = await buildPreview({ orders, year, tabName, logs, sourceTotal, sourceLabel })
     if (result.error) {
       const respBody = { error: result.error }
@@ -466,8 +474,15 @@ export async function POST(request) {
     return NextResponse.json(result.body)
 
   } catch (error) {
-    console.error('Order sync preview error:', error)
-    return NextResponse.json({ error: error.message || '서버 오류' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/order-sync',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { mode: modeForCtx, year: yearForCtx, tabName: tabNameForCtx },
+    })
+    return errorResponse(logged, 500)
   }
 }
 
@@ -533,8 +548,17 @@ export async function GET(request) {
       range: { from: fromStr, to: toStr, days: range.days }
     })
   } catch (error) {
-    console.error('Order sync teachers error:', error)
-    return NextResponse.json({ error: error.message || '서버 오류' }, { status: 500 })
+    const url = new URL(request.url)
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/order-sync',
+      method: 'GET',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { from: url.searchParams.get('from'), to: url.searchParams.get('to') },
+    })
+    return errorResponse(logged, 500)
   }
 }
 
@@ -551,9 +575,15 @@ export async function PUT(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let yearForCtx = null
+  let tabNameForCtx = null
+  let rowCountForCtx = 0
   try {
     const body = await request.json()
     const { year, tabName, rows } = body
+    yearForCtx = year
+    tabNameForCtx = tabName
+    rowCountForCtx = Array.isArray(rows) ? rows.length : 0
 
     if (!year || !tabName) {
       return NextResponse.json({ error: 'year, tabName 필수' }, { status: 400 })
@@ -693,8 +723,16 @@ export async function PUT(request) {
     })
 
   } catch (error) {
-    console.error('Order sync commit error:', error)
-    return NextResponse.json({ error: error.message || '서버 오류' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/order-sync',
+      method: 'PUT',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { year: yearForCtx, tabName: tabNameForCtx, rowCount: rowCountForCtx },
+    })
+    return errorResponse(logged, 500)
   }
 }
 

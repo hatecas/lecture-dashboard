@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { logError, errorResponse } from '@/lib/errorLog'
 
 // 슝(Shoong) 알림톡 발송 API 프록시.
 // 템플릿별 변수가 다르므로 templatecode에 따라 검증/필터링.
@@ -21,6 +22,8 @@ export async function POST(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let tplCodeForCtx = null
+  let phoneForCtx = null
   try {
     const body = await request.json()
 
@@ -28,6 +31,8 @@ export async function POST(request) {
     for (const k of Object.keys(body)) {
       if (typeof body[k] === 'string') body[k] = body[k].trim()
     }
+    tplCodeForCtx = body['channelConfig.templatecode']
+    phoneForCtx = body.phone
 
     // 발신프로필키는 비어있으면 서버 env 값으로 fallback (env 값도 trim)
     if (!body['channelConfig.senderkey']) {
@@ -101,8 +106,15 @@ export async function POST(request) {
     }, { status: 200 })
 
   } catch (error) {
-    console.error('Shoong send error:', error)
-    return NextResponse.json({ error: error.message || '서버 오류' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/shoong-send',
+      errorCode: 'EXTERNAL_API',
+      username: auth?.user?.username,
+      context: { templatecode: tplCodeForCtx, phone: phoneForCtx },
+    })
+    return errorResponse(logged, 500)
   }
 }
 

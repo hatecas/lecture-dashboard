@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getGoogleAccessToken } from '@/lib/googleAuth'
+import { getNlabSupabase } from '@/lib/nlabSupabase'
+import { logError, errorResponse } from '@/lib/errorLog'
 import * as XLSX from 'xlsx'
 
 const PAYER_SHEETS = {
@@ -16,99 +18,102 @@ function normalizePhone(phone) {
   return cleaned
 }
 
-function getColumnValue(row, colIndex) {
-  const keys = Object.keys(row)
-  return colIndex < keys.length ? row[keys[colIndex]] : ''
+// PostgREST 1000행 한계 회피
+async function fetchAllPaginated(queryFactory, pageSize = 1000, hardLimit = 100000) {
+  const all = []
+  let offset = 0
+  while (offset < hardLimit) {
+    const { data, error } = await queryFactory().range(offset, offset + pageSize - 1)
+    if (error) throw new Error(error.message)
+    if (!data || data.length === 0) break
+    all.push(...data)
+    if (data.length < pageSize) break
+    offset += pageSize
+  }
+  return all
 }
 
-function parseDate(dateStr) {
-  if (!dateStr) return null
-  const str = String(dateStr).trim()
-
-  if (!isNaN(str) && str !== '') {
-    const excelDate = parseFloat(str)
-    return new Date((excelDate - 25569) * 86400 * 1000).getTime()
-  }
-
-  const googleFormMatch = str.match(/(\d{4})\.\s*(\d+)\.\s*(\d+)\.\s*(오전|오후)\s*(\d+):(\d+):?(\d+)?/)
-  if (googleFormMatch) {
-    const [, year, month, day, ampm, hour, minute, second] = googleFormMatch
-    let h = parseInt(hour)
-    if (ampm === '오후' && h < 12) h += 12
-    if (ampm === '오전' && h === 12) h = 0
-    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), h, parseInt(minute), parseInt(second) || 0).getTime()
-  }
-
-  const koreanMatch = str.match(/(\d+)월\s*(\d+)일\s*(오전|오후)?\s*(\d+)시\s*(\d+)분?/)
-  if (koreanMatch) {
-    const [, month, day, ampm, hour, minute] = koreanMatch
-    let h = parseInt(hour)
-    if (ampm === '오후' && h < 12) h += 12
-    if (ampm === '오전' && h === 12) h = 0
-    return new Date(new Date().getFullYear(), parseInt(month) - 1, parseInt(day), h, parseInt(minute) || 0).getTime()
-  }
-
-  const parsed = Date.parse(str)
-  return !isNaN(parsed) ? parsed : null
+function toAmountNumber(raw) {
+  if (raw == null) return 0
+  const cleaned = String(raw).replace(/[^0-9.-]/g, '')
+  const n = parseFloat(cleaned)
+  return Number.isFinite(n) ? n : 0
 }
 
+// POST /api/tools/payer-match
+// body: { freeCourseIds: number[], year: '25'|'26', tabName: string }
+// nlab DB(ApplyCourse → User)에서 신청자 명단을 직접 가져와 결제자 시트와 매칭.
+// 매칭 결과는 결제금액을 number 셀로 export하여 시트에서 SUM이 동작하도록 함.
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let yearForCtx = null
+  let tabNameForCtx = null
+  let freeCourseIdsForCtx = null
   try {
-    const formData = await request.formData()
-    const applicantsFiles = formData.getAll('applicants')
-    const year = formData.get('year')
-    const tabName = formData.get('tabName')
+    const body = await request.json().catch(() => ({}))
+    const { freeCourseIds, year, tabName } = body || {}
+    yearForCtx = year
+    tabNameForCtx = tabName
+    freeCourseIdsForCtx = Array.isArray(freeCourseIds) ? freeCourseIds.slice(0, 20) : freeCourseIds
 
-    if (applicantsFiles.length === 0) {
-      return NextResponse.json({ success: false, error: '신청자 파일이 필요합니다.' })
+    if (!Array.isArray(freeCourseIds) || freeCourseIds.length === 0) {
+      return NextResponse.json({ success: false, error: '강의를 1개 이상 선택해주세요.' })
     }
     if (!year || !tabName) {
       return NextResponse.json({ success: false, error: '결제자 시트 탭을 선택해주세요.' })
     }
 
-    const logs = [`신청자 파일 ${applicantsFiles.length}개 업로드됨`]
+    const logs = []
+    const supabase = getNlabSupabase()
 
-    // 1. 신청자 파일 파싱
-    const applicantMap = new Map()
-    for (const file of applicantsFiles) {
-      const buffer = await file.arrayBuffer()
-      const wb = XLSX.read(buffer)
-      const sheet = wb.Sheets[wb.SheetNames[0]]
-      const data = XLSX.utils.sheet_to_json(sheet, { defval: '' })
-
-      const fileName = file.name.replace(/\.(xlsx|xls|csv)$/i, '')
-
-      for (const row of data) {
-        const phone = normalizePhone(getColumnValue(row, 3)) // D열 = 전화번호
-        if (phone) {
-          const applyDate = getColumnValue(row, 4) // E열 = 신청일
-          const applyTimestamp = parseDate(applyDate)
-          const existing = applicantMap.get(phone)
-
-          if (!existing || (applyTimestamp && existing._timestamp && applyTimestamp < existing._timestamp)) {
-            applicantMap.set(phone, {
-              신청일: applyDate,
-              유입경로: fileName,
-              _timestamp: applyTimestamp
-            })
-          }
-        }
-      }
-      logs.push(`신청자 파일 "${file.name}": ${data.length}건`)
+    // 1. FreeCourse title 매핑 (유입경로 라벨용)
+    const { data: courseRows, error: courseErr } = await supabase
+      .from('FreeCourse')
+      .select('id, title')
+      .in('id', freeCourseIds)
+    if (courseErr) {
+      return NextResponse.json({ success: false, error: 'FreeCourse 조회 실패: ' + courseErr.message })
     }
-    logs.push(`신청자 맵: ${applicantMap.size}명 (중복 제거됨)`)
+    const courseTitleMap = new Map()
+    for (const c of courseRows || []) courseTitleMap.set(c.id, c.title || `강의#${c.id}`)
+    logs.push(`선택 강의 ${courseRows?.length || 0}개`)
 
-    // 2. 구글 시트에서 결제자 데이터 가져오기
+    // 2. ApplyCourse → User.phone, createdAt
+    const applies = await fetchAllPaginated(() =>
+      supabase
+        .from('ApplyCourse')
+        .select('id, freeCourseId, createdAt, User:userId(phone)')
+        .in('freeCourseId', freeCourseIds)
+    )
+    logs.push(`신청자 행 ${applies.length}건 (DB)`)
+
+    const applicantMap = new Map()
+    let invalidPhoneCount = 0
+    for (const a of applies) {
+      const phone = normalizePhone(a.User?.phone)
+      if (!phone) { invalidPhoneCount++; continue }
+      const ts = a.createdAt ? Date.parse(a.createdAt) : null
+      const courseTitle = courseTitleMap.get(a.freeCourseId) || `강의#${a.freeCourseId}`
+      const existing = applicantMap.get(phone)
+      if (!existing || (ts && existing._timestamp && ts < existing._timestamp)) {
+        applicantMap.set(phone, {
+          신청일: a.createdAt || '',
+          유입경로: courseTitle,
+          _timestamp: ts
+        })
+      }
+    }
+    logs.push(`신청자 맵: ${applicantMap.size}명 (중복 제거, 전화번호 없음 ${invalidPhoneCount}건 제외)`)
+
+    // 3. 결제자 시트 데이터
     const spreadsheetId = PAYER_SHEETS[year]
     if (!spreadsheetId) {
       return NextResponse.json({ success: false, error: '유효하지 않은 연도입니다.' })
     }
-
     logs.push(`시트 "${tabName}" 결제자 데이터 불러오는 중...`)
 
     const accessToken = await getGoogleAccessToken()
@@ -117,14 +122,11 @@ export async function POST(request) {
     const sheetRes = await fetch(url, {
       headers: { 'Authorization': `Bearer ${accessToken}` }
     })
-
     if (!sheetRes.ok) {
       return NextResponse.json({ success: false, error: '시트 데이터를 가져올 수 없습니다.' })
     }
-
     const sheetData = await sheetRes.json()
     const rows = sheetData.values || []
-
     if (rows.length === 0) {
       return NextResponse.json({ success: false, error: '시트에 데이터가 없습니다.' })
     }
@@ -146,7 +148,6 @@ export async function POST(request) {
 
     const dataRows = rows.slice(1).filter(row => row.some(cell => cell && cell.toString().trim()))
 
-    // 결제자 파싱
     const validPayers = []
     let refundCount = 0
     for (const row of dataRows) {
@@ -158,24 +159,28 @@ export async function POST(request) {
       const method = methodColIndex >= 0 ? (row[methodColIndex] || '').toString().trim() : ''
       const status = statusColIndex >= 0 ? (row[statusColIndex] || '').toString().trim() : ''
 
-      // 전체환불이면 제외
       if (status === '전체환불') {
         refundCount++
         continue
       }
 
-      // 부분환불이면 최종결제금액(H열) 사용, 아니면 결제금액(E열) 사용
-      const amount = status === '부분환불' && finalAmount ? finalAmount : amountRaw
-
-      // 결제금액이 0 이하면 환불로 제외
-      const amountNum = parseFloat(String(amount).replace(/[^0-9.-]/g, '')) || 0
-      if (amountNum <= 0 && amount) {
+      const amountSrc = status === '부분환불' && finalAmount ? finalAmount : amountRaw
+      const amountNum = toAmountNumber(amountSrc)
+      if (amountNum <= 0 && amountSrc) {
         refundCount++
         continue
       }
 
       if (name || phoneRaw) {
-        validPayers.push({ name, phoneRaw, phone: normalizePhone(phoneRaw), amount, date, method, status: status || '결제완료' })
+        validPayers.push({
+          name,
+          phoneRaw,
+          phone: normalizePhone(phoneRaw),
+          amount: amountNum, // number — Excel SUM 가능하게
+          date,
+          method,
+          status: status || '결제완료'
+        })
       }
     }
 
@@ -183,44 +188,33 @@ export async function POST(request) {
     logs.push(`유효 결제자: ${validPayers.length}명`)
     logs.push('매칭 시작...')
 
-    // 3. 매칭
+    // 4. 매칭
     const results = []
     const unmatchedList = []
     let matched = 0, unmatched = 0
 
     for (const payer of validPayers) {
       const matchedApplicant = payer.phone ? applicantMap.get(payer.phone) : null
-
+      const baseRow = {
+        구매자: payer.name,
+        전화번호: payer.phoneRaw,
+        결제금액: payer.amount, // number
+        결제일: payer.date,
+        결제수단: payer.method,
+        결제상태: payer.status,
+      }
       if (matchedApplicant) {
-        results.push({
-          구매자: payer.name,
-          전화번호: payer.phoneRaw,
-          결제금액: payer.amount,
-          결제일: payer.date,
-          신청일: matchedApplicant.신청일,
-          유입경로: matchedApplicant.유입경로,
-          결제수단: payer.method,
-          결제상태: payer.status
-        })
+        results.push({ ...baseRow, 신청일: matchedApplicant.신청일, 유입경로: matchedApplicant.유입경로 })
         matched++
       } else {
-        unmatchedList.push({
-          구매자: payer.name,
-          전화번호: payer.phoneRaw,
-          결제금액: payer.amount,
-          결제일: payer.date,
-          신청일: '',
-          유입경로: '(직접구매)',
-          결제수단: payer.method,
-          결제상태: payer.status
-        })
+        unmatchedList.push({ ...baseRow, 신청일: '', 유입경로: '(직접구매)' })
         unmatched++
       }
     }
 
     logs.push(`매칭 완료: ${matched}명 매칭됨, ${unmatched}명 미매칭(직접구매)`)
 
-    // 4. Excel 결과 생성
+    // 5. Excel — 결제금액은 number라 자동으로 t='n' 셀로 저장됨 (SUM 가능)
     const wb = XLSX.utils.book_new()
     if (results.length > 0) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(results), '매칭결과')
@@ -242,9 +236,18 @@ export async function POST(request) {
       matchedData: results,
       unmatchedData: unmatchedList
     })
-
   } catch (error) {
-    console.error('Payer match error:', error)
-    return NextResponse.json({ success: false, error: error.message })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/payer-match',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { year: yearForCtx, tabName: tabNameForCtx, freeCourseIds: freeCourseIdsForCtx },
+    })
+    return NextResponse.json({ success: false, error: logged.userMessage, errorId: logged.id || undefined }, { status: 500 })
   }
 }
+
+export const runtime = 'nodejs'
+export const maxDuration = 60

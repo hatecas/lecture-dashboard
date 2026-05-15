@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { logError, errorResponse } from '@/lib/errorLog'
 
 const CHANNEL_API = 'https://api.channel.io/open'
 
@@ -89,8 +90,12 @@ export async function POST(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let actionForCtx = null
+  let queryForCtx = null
   try {
     const { action, query, userId, chatId } = await request.json()
+    actionForCtx = action
+    queryForCtx = query
 
     if (!process.env.CHANNEL_ACCESS_KEY || !process.env.CHANNEL_ACCESS_SECRET) {
       return NextResponse.json({
@@ -178,7 +183,14 @@ export async function POST(request) {
     return NextResponse.json({ error: '알 수 없는 action입니다' }, { status: 400 })
 
   } catch (error) {
-    console.error('채널톡 대화 조회 오류:', error)
-    return NextResponse.json({ error: error.message || '채널톡 대화 조회 중 오류 발생' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/channel-conversations',
+      errorCode: 'EXTERNAL_API',
+      username: auth?.user?.username,
+      context: { action: actionForCtx, query: queryForCtx },
+    })
+    return errorResponse(logged, 500)
   }
 }

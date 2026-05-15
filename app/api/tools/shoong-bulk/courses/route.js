@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getNlabSupabase } from '@/lib/nlabSupabase'
+import { logError, errorResponse } from '@/lib/errorLog'
 
 // FreeCourse를 title로 검색하고 각 코스의 신청자 수(ApplyCourse 행수)를 함께 반환
 // GET /api/tools/shoong-bulk/courses?keyword=씨오
@@ -62,8 +63,15 @@ export async function GET(request) {
       keyword
     })
   } catch (error) {
-    console.error('shoong-bulk/courses error:', error)
-    return NextResponse.json({ error: error.message || '서버 오류' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/shoong-bulk/courses',
+      errorCode: 'DB',
+      username: auth?.user?.username,
+      context: { keyword },
+    })
+    return errorResponse(logged, 500)
   }
 }
 

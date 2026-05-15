@@ -72,7 +72,6 @@ export default function Login({ onLogin }) {
         } catch (e) {}
 
         onLogin(data.name || data.username, {
-          canUseInflow: data.can_use_inflow || false,
           loginId: data.username,
           features: userFeatures
         })

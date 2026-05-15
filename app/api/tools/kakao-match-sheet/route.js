@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getGoogleAccessToken } from '@/lib/googleAuth'
+import { logError, errorResponse } from '@/lib/errorLog'
 
 // PM 결제자 관리 시트 ID (payer-sheets/route.js 와 동일)
 const PAYER_SHEETS = {
@@ -137,11 +138,15 @@ export async function POST(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let yearForCtx = null
+  let tabNameForCtx = null
   try {
     const formData = await request.formData()
     const year = formData.get('year') || '26'
     const tabName = formData.get('tabName')
     const kakaoLogFiles = formData.getAll('kakaoLogs')
+    yearForCtx = year
+    tabNameForCtx = tabName
 
     if (!tabName) {
       return NextResponse.json({ error: '탭 이름이 필요합니다.' }, { status: 400 })
@@ -332,8 +337,16 @@ export async function POST(request) {
     })
 
   } catch (error) {
-    console.error('Kakao match preview error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/kakao-match-sheet',
+      method: 'POST',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { year: yearForCtx, tabName: tabNameForCtx },
+    })
+    return errorResponse(logged, 500)
   }
 }
 
@@ -344,9 +357,15 @@ export async function PUT(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let yearForCtx = null
+  let tabNameForCtx = null
+  let rowCountForCtx = 0
   try {
     const body = await request.json()
     const { year, tabName, entryColIndex, rows: writeRows } = body
+    yearForCtx = year
+    tabNameForCtx = tabName
+    rowCountForCtx = Array.isArray(writeRows) ? writeRows.length : 0
 
     if (!year || !tabName) {
       return NextResponse.json({ error: 'year, tabName 필수' }, { status: 400 })
@@ -392,7 +411,15 @@ export async function PUT(request) {
     })
 
   } catch (error) {
-    console.error('Kakao match commit error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/kakao-match-sheet',
+      method: 'PUT',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { year: yearForCtx, tabName: tabNameForCtx, rowCount: rowCountForCtx },
+    })
+    return errorResponse(logged, 500)
   }
 }
