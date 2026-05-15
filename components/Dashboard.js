@@ -1574,9 +1574,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // errorLogs* state는 components/tabs/ErrorLogsTab.js 안으로 이동됨 (2026-05-14 분리)
 
   // PPT outline 구조 설정 (사용자가 직접 단계 순서 변경 + ON/OFF).
-  // 11개 kind 중 사용할 것만 + 원하는 순서로 배열. localStorage에 사용자별 저장.
-  // 기본값: outro 제외 9단계 (사용자 요청 — "마지막으로 드리고싶은말~동기부여~마지막부분" 제외)
-  const DEFAULT_PPT_STRUCTURE = ['hook', 'intro', 'proof', 'journey', 'myth', 'info', 'qna', 'testimonial', 'cta']
+  // 12개 kind 중 사용할 것만 + 원하는 순서로 배열. localStorage에 사용자별 저장.
+  // 기본값: outro 제외, breath 포함 (breath는 분포 신호 — 끝에 두면 LLM이 알아서 사이사이 분산)
+  const DEFAULT_PPT_STRUCTURE = ['hook', 'intro', 'proof', 'journey', 'myth', 'info', 'qna', 'testimonial', 'cta', 'breath']
   const [pp_pptStructure, setPpPptStructure] = useState(DEFAULT_PPT_STRUCTURE)
   const [pp_structureModalOpen, setPpStructureModalOpen] = useState(false)
   // 드래그앤드롭 상태 (구조 설정 모달용)
