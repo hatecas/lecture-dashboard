@@ -105,6 +105,110 @@ function pptPlanToMarkdown(plan) {
   return lines.join('\n')
 }
 
+// 클로드 디자인 / 외부 슬라이드 디자인 도구용 슬림 마크다운.
+//
+// 목적: claude.ai/design 같은 디자인 도구에 붙여넣을 때 토큰 사용량 최소화.
+// 풀 .md 대비 약 30~40% 분량 (130장 풀 outline → 슬림 export 시 약 50장 분량 압축).
+//
+// 압축 전략:
+//   - speakerNotes는 모두 제거 (디자인에 불필요, 가장 큰 텍스트 덩어리)
+//   - info kind는 CHAPTER 표지(title에 'CHAPTER'/'챕터' 포함)만 유지하고 내부 본문은
+//     bullets만 압축 리스트로 통합
+//   - empty/breath 같은 한 줄 슬라이드는 통합 라인 1개로 (각각 슬라이드 헤더 X)
+//   - hook/intro/proof 등 핵심 단계는 전체 보존 (분량 적고 디자인 임팩트 큼)
+//   - 디자인 톤 지시 한 줄을 머리에 포함 (디자인 도구가 톤을 잡기 쉽도록)
+function pptPlanToSlimMarkdown(plan, toneMd) {
+  if (!plan) return ''
+  const lines = []
+  lines.push(`# ${plan.title || '강의 PPT outline'}`)
+  lines.push('')
+  lines.push(`총 ${plan.totalSlides || plan.slides?.length || 0}장 — 슬림 export (디자인 도구용)`)
+  lines.push('')
+  if (toneMd && toneMd.trim()) {
+    lines.push('## 🎨 디자인 톤')
+    lines.push('')
+    // 토큰 절약을 위해 톤 MD는 앞 500자만
+    lines.push(toneMd.trim().slice(0, 500))
+    lines.push('')
+  }
+  lines.push('---')
+  lines.push('')
+
+  const slides = plan.slides || []
+  let i = 0
+  while (i < slides.length) {
+    const s = slides[i]
+    const kindLabel = PPT_KIND_META[s.kind]?.label || ''
+
+    // empty/breath 슬라이드는 연속이면 한 묶음으로 표시
+    if (s.kind === 'empty' || s.kind === 'breath') {
+      const group = []
+      while (i < slides.length && (slides[i].kind === 'empty' || slides[i].kind === 'breath')) {
+        const t = slides[i].title || (slides[i].kind === 'breath' ? '💧' : '🖼️')
+        group.push(`- ${slides[i].kind === 'breath' ? '💧' : '🖼️'} ${t}`)
+        i++
+      }
+      lines.push(`## ${group.length > 1 ? `전환 슬라이드 ${group.length}장` : '전환'}`)
+      lines.push('')
+      lines.push(...group)
+      lines.push('')
+      lines.push('---')
+      lines.push('')
+      continue
+    }
+
+    // info 슬라이드 중 CHAPTER 표지가 아닌 본문은 다음 CHAPTER 표지까지 묶어 압축
+    if (s.kind === 'info') {
+      const isChapterMarker = /CHAPTER|챕터/i.test(s.title || '')
+      if (isChapterMarker) {
+        // CHAPTER 표지는 그대로 + 내부 본문은 다음 CHAPTER까지 bullets만 압축
+        lines.push(`## ${s.title || '본론 챕터'} · ${kindLabel}`)
+        lines.push('')
+        i++
+        const sectionBullets = []
+        while (i < slides.length && slides[i].kind === 'info' && !/CHAPTER|챕터/i.test(slides[i].title || '')) {
+          const ss = slides[i]
+          if (ss.title) sectionBullets.push(`- **${ss.title}**${Array.isArray(ss.bullets) && ss.bullets.length ? `: ${ss.bullets.join(' / ')}` : ''}`)
+          else if (Array.isArray(ss.bullets) && ss.bullets.length) {
+            for (const b of ss.bullets) sectionBullets.push(`- ${b}`)
+          }
+          i++
+        }
+        if (sectionBullets.length) {
+          lines.push(...sectionBullets)
+          lines.push('')
+        }
+        lines.push('---')
+        lines.push('')
+        continue
+      }
+      // CHAPTER 표지가 없는 (드문) info 본문이면 일반 슬라이드처럼 처리 (fall through)
+    }
+
+    // 일반 슬라이드 — title + bullets만, speakerNotes 제거
+    lines.push(`## 슬라이드 ${s.slideNumber || '?'}${kindLabel ? ` · ${kindLabel}` : ''}`)
+    lines.push('')
+    if (s.title) {
+      lines.push(`### ${s.title}`)
+      lines.push('')
+    }
+    if (Array.isArray(s.bullets) && s.bullets.length) {
+      for (const b of s.bullets) lines.push(`- ${b}`)
+      lines.push('')
+    }
+    lines.push('---')
+    lines.push('')
+    i++
+  }
+
+  lines.push('')
+  lines.push('## 📝 디자인 지시 (디자인 도구에 함께 전달)')
+  lines.push('')
+  lines.push('위 outline을 기반으로 PPT 슬라이드를 만들어주세요. 발표 멘트는 별도 첨부되어 있고 디자인에는 불필요합니다. 각 슬라이드는 짧고 임팩트 있게, 본문 텍스트는 슬라이드당 3~5줄을 넘기지 마세요. 디자인 톤은 위 "🎨 디자인 톤" 섹션을 따르세요.')
+
+  return lines.join('\n')
+}
+
 // 봇별 generic 마크다운 변환 — PPT 외 봇 결과를 노션/문서로 옮기기 위한 fallback.
 // 키 깊이 2~3까지 펼침. 깊은 객체는 JSON.
 function genericPlanToMarkdown(taskKey, plan) {
@@ -10108,6 +10212,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
 
                 // ===== 결과 추출 헬퍼 =====
                 const toMarkdown = () => pptPlanToMarkdown(plan)
+                const toSlimMarkdown = () => pptPlanToSlimMarkdown(plan, pp_designToneMd || DEFAULT_DESIGN_TONE_MD)
                 const safeFileName = makeSafeFileName(plan.title, 'ppt-outline')
 
                 // 2) 마크다운 복사
@@ -10120,6 +10225,19 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   }
                 }
 
+                // 2b) 클로드 디자인용 슬림 마크다운 복사 (토큰 절약)
+                const copySlimMarkdown = async () => {
+                  try {
+                    const slim = toSlimMarkdown()
+                    await navigator.clipboard.writeText(slim)
+                    const full = toMarkdown()
+                    const ratio = Math.round((slim.length / Math.max(full.length, 1)) * 100)
+                    alert(`클로드 디자인용 슬림 마크다운 복사 완료.\n원본 대비 ${ratio}% 크기 (speakerNotes 제거 + 본론 챕터 압축).\n\nclaude.ai/design 채팅창에 그대로 붙여넣으세요.`)
+                  } catch (e) {
+                    alert('복사 실패: ' + (e?.message || ''))
+                  }
+                }
+
                 // 3) .md 파일 다운로드
                 const downloadMarkdown = () => {
                   const blob = new Blob([toMarkdown()], { type: 'text/markdown;charset=utf-8' })
@@ -10127,6 +10245,19 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   const a = document.createElement('a')
                   a.href = url
                   a.download = `${safeFileName}.md`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  setTimeout(() => URL.revokeObjectURL(url), 1000)
+                }
+
+                // 3b) 클로드 디자인용 슬림 .md 다운로드
+                const downloadSlimMarkdown = () => {
+                  const blob = new Blob([toSlimMarkdown()], { type: 'text/markdown;charset=utf-8' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `${safeFileName}-슬림.md`
                   document.body.appendChild(a)
                   a.click()
                   document.body.removeChild(a)
@@ -10224,6 +10355,16 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', borderRadius: '7px', color: '#e2e8f0', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
                         title=".md 파일로 다운로드 — 어디서든 열 수 있는 텍스트 형식">
                         📄 .md 다운로드
+                      </button>
+                      <button onClick={copySlimMarkdown}
+                        style={{ padding: '7px 12px', background: 'linear-gradient(135deg, rgba(244,114,182,0.20), rgba(168,85,247,0.20))', border: '1px solid rgba(168,85,247,0.40)', borderRadius: '7px', color: '#f0abfc', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                        title="claude.ai/design 토큰 절약용 — speakerNotes 제거 + 본론 챕터 압축으로 약 30~40% 크기">
+                        🎨 클로드 디자인용 복사
+                      </button>
+                      <button onClick={downloadSlimMarkdown}
+                        style={{ padding: '7px 12px', background: 'rgba(244,114,182,0.10)', border: '1px solid rgba(168,85,247,0.30)', borderRadius: '7px', color: '#f0abfc', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                        title="슬림 .md 파일로 저장 — claude.ai/design 업로드용">
+                        🎨 슬림 .md
                       </button>
                       <button onClick={downloadPptx} disabled={exportBusyKind === 'pptx'}
                         style={{
@@ -13030,6 +13171,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         'plan'
                       )
                       const markdown = isPpt ? pptPlanToMarkdown(plan) : genericPlanToMarkdown(taskKey, plan)
+                      const slimMarkdown = isPpt ? pptPlanToSlimMarkdown(plan, pp_designToneMd || DEFAULT_DESIGN_TONE_MD) : null
                       const exportBusy = pp_exportBusy[`saved:${savedPlanDetail.id}`] || null
 
                       // 1) 마크다운 복사
@@ -13039,12 +13181,31 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           alert('마크다운으로 복사 완료.')
                         } catch (e) { alert('복사 실패. 수동으로 선택해주세요.') }
                       }
+                      // 1b) 슬림 마크다운 복사 (PPT만)
+                      const copySlimMd = async () => {
+                        if (!slimMarkdown) return
+                        try {
+                          await navigator.clipboard.writeText(slimMarkdown)
+                          const ratio = Math.round((slimMarkdown.length / Math.max(markdown.length, 1)) * 100)
+                          alert(`클로드 디자인용 슬림 마크다운 복사 완료.\n원본 대비 ${ratio}% 크기.\n\nclaude.ai/design에 그대로 붙여넣으세요.`)
+                        } catch (e) { alert('복사 실패: ' + (e?.message || '')) }
+                      }
                       // 2) .md 다운로드
                       const downloadMd = () => {
                         const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
                         const url = URL.createObjectURL(blob)
                         const a = document.createElement('a')
                         a.href = url; a.download = `${safeTitle}.md`
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a)
+                        setTimeout(() => URL.revokeObjectURL(url), 1000)
+                      }
+                      // 2b) 슬림 .md 다운로드 (PPT만)
+                      const downloadSlimMd = () => {
+                        if (!slimMarkdown) return
+                        const blob = new Blob([slimMarkdown], { type: 'text/markdown;charset=utf-8' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url; a.download = `${safeTitle}-슬림.md`
                         document.body.appendChild(a); a.click(); document.body.removeChild(a)
                         setTimeout(() => URL.revokeObjectURL(url), 1000)
                       }
@@ -13125,6 +13286,20 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', borderRadius: '7px', color: '#e2e8f0', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                               📄 .md 다운로드
                             </button>
+                            {isPpt && (
+                              <button onClick={copySlimMd}
+                                style={{ padding: '7px 12px', background: 'linear-gradient(135deg, rgba(244,114,182,0.20), rgba(168,85,247,0.20))', border: '1px solid rgba(168,85,247,0.40)', borderRadius: '7px', color: '#f0abfc', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
+                                title="claude.ai/design 토큰 절약용 — speakerNotes 제거 + 본론 챕터 압축">
+                                🎨 클로드 디자인용 복사
+                              </button>
+                            )}
+                            {isPpt && (
+                              <button onClick={downloadSlimMd}
+                                style={{ padding: '7px 12px', background: 'rgba(244,114,182,0.10)', border: '1px solid rgba(168,85,247,0.30)', borderRadius: '7px', color: '#f0abfc', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                                title="슬림 .md 파일로 저장 — claude.ai/design 업로드용">
+                                🎨 슬림 .md
+                              </button>
+                            )}
                             {isPpt && (
                               <button onClick={downloadPptxSaved} disabled={exportBusy === 'pptx'}
                                 style={{
