@@ -1,6 +1,7 @@
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getNlabSupabase } from '@/lib/nlabSupabase'
 import { extractInstructorName, isRefunded } from '@/lib/utils/instructorName'
+import { logError, errorResponse } from '@/lib/errorLog'
 
 // 무료특강 후 시간별 구매 추이 분석
 //
@@ -44,10 +45,14 @@ export async function POST(request) {
     return Response.json({ error: auth.error }, { status: 401 })
   }
 
+  let instructorForCtx = null
+  let freeClassDateForCtx = null
   try {
     const body = await request.json()
     const instructor = (body.instructor || (body.tabName ? String(body.tabName).split(/\s+/)[0] : '')).trim()
     const freeClassDate = body.freeClassDate
+    instructorForCtx = instructor
+    freeClassDateForCtx = freeClassDate
 
     if (!instructor || !freeClassDate) {
       return Response.json({ error: 'instructor, freeClassDate 필수' }, { status: 400 })
@@ -115,7 +120,14 @@ export async function POST(request) {
       totalAll: rawRows.length
     })
   } catch (error) {
-    console.error('매출 분석 오류:', error)
-    return Response.json({ error: '매출 분석 중 오류 발생: ' + error.message }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/sales-analysis',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { instructor: instructorForCtx, freeClassDate: freeClassDateForCtx },
+    })
+    return errorResponse(logged, 500)
   }
 }

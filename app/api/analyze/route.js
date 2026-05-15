@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { logError, errorResponse, classifyAnthropicError } from '@/lib/errorLog'
 
 export async function POST(request) {
   // API 인증 검증
@@ -8,8 +9,12 @@ export async function POST(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let analysisTypeForCtx = null
+  let instructorForCtx = null
   try {
     const { sessionData, memos, attachments, analysisType } = await request.json()
+    analysisTypeForCtx = analysisType
+    instructorForCtx = sessionData?.instructorName
 
     const isDetail = analysisType === 'detail'
 
@@ -68,6 +73,24 @@ ${memoSection}
 
       const data = await response.json()
 
+      if (!response.ok || !data.content) {
+        const errMsg = data?.error?.message || `Anthropic ${response.status}`
+        const logged = await logError({
+          request,
+          error: new Error(errMsg),
+          route: '/api/analyze',
+          errorCode: classifyAnthropicError(errMsg),
+          username: auth?.user?.username,
+          context: {
+            mode: 'detail',
+            anthropicStatus: response.status,
+            anthropicError: data?.error,
+            instructor: sessionData?.instructorName,
+          },
+        })
+        return errorResponse(logged, 500)
+      }
+
       if (data.content && data.content[0]) {
         const text = data.content[0].text
         const jsonMatch = text.match(/\{[\s\S]*\}/)
@@ -88,7 +111,15 @@ ${memoSection}
         }
       }
 
-      return NextResponse.json({ error: 'AI 응답 파싱 실패' }, { status: 500 })
+      const logged = await logError({
+        request,
+        error: new Error('AI 응답 파싱 실패 (detail)'),
+        route: '/api/analyze',
+        errorCode: 'EXTERNAL_API',
+        username: auth?.user?.username,
+        context: { mode: 'detail', instructor: sessionData?.instructorName },
+      })
+      return errorResponse(logged, 500)
     }
 
     // 기본 분석: 대시보드 데이터 기반
@@ -137,7 +168,25 @@ ${memoSection}
     })
 
     const data = await response.json()
-    
+
+    if (!response.ok || !data.content) {
+      const errMsg = data?.error?.message || `Anthropic ${response.status}`
+      const logged = await logError({
+        request,
+        error: new Error(errMsg),
+        route: '/api/analyze',
+        errorCode: classifyAnthropicError(errMsg),
+        username: auth?.user?.username,
+        context: {
+          mode: 'default',
+          anthropicStatus: response.status,
+          anthropicError: data?.error,
+          instructor: sessionData?.instructorName,
+        },
+      })
+      return errorResponse(logged, 500)
+    }
+
     if (data.content && data.content[0]) {
       const text = data.content[0].text
       const jsonMatch = text.match(/\{[\s\S]*\}/)
@@ -157,10 +206,25 @@ ${memoSection}
       }
     }
 
-    return NextResponse.json({ error: 'AI 응답 파싱 실패' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error: new Error('AI 응답 파싱 실패 (default)'),
+      route: '/api/analyze',
+      errorCode: 'EXTERNAL_API',
+      username: auth?.user?.username,
+      context: { mode: 'default', instructor: sessionData?.instructorName },
+    })
+    return errorResponse(logged, 500)
 
   } catch (error) {
-    console.error('AI 분석 오류:', error)
-    return NextResponse.json({ error: '분석 중 오류 발생' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/analyze',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { analysisType: analysisTypeForCtx, instructor: instructorForCtx },
+    })
+    return errorResponse(logged, 500)
   }
 }

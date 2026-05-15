@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { supabase } from '@/lib/supabase'
+import { logError, errorResponse, classifyAnthropicError } from '@/lib/errorLog'
 
 const CHANNEL_API = 'https://api.channel.io/open'
 
@@ -12,87 +13,95 @@ function getChannelHeaders() {
   }
 }
 
-// 채널톡 대화 목록에서 사용자 이름으로 필터링하여 대화 가져오기 (전체 페이지네이션)
+// 채널톡 단일 상태(opened|closed)에서 customerName과 매칭되는 채팅을 페이지네이션 조회.
+// 매칭 결과가 EARLY_STOP_COUNT개에 도달하면 조기 종료.
+async function fetchChatsByState(state, customerName, MAX_PAGES = 15, EARLY_STOP_COUNT = 5) {
+  const matched = []
+  let since = undefined
+  let page = 0
+
+  while (page < MAX_PAGES) {
+    let url = `${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`
+    if (since) url += `&since=${encodeURIComponent(since)}`
+
+    const chatRes = await fetch(url, { headers: getChannelHeaders() })
+    if (!chatRes.ok) {
+      const errText = await chatRes.text().catch(() => '')
+      console.error(`채널톡 user-chats(${state}) p${page} 조회 실패:`, chatRes.status, errText)
+      break
+    }
+
+    const chatData = await chatRes.json()
+    const chats = chatData.userChats || []
+    const users = chatData.users || []
+
+    for (const chat of chats) {
+      const user = users.find(u => u.id === chat.userId)
+      const userName = user?.profile?.name || user?.name || ''
+      if (userName && userName.includes(customerName)) {
+        matched.push({ chat, userName, userId: chat.userId })
+      }
+    }
+
+    if (matched.length >= EARLY_STOP_COUNT) break
+    if (!chatData.next || chats.length === 0) break
+    since = chatData.next
+    page++
+  }
+
+  return matched
+}
+
+// 채널톡 대화 목록에서 사용자 이름으로 필터링하여 대화 가져오기.
+// opened/closed 병렬, 매칭된 채팅의 메시지도 병렬 fetch.
 async function fetchChannelConversations(customerName) {
   if (!process.env.CHANNEL_ACCESS_KEY || !process.env.CHANNEL_ACCESS_SECRET) {
     return { error: '채널톡 API 키가 설정되지 않았습니다.' }
   }
 
   try {
-    // 1. 모든 user-chats를 페이지네이션으로 가져오며 이름 매칭
-    const allChats = []
-    const MAX_PAGES = 50 // 안전 제한: 최대 50페이지 × 100개 = 5000개/상태
-
-    for (const state of ['opened', 'closed']) {
-      let since = undefined
-      let page = 0
-
-      while (page < MAX_PAGES) {
-        let url = `${CHANNEL_API}/v5/user-chats?state=${state}&sortOrder=desc&limit=100`
-        if (since) url += `&since=${encodeURIComponent(since)}`
-
-        const chatRes = await fetch(url, { headers: getChannelHeaders() })
-
-        if (!chatRes.ok) {
-          const errText = await chatRes.text()
-          console.error(`채널톡 user-chats(${state}) p${page} 조회 실패:`, chatRes.status, errText)
-          break
-        }
-
-        const chatData = await chatRes.json()
-        const chats = chatData.userChats || []
-        const users = chatData.users || []
-
-        // users 배열에서 이름 매칭
-        for (const chat of chats) {
-          const user = users.find(u => u.id === chat.userId)
-          const userName = user?.profile?.name || user?.name || ''
-
-          if (userName && userName.includes(customerName)) {
-            allChats.push({ chat, userName, userId: chat.userId })
-          }
-        }
-
-        // 응답의 next 커서로 다음 페이지 조회 (Base64 인코딩된 커서)
-        if (!chatData.next || chats.length === 0) break
-        since = chatData.next
-        page++
-      }
-    }
+    // 1. opened/closed 동시 조회
+    const [openedMatches, closedMatches] = await Promise.all([
+      fetchChatsByState('opened', customerName),
+      fetchChatsByState('closed', customerName)
+    ])
+    const allChats = [...openedMatches, ...closedMatches]
 
     if (allChats.length === 0) {
       return { conversations: [], message: `"${customerName}" 이름의 소비자 대화를 찾을 수 없습니다.` }
     }
 
-    // 2. 매칭된 채팅의 메시지 가져오기
-    const allConversations = []
-
-    for (const { chat, userName } of allChats.slice(0, 10)) {
-      const msgRes = await fetch(
-        `${CHANNEL_API}/v5/user-chats/${chat.id}/messages?sortOrder=asc&limit=50`,
-        { headers: getChannelHeaders() }
-      )
-
-      if (!msgRes.ok) continue
-      const msgData = await msgRes.json()
-      const messages = (msgData.messages || [])
-        .map(msg => ({
-          sender: msg.personType === 'user' ? userName : '상담원',
-          text: msg.plainText || msg.message || '',
-          createdAt: msg.createdAt
-        }))
-        .filter(m => m.text)
-
-      if (messages.length > 0) {
-        allConversations.push({
+    // 2. 매칭된 채팅(최대 10건)의 메시지를 병렬로 fetch
+    const targetChats = allChats.slice(0, 10)
+    const messageResults = await Promise.all(targetChats.map(async ({ chat, userName }) => {
+      try {
+        const msgRes = await fetch(
+          `${CHANNEL_API}/v5/user-chats/${chat.id}/messages?sortOrder=asc&limit=50`,
+          { headers: getChannelHeaders() }
+        )
+        if (!msgRes.ok) return null
+        const msgData = await msgRes.json()
+        const messages = (msgData.messages || [])
+          .map(msg => ({
+            sender: msg.personType === 'user' ? userName : '상담원',
+            text: msg.plainText || msg.message || '',
+            createdAt: msg.createdAt
+          }))
+          .filter(m => m.text)
+        if (messages.length === 0) return null
+        return {
           chatId: chat.id,
           userName,
           createdAt: chat.createdAt,
           state: chat.state,
           messages
-        })
+        }
+      } catch {
+        return null
       }
-    }
+    }))
+
+    const allConversations = messageResults.filter(Boolean)
 
     return {
       conversations: allConversations,
@@ -231,6 +240,8 @@ async function executeTool(toolName, toolInput) {
   }
 }
 
+const CS_MODEL = process.env.CS_AI_MODEL || 'claude-sonnet-4-6'
+
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
   if (!auth.authenticated) {
@@ -262,10 +273,13 @@ export async function POST(request) {
 - 이런 애매한 경우에는 반드시 과거 상담 이력을 검색하여, 동일하거나 유사한 상황에서 실제로 어떻게 대응했는지를 기준으로 삼으세요
 - 과거 이력이 있으면 그 판례를 따르고, 없으면 정책 원칙에 기반하여 답변합니다
 
+⚡ 효율성 원칙 (중요):
+- 여러 정보가 필요하면 한 번에 여러 도구를 동시에 호출하세요 (예: 정책 검색과 이력 검색을 같은 turn에 함께 호출)
+- 한 번의 turn에 여러 tool_use 블록을 포함해도 됩니다 — 시스템이 병렬로 처리합니다
+
 대화 내용을 가져온 후 사용자가 대응 방법을 물으면:
-1. 먼저 과거 유사 상담 이력을 검색합니다 (가장 중요)
-2. 관련 정책도 함께 검색합니다
-3. 과거 이력 > 정책 순서로 우선하여 답변을 작성합니다
+1. 과거 유사 상담 이력 검색과 관련 정책 검색을 가능하면 동시에 호출
+2. 과거 이력 > 정책 순서로 우선하여 답변을 작성
 
 답변 작성 원칙:
 - 존댓말 사용 (~~습니다, ~~드리겠습니다)
@@ -315,9 +329,12 @@ export async function POST(request) {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: CS_MODEL,
           max_tokens: 4096,
-          system: systemPrompt,
+          system: [
+            // 시스템 프롬프트 캐싱 — 같은 사용자가 연속 메시지 보낼 때 5분 내 재호출 시 캐시 히트.
+            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+          ],
           tools,
           messages: currentMessages
         })
@@ -325,8 +342,22 @@ export async function POST(request) {
 
       const data = await response.json()
 
-      if (!data.content) {
-        return NextResponse.json({ error: 'AI 응답 실패' }, { status: 500 })
+      if (!response.ok || !data.content) {
+        const errMsg = data?.error?.message || `Anthropic ${response.status}`
+        const logged = await logError({
+          request,
+          error: new Error(errMsg),
+          route: '/api/cs-ai',
+          errorCode: classifyAnthropicError(errMsg),
+          username: auth?.user?.username,
+          context: {
+            anthropicStatus: response.status,
+            anthropicError: data?.error,
+            model: CS_MODEL,
+            iterationsLeft: maxIterations,
+          },
+        })
+        return errorResponse(logged, 500)
       }
 
       // stop_reason이 end_turn이면 최종 응답
@@ -338,25 +369,20 @@ export async function POST(request) {
         })
       }
 
-      // stop_reason이 tool_use이면 도구 실행
+      // stop_reason이 tool_use이면 도구 실행 (여러 도구는 병렬)
       if (data.stop_reason === 'tool_use') {
-        // AI의 응답을 메시지에 추가
         currentMessages.push({ role: 'assistant', content: data.content })
 
-        // 도구 호출 결과 수집
-        const toolResults = []
-        for (const block of data.content) {
-          if (block.type === 'tool_use') {
-            const result = await executeTool(block.name, block.input)
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: block.id,
-              content: JSON.stringify(result, null, 2)
-            })
+        const toolUseBlocks = data.content.filter(b => b.type === 'tool_use')
+        const toolResults = await Promise.all(toolUseBlocks.map(async (block) => {
+          const result = await executeTool(block.name, block.input)
+          return {
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: JSON.stringify(result, null, 2)
           }
-        }
+        }))
 
-        // 도구 결과를 메시지에 추가
         currentMessages.push({ role: 'user', content: toolResults })
         continue
       }
@@ -374,7 +400,15 @@ export async function POST(request) {
     })
 
   } catch (error) {
-    console.error('CS AI 오류:', error)
-    return NextResponse.json({ error: 'CS AI 처리 중 오류 발생' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/cs-ai',
+      errorCode: 'INTERNAL',
+    })
+    return errorResponse(logged, 500)
   }
 }
+
+export const runtime = 'nodejs'
+export const maxDuration = 60

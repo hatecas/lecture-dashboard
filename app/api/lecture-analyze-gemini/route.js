@@ -1,5 +1,6 @@
 import { GoogleGenAI, createUserContent, createPartFromUri } from '@google/genai'
 import { verifyApiAuth } from '@/lib/apiAuth'
+import { logError } from '@/lib/errorLog'
 
 // Vercel Hobby 최대 300초. Pro 플랜이면 더 길게 설정 가능.
 export const maxDuration = 300
@@ -150,7 +151,20 @@ export async function POST(request) {
           send({ type: 'error', message: '분석 결과가 비어있습니다.' })
         }
       } catch (err) {
-        send({ type: 'error', message: `${err.name || 'Error'}: ${err.message || String(err)}` })
+        const logged = await logError({
+          request,
+          error: err,
+          route: '/api/lecture-analyze-gemini',
+          errorCode: /timeout|timed out/i.test(err?.message || '') ? 'TIMEOUT' : 'EXTERNAL_API',
+          username: auth?.user?.username,
+          context: {
+            inputMode,
+            youtubeUrl: inputMode === 'youtube' ? youtubeUrl : undefined,
+            fileName: inputMode !== 'youtube' && videoFile && typeof videoFile !== 'string' ? videoFile.name : undefined,
+            model: GEMINI_MODEL,
+          },
+        })
+        send({ type: 'error', message: logged.userMessage, errorId: logged.id || undefined })
       } finally {
         try { controller.close() } catch (_) {}
       }

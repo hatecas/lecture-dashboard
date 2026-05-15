@@ -2411,6 +2411,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     if (currentTab === 'tools' && currentTool === 'kakao' && kakaoTabs.length === 0) {
       loadKakaoTabs(kakaoYear)
     }
+    if (currentTab === 'tools' && currentTool === 'order-sync') {
+      if (orderSyncTabs.length === 0) loadOrderSyncTabs(orderSyncYear)
+      if (orderSyncInstructors.length === 0) loadOrderSyncInstructors()
+    }
     if (currentTab === 'account-management' && loginId === 'jinwoo' && am_accounts.length === 0) {
       setAmLoading(true)
       fetch('/api/admin/accounts', { headers: getAuthHeaders() })
@@ -5609,7 +5613,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             cursor: orderSyncTabsLoading ? 'wait' : 'pointer'
                           }}
                         >
-                          {orderSyncTabsLoading ? '불러오는 중...' : (orderSyncTabs.length > 0 ? '🔄 새로고침' : '📂 탭 불러오기')}
+                          {orderSyncTabsLoading ? '불러오는 중...' : '🔄 새로고침'}
                         </button>
                       </div>
 

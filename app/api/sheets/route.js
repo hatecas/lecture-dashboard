@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { supabase } from '@/lib/supabase'
 import { getGoogleAccessToken } from '@/lib/googleAuth'
+import { logError, errorResponse } from '@/lib/errorLog'
 
 // 기본 설정값 (DB에 설정이 없을 때 사용)
 const DEFAULT_CONFIG = {
@@ -205,15 +206,29 @@ export async function GET(request) {
     return NextResponse.json({ data: allData })
 
   } catch (error) {
-    console.error('시트 API 오류:', error?.message || error)
     // 외부 Google API 일시 장애(5xx/429)는 503으로 노출해 클라이언트가 일시적 에러로 다룰 수 있게.
     const upstreamStatus = error?.status
     if (upstreamStatus && RETRYABLE_STATUS.has(upstreamStatus)) {
-      return NextResponse.json(
-        { error: 'Google Sheets 일시 장애. 잠시 후 다시 시도해주세요.', upstreamStatus },
-        { status: 503, headers: { 'Retry-After': '30' } }
-      )
+      const logged = await logError({
+        request,
+        error,
+        route: '/api/sheets',
+        errorCode: 'EXTERNAL_API',
+        username: auth?.user?.username,
+        context: { name, upstreamStatus },
+      })
+      const body = { error: logged.userMessage, upstreamStatus }
+      if (logged.id) body.errorId = logged.id
+      return NextResponse.json(body, { status: 503, headers: { 'Retry-After': '30' } })
     }
-    return NextResponse.json({ error: '시트 데이터 로드 실패' }, { status: 500 })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/sheets',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { name },
+    })
+    return errorResponse(logged, 500)
   }
 }

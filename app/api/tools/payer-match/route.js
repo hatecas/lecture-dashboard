@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { verifyApiAuth } from '@/lib/apiAuth'
 import { getGoogleAccessToken } from '@/lib/googleAuth'
 import { getNlabSupabase } from '@/lib/nlabSupabase'
+import { logError, errorResponse } from '@/lib/errorLog'
 import * as XLSX from 'xlsx'
 
 const PAYER_SHEETS = {
@@ -49,9 +50,15 @@ export async function POST(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 })
   }
 
+  let yearForCtx = null
+  let tabNameForCtx = null
+  let freeCourseIdsForCtx = null
   try {
     const body = await request.json().catch(() => ({}))
     const { freeCourseIds, year, tabName } = body || {}
+    yearForCtx = year
+    tabNameForCtx = tabName
+    freeCourseIdsForCtx = Array.isArray(freeCourseIds) ? freeCourseIds.slice(0, 20) : freeCourseIds
 
     if (!Array.isArray(freeCourseIds) || freeCourseIds.length === 0) {
       return NextResponse.json({ success: false, error: '강의를 1개 이상 선택해주세요.' })
@@ -230,8 +237,15 @@ export async function POST(request) {
       unmatchedData: unmatchedList
     })
   } catch (error) {
-    console.error('Payer match error:', error)
-    return NextResponse.json({ success: false, error: error.message })
+    const logged = await logError({
+      request,
+      error,
+      route: '/api/tools/payer-match',
+      errorCode: 'INTERNAL',
+      username: auth?.user?.username,
+      context: { year: yearForCtx, tabName: tabNameForCtx, freeCourseIds: freeCourseIdsForCtx },
+    })
+    return NextResponse.json({ success: false, error: logged.userMessage, errorId: logged.id || undefined }, { status: 500 })
   }
 }
 
