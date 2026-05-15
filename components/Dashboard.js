@@ -57,6 +57,7 @@ const PPT_KIND_META = {
   testimonial: { label: '💬 후기',       bg: 'rgba(244,114,182,0.18)', color: '#f9a8d4' },
   cta:         { label: '🎯 모집',       bg: 'rgba(168,85,247,0.20)',  color: '#d8b4fe' },
   outro:       { label: '🎤 마무리',     bg: 'rgba(148,163,184,0.18)', color: '#cbd5e1' },
+  breath:      { label: '💧 숨고르기',    bg: 'rgba(56,189,248,0.14)',  color: '#7dd3fc' },
 }
 
 // 봇별 메타 (생성된 기획안 탭에서 사용)
@@ -792,6 +793,26 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         })
         slide.addShape(pptx.ShapeType.line, {
           x: SLIDE_W / 2 - 1, y: 4.3, w: 2, h: 0,
+          line: { color: T.text, width: 0.5 },
+        })
+        drawFooter(slide, slideNum)
+        break
+      }
+      case 'breath': {
+        // 숨고르기/아이스브레이킹 — 부드러운 배경 + 짧은 한 줄 중앙 배치.
+        // 본론 흐름을 잠깐 끊고 호흡을 가져가는 용도라 어떤 정보도 강조하지 않음.
+        slide.addShape(pptx.ShapeType.rect, {
+          x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
+          fill: { color: T.soft }, line: { color: T.soft, width: 0 },
+        })
+        slide.addText(s.title || '💧', {
+          x: MARGIN_X, y: 2.8, w: CONTENT_W, h: 1.4,
+          fontSize: 44, bold: false, color: onBg, fontFace: T.fontMain,
+          align: 'center', valign: 'middle',
+        })
+        // 아래쪽 가는 디바이더 — '잠깐 멈춤' 신호
+        slide.addShape(pptx.ShapeType.line, {
+          x: SLIDE_W / 2 - 0.6, y: 4.5, w: 1.2, h: 0,
           line: { color: T.text, width: 0.5 },
         })
         drawFooter(slide, slideNum)
@@ -11385,6 +11406,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                     { key: 'testimonial', icon: '💬', label: '수강생 후기',     desc: '★ 3단 구조: 상황 → 코칭 → 결과 (5~10장)' },
                     { key: 'cta',         icon: '🎯', label: '정규 강의 모집',  desc: '회차·혜택·가격·마감일 (10~20장)' },
                     { key: 'outro',       icon: '🎤', label: '마무리 (호소)',    desc: '⚠️ 동기부여 멘트 류. 기본은 OFF (사용자 요청)' },
+                    { key: 'breath',      icon: '💧', label: '숨고르기',        desc: '한 줄 농담·물 한 모금·잠시 쉬기. 큰 챕터 전환점에 3~6장 자동 분포' },
                   ]
                   const KIND_MAP = Object.fromEntries(ALL_KINDS.map(k => [k.key, k]))
                   const orderedItems = pp_pptStructure.map(k => KIND_MAP[k]).filter(Boolean)
