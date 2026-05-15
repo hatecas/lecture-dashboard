@@ -1337,9 +1337,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // 자료 영역에 별도 업로드 버튼 X (이전 referenceInputRef는 제거됨).
 
   // 툴 관련 상태
-  const [currentTool, setCurrentTool] = useState('crm') // crm, kakao, youtube (inflow는 권한 필요)
-  const [toolFiles1, setToolFiles1] = useState([]) // 여러 파일 지원
-  const [toolFiles2, setToolFiles2] = useState([]) // 여러 파일 지원
+  const [currentTool, setCurrentTool] = useState('order-sync') // order-sync, crm, kakao, youtube, shoong
+  const [toolFiles1, setToolFiles1] = useState([]) // 여러 파일 지원 (카톡 로그 등)
   const [toolResult, setToolResult] = useState(null)
   const [toolProcessing, setToolProcessing] = useState(false)
   const [toolLog, setToolLog] = useState([])
@@ -1687,7 +1686,11 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [payerSheetData, setPayerSheetData] = useState(null)
   const [payerSheetDataLoading, setPayerSheetDataLoading] = useState(false)
   const [payerSheetSearch, setPayerSheetSearch] = useState('')
-  const [payerMatchFiles, setPayerMatchFiles] = useState([])
+  // 신청자 데이터는 더 이상 파일 업로드가 아닌 nlab DB의 FreeCourse/ApplyCourse 직접 조회로 처리.
+  const [payerMatchKeyword, setPayerMatchKeyword] = useState('')
+  const [payerMatchSearching, setPayerMatchSearching] = useState(false)
+  const [payerMatchCourses, setPayerMatchCourses] = useState([])
+  const [payerMatchSelectedCourseIds, setPayerMatchSelectedCourseIds] = useState([])
   const [payerMatchProcessing, setPayerMatchProcessing] = useState(false)
   const [payerMatchLog, setPayerMatchLog] = useState([])
   const [payerMatchResult, setPayerMatchResult] = useState(null)
@@ -2125,7 +2128,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   // 툴 상태 초기화 함수
   const resetToolState = () => {
     setToolFiles1([])
-    setToolFiles2([])
     setToolResult(null)
     setToolProcessing(false)
     setToolLog([])
@@ -2230,14 +2232,10 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // 권한에 따라 기본 툴 설정
+  // 이전 'inflow' 도구가 제거됨 — 잔여 상태값이 있으면 기본 도구로 복귀
   useEffect(() => {
-    if (permissions.canUseInflow) {
-      setCurrentTool('inflow')
-    } else if (currentTool === 'inflow') {
-      setCurrentTool('crm')
-    }
-  }, [permissions.canUseInflow])
+    if (currentTool === 'inflow') setCurrentTool('order-sync')
+  }, [currentTool])
 
   // 프로젝트 기획/정리봇 진행 중일 때만 elapsed-time 표시를 250ms마다 갱신.
   useEffect(() => {
@@ -2410,6 +2408,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
     if (currentTab === 'payer-data' && payerSheetTabs.length === 0) {
       loadPayerSheetTabs(payerSheetYear)
     }
+    if (currentTab === 'tools' && currentTool === 'kakao' && kakaoTabs.length === 0) {
+      loadKakaoTabs(kakaoYear)
+    }
     if (currentTab === 'account-management' && loginId === 'jinwoo' && am_accounts.length === 0) {
       setAmLoading(true)
       fetch('/api/admin/accounts', { headers: getAuthHeaders() })
@@ -2440,7 +2441,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
         .catch(() => {})
         .finally(() => setPcLoading(false))
     }
-  }, [currentTab])
+  }, [currentTab, currentTool])
 
   // 로그아웃 핸들러 (수집 중 확인)
   const handleLogoutWithConfirm = () => {
@@ -4595,7 +4596,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               {/* 툴 서브탭 */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
                 {[
-                  { id: 'inflow', icon: '🔀', label: '유입경로 매칭', requiresPermission: 'canUseInflow' },
                   { id: 'order-sync', icon: '📦', label: '주문 동기화' },
                   { id: 'crm', icon: '📋', label: 'CRM 정리' },
                   { id: 'kakao', icon: '💬', label: '카톡 매칭' },
@@ -4643,209 +4643,6 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   </button>
                 ))}
               </div>
-
-              {/* 유입경로 매칭 툴 */}
-              {currentTool === 'inflow' && (
-                <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <div style={{ marginBottom: '20px' }}>
-                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>🔀 신청자-결제자 유입경로 매칭 <HelpTooltip text={"무료특강 신청자 명단과 결제자 명단을\n연락처 기준으로 매칭합니다.\n좌측에 신청자, 우측에 결제자 파일을\n업로드 후 매칭 시작을 누르세요.\n결과를 Excel로 다운로드할 수 있습니다."} /></h3>
-                    <p style={{ color: '#94a3b8', fontSize: '13px' }}>무료특강 신청자와 결제자 데이터를 비교하여 유입경로를 매칭합니다.</p>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-                    {/* 신청자 파일 (여러개 가능) */}
-                    <div style={{
-                      padding: '20px',
-                      background: 'rgba(99,102,241,0.1)',
-                      borderRadius: '12px',
-                      border: '2px dashed rgba(99,102,241,0.3)',
-                      textAlign: 'center'
-                    }}>
-                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>📥</div>
-                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>신청자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>연락처, 유입경로 포함 (Excel/CSV, 여러개 가능)</p>
-                      <input
-                        type="file"
-                        accept=".xlsx,.xls,.csv"
-                        multiple
-                        onChange={(e) => setToolFiles1(Array.from(e.target.files))}
-                        style={{ display: 'none' }}
-                        id="tool-file1"
-                      />
-                      <label
-                        htmlFor="tool-file1"
-                        style={{
-                          display: 'inline-block',
-                          padding: '8px 16px',
-                          background: 'rgba(99,102,241,0.3)',
-                          borderRadius: '8px',
-                          color: '#a5b4fc',
-                          fontSize: '13px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        파일 선택
-                      </label>
-                      {toolFiles1.length > 0 && (
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
-                          {toolFiles1.map((f, i) => <div key={i}>✓ {f.name}</div>)}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 결제자 파일 (여러개 가능) */}
-                    <div style={{
-                      padding: '20px',
-                      background: 'rgba(168,85,247,0.1)',
-                      borderRadius: '12px',
-                      border: '2px dashed rgba(168,85,247,0.3)',
-                      textAlign: 'center'
-                    }}>
-                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>💳</div>
-                      <p style={{ fontSize: '14px', fontWeight: '500', marginBottom: '4px' }}>결제자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '12px' }}>결제자 연락처 포함 (Excel/CSV, 여러개 가능)</p>
-                      <input
-                        type="file"
-                        accept=".xlsx,.xls,.csv"
-                        multiple
-                        onChange={(e) => setToolFiles2(Array.from(e.target.files))}
-                        style={{ display: 'none' }}
-                        id="tool-file2"
-                      />
-                      <label
-                        htmlFor="tool-file2"
-                        style={{
-                          display: 'inline-block',
-                          padding: '8px 16px',
-                          background: 'rgba(168,85,247,0.3)',
-                          borderRadius: '8px',
-                          color: '#c4b5fd',
-                          fontSize: '13px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        파일 선택
-                      </label>
-                      {toolFiles2.length > 0 && (
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '80px', overflow: 'auto' }}>
-                          {toolFiles2.map((f, i) => <div key={i}>✓ {f.name}</div>)}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={async () => {
-                      if (toolFiles1.length === 0 || toolFiles2.length === 0) {
-                        alert('두 쪽 모두 파일을 선택해주세요.')
-                        return
-                      }
-                      setToolProcessing(true)
-                      setToolLog(['처리 시작...'])
-
-                      const formData = new FormData()
-                      toolFiles1.forEach(f => formData.append('applicants', f))
-                      toolFiles2.forEach(f => formData.append('payers', f))
-
-                      try {
-                        const res = await fetch('/api/tools/inflow-match', {
-                          method: 'POST',
-                          body: formData
-                        })
-                        const data = await res.json()
-                        if (data.success) {
-                          setToolResult(data)
-                          setToolLog(data.logs || ['처리 완료'])
-                        } else {
-                          setToolLog(['오류: ' + data.error])
-                        }
-                      } catch (err) {
-                        setToolLog(['오류: ' + err.message])
-                      }
-                      setToolProcessing(false)
-                    }}
-                    disabled={toolProcessing || toolFiles1.length === 0 || toolFiles2.length === 0}
-                    style={{
-                      width: '100%',
-                      padding: '14px',
-                      background: toolProcessing ? '#4c4c6d' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                      border: 'none',
-                      borderRadius: '10px',
-                      color: '#fff',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      cursor: toolProcessing ? 'wait' : 'pointer'
-                    }}
-                  >
-                    {toolProcessing ? '처리 중...' : '🔄 매칭 시작'}
-                  </button>
-
-                  {/* 로그 출력 */}
-                  {toolLog.length > 0 && (
-                    <div style={{
-                      marginTop: '16px',
-                      padding: '12px',
-                      background: 'rgba(0,0,0,0.3)',
-                      borderRadius: '8px',
-                      maxHeight: '150px',
-                      overflow: 'auto',
-                      fontFamily: 'monospace',
-                      fontSize: '12px'
-                    }}>
-                      {toolLog.map((log, i) => (
-                        <div key={i} style={{ color: log.startsWith('오류') ? '#f87171' : '#94a3b8', marginBottom: '4px' }}>{log}</div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* 결과 */}
-                  {toolResult && toolResult.success && (
-                    <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(16,185,129,0.1)', borderRadius: '10px', border: '1px solid rgba(16,185,129,0.3)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                        <span style={{ color: '#10b981', fontWeight: '600' }}>✓ 매칭 완료</span>
-                        <span style={{ color: '#94a3b8', fontSize: '13px' }}>
-                          매칭됨: {toolResult.matched}명 / 미매칭: {toolResult.unmatched}명
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <button
-                          onClick={() => {
-                            const link = document.createElement('a')
-                            link.href = toolResult.downloadUrl
-                            link.download = 'matched_result.xlsx'
-                            link.click()
-                          }}
-                          style={{
-                            padding: '10px 20px',
-                            background: 'rgba(16,185,129,0.2)',
-                            border: '1px solid rgba(16,185,129,0.4)',
-                            borderRadius: '8px',
-                            color: '#10b981',
-                            fontSize: '13px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          📥 결과 다운로드
-                        </button>
-                        <button
-                          onClick={resetToolState}
-                          style={{
-                            padding: '10px 20px',
-                            background: 'rgba(99,102,241,0.2)',
-                            border: '1px solid rgba(99,102,241,0.4)',
-                            borderRadius: '8px',
-                            color: '#a5b4fc',
-                            fontSize: '13px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          🔄 초기화
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* CRM 정리 툴 */}
               {currentTool === 'crm' && (
@@ -5228,7 +5025,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             cursor: kakaoTabsLoading ? 'wait' : 'pointer'
                           }}
                         >
-                          {kakaoTabsLoading ? '불러오는 중...' : (kakaoTabs.length > 0 ? '🔄 새로고침' : '📂 탭 불러오기')}
+                          {kakaoTabsLoading ? '불러오는 중...' : '🔄 새로고침'}
                         </button>
                       </div>
 
@@ -10751,26 +10548,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· 💾 저장 버튼을 눌러야 저장됩니다</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          {pp_inputsSavedAt && !pp_inputsDirty && (
+                          {pp_inputsSavedAt && (
                             <span style={{ fontSize: '11px', color: '#86efac' }}>
                               ✅ {formatKST(pp_inputsSavedAt)} 저장됨
                             </span>
                           )}
-                          {pp_inputsDirty && (
-                            <span style={{
-                              fontSize: '11px',
-                              color: '#fff',
-                              background: 'rgba(239,68,68,0.85)',
-                              padding: '3px 9px',
-                              borderRadius: '6px',
-                              fontWeight: 700,
-                              animation: 'laPulse 1.5s ease-in-out infinite',
-                            }}>⚠️ 저장 안 됨 — 💾 저장 클릭</span>
-                          )}
                           <button onClick={saveInputs} disabled={!ready || pp_inputsSaving}
                             style={{
                               padding: '7px 14px',
-                              background: pp_inputsDirty ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(99,102,241,0.20)',
+                              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
                               border: 'none',
                               borderRadius: '8px',
                               color: '#fff',
@@ -10778,7 +10564,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               fontWeight: 700,
                               cursor: (!ready || pp_inputsSaving) ? 'not-allowed' : 'pointer',
                               opacity: (!ready || pp_inputsSaving) ? 0.5 : 1,
-                              boxShadow: pp_inputsDirty ? '0 4px 10px rgba(99,102,241,0.30)' : 'none',
+                              boxShadow: '0 4px 10px rgba(99,102,241,0.30)',
                             }}>
                             {pp_inputsSaving ? '저장 중…' : '💾 저장'}
                           </button>
@@ -12728,41 +12514,175 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                       )}
                     </div>
 
-                    {/* 신청자 파일 업로드 */}
+                    {/* 신청자 데이터 — nlab DB의 FreeCourse 검색 → ApplyCourse 자동 매칭 */}
                     <div style={{
-                      padding: '20px',
+                      padding: '16px',
                       background: 'rgba(99,102,241,0.08)',
                       borderRadius: '10px',
-                      border: '2px dashed rgba(99,102,241,0.25)',
-                      textAlign: 'center',
+                      border: '1px solid rgba(99,102,241,0.25)',
                       marginBottom: '16px'
                     }}>
-                      <div style={{ fontSize: '28px', marginBottom: '6px' }}>📥</div>
-                      <p style={{ fontSize: '13px', fontWeight: '500', marginBottom: '4px' }}>신청자 데이터</p>
-                      <p style={{ color: '#94a3b8', fontSize: '11px', marginBottom: '10px' }}>D열=전화번호, E열=신청일, 파일명=유입경로 (Excel/CSV, 여러개 가능)</p>
-                      <input
-                        type="file"
-                        accept=".xlsx,.xls,.csv"
-                        multiple
-                        onChange={(e) => { setPayerMatchFiles(Array.from(e.target.files)); setPayerMatchResult(null) }}
-                        style={{ display: 'none' }}
-                        id="payer-match-file"
-                      />
-                      <label
-                        htmlFor="payer-match-file"
-                        style={{
-                          display: 'inline-block',
-                          padding: '7px 16px',
-                          background: 'rgba(99,102,241,0.3)',
-                          borderRadius: '6px',
-                          color: '#a5b4fc',
-                          fontSize: '12px',
-                          cursor: 'pointer'
-                        }}
-                      >파일 선택</label>
-                      {payerMatchFiles.length > 0 && (
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#10b981', maxHeight: '60px', overflow: 'auto' }}>
-                          {payerMatchFiles.map((f, i) => <div key={i}>✓ {f.name}</div>)}
+                      <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        📥 신청자 데이터 <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>· nlab DB의 무료강의 신청자 자동 조회</span>
+                      </div>
+                      <p style={{ color: '#94a3b8', fontSize: '11px', marginBottom: '10px' }}>강의명 검색 → 강의 선택 → 신청자가 자동으로 유입경로로 매칭됩니다</p>
+
+                      {/* 검색 입력 */}
+                      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                        <input
+                          type="text"
+                          value={payerMatchKeyword}
+                          onChange={(e) => setPayerMatchKeyword(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key !== 'Enter') return
+                            if (!payerMatchKeyword.trim()) return
+                            setPayerMatchSearching(true)
+                            try {
+                              const token = getAuthToken() || ''
+                              const res = await fetch(`/api/tools/shoong-bulk/courses?keyword=${encodeURIComponent(payerMatchKeyword.trim())}`, {
+                                headers: { 'Authorization': `Bearer ${token}` }
+                              })
+                              const data = await res.json()
+                              if (!res.ok) {
+                                alert(data.error || '검색 실패')
+                                setPayerMatchCourses([])
+                              } else {
+                                setPayerMatchCourses(data.courses || [])
+                                setPayerMatchSelectedCourseIds([])
+                              }
+                            } catch (err) {
+                              alert(err.message)
+                            } finally {
+                              setPayerMatchSearching(false)
+                            }
+                          }}
+                          placeholder='강의명 검색 (예: 루시, 김탄생) — Enter'
+                          style={{
+                            flex: 1, padding: '8px 10px',
+                            background: 'rgba(0,0,0,0.35)',
+                            border: '1px solid rgba(99,102,241,0.30)',
+                            borderRadius: '6px', color: '#fff', fontSize: '12px'
+                          }}
+                        />
+                        <button
+                          type="button"
+                          disabled={payerMatchSearching || !payerMatchKeyword.trim()}
+                          onClick={async () => {
+                            setPayerMatchSearching(true)
+                            try {
+                              const token = getAuthToken() || ''
+                              const res = await fetch(`/api/tools/shoong-bulk/courses?keyword=${encodeURIComponent(payerMatchKeyword.trim())}`, {
+                                headers: { 'Authorization': `Bearer ${token}` }
+                              })
+                              const data = await res.json()
+                              if (!res.ok) {
+                                alert(data.error || '검색 실패')
+                                setPayerMatchCourses([])
+                              } else {
+                                setPayerMatchCourses(data.courses || [])
+                                setPayerMatchSelectedCourseIds([])
+                              }
+                            } catch (err) {
+                              alert(err.message)
+                            } finally {
+                              setPayerMatchSearching(false)
+                            }
+                          }}
+                          style={{
+                            padding: '8px 14px',
+                            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                            border: 'none', borderRadius: '6px',
+                            color: '#fff', fontSize: '12px', fontWeight: 600,
+                            cursor: (payerMatchSearching || !payerMatchKeyword.trim()) ? 'not-allowed' : 'pointer',
+                            opacity: (payerMatchSearching || !payerMatchKeyword.trim()) ? 0.6 : 1
+                          }}
+                        >
+                          {payerMatchSearching ? '검색 중...' : '🔍 검색'}
+                        </button>
+                      </div>
+
+                      {/* 검색 결과 체크박스 리스트 */}
+                      {payerMatchCourses.length > 0 && (() => {
+                        const selectedCount = payerMatchSelectedCourseIds.length
+                        const totalApplicants = payerMatchCourses
+                          .filter(c => payerMatchSelectedCourseIds.includes(c.id))
+                          .reduce((sum, c) => sum + (c.applicantCount || 0), 0)
+                        const allSelected = payerMatchSelectedCourseIds.length === payerMatchCourses.length
+                        return (
+                          <div style={{ padding: '8px', background: 'rgba(0,0,0,0.25)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                            <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                              <button
+                                type="button"
+                                onClick={() => setPayerMatchSelectedCourseIds(payerMatchCourses.map(c => c.id))}
+                                disabled={allSelected}
+                                style={{
+                                  flex: 1, padding: '6px 10px',
+                                  background: allSelected ? 'rgba(139,92,246,0.10)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                  border: '1px solid rgba(139,92,246,0.4)', borderRadius: '6px',
+                                  color: allSelected ? '#64748b' : '#fff',
+                                  fontSize: '11px', fontWeight: 600,
+                                  cursor: allSelected ? 'not-allowed' : 'pointer',
+                                  opacity: allSelected ? 0.5 : 1
+                                }}
+                              >✅ 전체 선택 ({payerMatchCourses.length})</button>
+                              <button
+                                type="button"
+                                onClick={() => setPayerMatchSelectedCourseIds([])}
+                                disabled={selectedCount === 0}
+                                style={{
+                                  flex: 1, padding: '6px 10px',
+                                  background: selectedCount === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(239,68,68,0.15)',
+                                  border: `1px solid ${selectedCount === 0 ? 'var(--border)' : 'rgba(239,68,68,0.4)'}`,
+                                  borderRadius: '6px',
+                                  color: selectedCount === 0 ? '#64748b' : '#fca5a5',
+                                  fontSize: '11px', fontWeight: 600,
+                                  cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+                                  opacity: selectedCount === 0 ? 0.5 : 1
+                                }}
+                              >❌ 전체 해제</button>
+                            </div>
+                            <div style={{ marginBottom: '8px', fontSize: '11px', color: '#cbd5e1' }}>
+                              결과 <b style={{ color: '#fff' }}>{payerMatchCourses.length}개</b> · 선택 <b style={{ color: '#a78bfa' }}>{selectedCount}개</b> · 신청자 합 <b style={{ color: '#34d399' }}>{totalApplicants.toLocaleString()}명</b>
+                            </div>
+                            <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              {payerMatchCourses.map(c => {
+                                const checked = payerMatchSelectedCourseIds.includes(c.id)
+                                return (
+                                  <label
+                                    key={c.id}
+                                    style={{
+                                      display: 'flex', alignItems: 'center', gap: '8px',
+                                      padding: '6px 8px',
+                                      background: checked ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.03)',
+                                      border: `1px solid ${checked ? 'rgba(139,92,246,0.4)' : 'var(--border)'}`,
+                                      borderRadius: '6px', cursor: 'pointer', fontSize: '11.5px'
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => {
+                                        setPayerMatchSelectedCourseIds(prev =>
+                                          prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id]
+                                        )
+                                      }}
+                                      style={{ width: '14px', height: '14px', accentColor: '#8b5cf6', cursor: 'pointer' }}
+                                    />
+                                    <span style={{ flex: 1, color: '#e2e8f0', wordBreak: 'break-all' }}>{c.title}</span>
+                                    <span style={{ color: '#34d399', fontWeight: 600, fontSize: '10.5px', whiteSpace: 'nowrap' }}>
+                                      {(c.applicantCount || 0).toLocaleString()}명
+                                    </span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })()}
+
+                      {payerMatchCourses.length === 0 && payerMatchKeyword && !payerMatchSearching && (
+                        <div style={{ padding: '14px', textAlign: 'center', color: '#64748b', fontSize: '11.5px', background: 'rgba(0,0,0,0.20)', borderRadius: '6px' }}>
+                          검색 결과가 없습니다. (Enter 또는 🔍 검색)
                         </div>
                       )}
                     </div>
@@ -12774,25 +12694,27 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                           alert('결제자 시트를 선택해주세요.')
                           return
                         }
-                        if (payerMatchFiles.length === 0) {
-                          alert('신청자 파일을 선택해주세요.')
+                        if (payerMatchSelectedCourseIds.length === 0) {
+                          alert('신청자 데이터를 가져올 강의를 1개 이상 선택해주세요.')
                           return
                         }
                         setPayerMatchProcessing(true)
                         setPayerMatchLog(['처리 시작...'])
                         setPayerMatchResult(null)
 
-                        const formData = new FormData()
-                        payerMatchFiles.forEach(f => formData.append('applicants', f))
-                        formData.append('year', payerSheetYear)
-                        formData.append('tabName', payerSheetSelectedTab.raw)
-
                         try {
                           const token = getAuthToken()
                           const res = await fetch('/api/tools/payer-match', {
                             method: 'POST',
-                            headers: { 'Authorization': token ? `Bearer ${token}` : '' },
-                            body: formData
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': token ? `Bearer ${token}` : ''
+                            },
+                            body: JSON.stringify({
+                              freeCourseIds: payerMatchSelectedCourseIds,
+                              year: payerSheetYear,
+                              tabName: payerSheetSelectedTab.raw
+                            })
                           })
                           const data = await res.json()
                           if (data.success) {
@@ -12806,17 +12728,17 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         }
                         setPayerMatchProcessing(false)
                       }}
-                      disabled={payerMatchProcessing || !payerSheetSelectedTab || payerMatchFiles.length === 0}
+                      disabled={payerMatchProcessing || !payerSheetSelectedTab || payerMatchSelectedCourseIds.length === 0}
                       style={{
                         width: '100%',
                         padding: '12px',
-                        background: payerMatchProcessing ? '#4c4c6d' : (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        background: payerMatchProcessing ? '#4c4c6d' : (!payerSheetSelectedTab || payerMatchSelectedCourseIds.length === 0) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
                         border: 'none',
                         borderRadius: '10px',
-                        color: (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? '#64748b' : '#fff',
+                        color: (!payerSheetSelectedTab || payerMatchSelectedCourseIds.length === 0) ? '#64748b' : '#fff',
                         fontSize: '14px',
                         fontWeight: '600',
-                        cursor: payerMatchProcessing ? 'wait' : (!payerSheetSelectedTab || payerMatchFiles.length === 0) ? 'not-allowed' : 'pointer'
+                        cursor: payerMatchProcessing ? 'wait' : (!payerSheetSelectedTab || payerMatchSelectedCourseIds.length === 0) ? 'not-allowed' : 'pointer'
                       }}
                     >
                       {payerMatchProcessing ? '매칭 처리 중...' : '🔄 매칭 시작'}
@@ -12868,7 +12790,13 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             }}
                           >📥 결과 다운로드</button>
                           <button
-                            onClick={() => { setPayerMatchResult(null); setPayerMatchLog([]); setPayerMatchFiles([]) }}
+                            onClick={() => {
+                              setPayerMatchResult(null)
+                              setPayerMatchLog([])
+                              setPayerMatchKeyword('')
+                              setPayerMatchCourses([])
+                              setPayerMatchSelectedCourseIds([])
+                            }}
                             style={{
                               padding: '8px 16px',
                               background: 'rgba(99,102,241,0.2)',
