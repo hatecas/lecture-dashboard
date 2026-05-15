@@ -208,33 +208,31 @@ function makeSafeFileName(base, fallback = 'plan') {
 // 폰트 슬롯 3종(latin/ea/cs)을 Pretendard로 강제 → 받는 사람 PC에 Pretendard 설치만
 // 돼있으면 디자인 그대로 보임.
 const DEFAULT_DESIGN_TONE_MD = `# N잡연구소 무료강의 디자인 시스템
-Editorial minimalism (Nike-style). Bold typography, high-contrast black-and-white palette,
-consistent spatial anchoring across all slides. Fixed positional grid for rhythmic consistency.
+Editorial warm-tone with strong typographic hierarchy. Cream canvas, terracotta accent,
+multi-level type scale (165pt hero numbers → 14pt meta labels) for rhythmic density.
+SECTION labels at top-left, page numbers at top-right, refined footer.
 
 ## Colors
-- Background: #FFFFFF (canvas — 슬라이드 배경)
-- Text: #111111       (ink — 모든 본문/제목)
-- Primary: #111111    (ink — 강조도 흑색 통일)
-- Secondary: #39393B  (charcoal — 약한 강조)
-- Accent: #707072     (mute — 부제·캡션)
-- Soft: #F5F5F5       (soft-cloud — 콜아웃 박스 배경)
-
-## Semantic
-- Sale: #D30005 (경고 — sparingly)
-- Success: #007D48 (긍정 지표 — sparingly)
-- Pink: #ED1AA0 (강조 슬라이드만)
+- Background: #F5F0E8  (cream — 슬라이드 배경)
+- Text: #1F1A14        (deep charcoal — 본문/제목)
+- Primary: #B85A4A     (terracotta — 강조 단어·라인·CTA)
+- Secondary: #6B6056   (warm gray — 부드러운 본문)
+- Accent: #948876      (taupe — 메타·캡션)
+- Soft: #E8C9C0        (dusty rose — 강조 박스 배경)
+- Highlight: #B85A4A   (terracotta — emphasis 단어 인라인)
 
 ## Fonts
-- Heading: Pretendard Bold (700)
-- Body: Pretendard Regular (400)
-- Display: Pretendard Black (900) — 챕터 표지용
+- Body: Pretendard (한글·본문)
+- Display: Georgia (영문·숫자·통계 강조)
 
 ## Style
-- High content density — 슬라이드 본문이 위→아래까지 꽉 차게.
-- Left-aligned body, center-aligned hero/quote only.
-- Sharp corners, no shadows, no gradients.
-- Hierarchy by weight, not size jumps.
-- Chapter markers at top-left corner (80px from edge).`
+- Hero numbers in 100~165pt for impact (proof/stat slides)
+- 6-level type hierarchy in one slide (165 / 30 / 22.5 / 19.5 / 18 / 14pt)
+- Inline emphasis: 강조 단어를 큰 폰트+테라코타 색으로 본문에 섞어 표시
+- Left-aligned body, hero·stat·quote는 중앙 정렬
+- SECTION X — KIND 라벨 좌상단 (서브헤더), NN / TOTAL 페이지 번호 우상단
+- Hairline 1px 디바이더로 위·아래 영역 분리
+- Sharp corners, no shadows, soft warm minimalism`
 
 // 톤 MD에서 색상/폰트 추출. 정규식 기반 + 키워드 매칭 + fallback.
 // 사용자가 어떤 형식의 MD를 줘도 최대한 추출. 못 찾으면 기본값.
@@ -244,14 +242,16 @@ function parseToneMd(md) {
   // 폰트 슬롯 3종(latin/ea/cs)을 모두 Pretendard로 강제하므로 받는 사람 PC에
   // Pretendard 설치만 돼있으면 PowerPoint가 Pretendard로 정확히 표시.
   const DEFAULTS = {
-    background: 'FFFFFF', // canvas
-    text: '111111',       // ink
-    primary: '111111',    // ink (강조도 흑백)
-    secondary: '39393B',  // charcoal
-    accent: '707072',     // mute (부제·캡션)
-    soft: 'F5F5F5',       // soft-cloud (콜아웃 배경)
+    background: 'F5F0E8', // cream canvas (warm minimalism)
+    text: '1F1A14',       // deep charcoal
+    primary: 'B85A4A',    // terracotta (강조)
+    secondary: '6B6056',  // warm gray
+    accent: '948876',     // taupe (메타·캡션)
+    soft: 'E8C9C0',       // dusty rose (콜아웃 박스)
+    highlight: 'B85A4A',  // terracotta (emphasis 단어 인라인)
     sale: 'D30005',       // 경고
-    fontMain: 'Pretendard',
+    fontMain: 'Pretendard',     // 한글·본문
+    fontDisplay: 'Georgia',     // 영문·숫자·통계 강조
   }
   if (!md || typeof md !== 'string') return { ...DEFAULTS, _detected: {} }
 
@@ -304,22 +304,26 @@ function parseToneMd(md) {
     if (named) { result[key] = named; detected[key] = 'named'; return }
   }
 
-  tryExtract('primary', ['primary', 'main', '메인', '주요'], ['primary', 'main', 'brand', 'cta'])
-  tryExtract('secondary', ['secondary', 'sub', '보조', 'charcoal'], ['secondary', 'sub'])
-  tryExtract('background', ['background', 'bg', '배경', 'canvas'], ['background', 'canvas', 'surface'])
-  tryExtract('text', ['text', 'foreground', 'fg', '글씨', '텍스트', 'ink'], ['text', 'ink', 'foreground'])
-  tryExtract('accent', ['accent', '강조', 'highlight', 'mute'], ['accent', 'highlight'])
-  tryExtract('soft', ['soft', 'soft-cloud', 'cloud'], ['soft', 'cloud'])
+  tryExtract('primary', ['primary', 'main', '메인', '주요', 'terracotta', 'accent'], ['primary', 'main', 'brand', 'cta', 'terracotta'])
+  tryExtract('secondary', ['secondary', 'sub', '보조', 'charcoal', 'warm gray'], ['secondary', 'sub'])
+  tryExtract('background', ['background', 'bg', '배경', 'canvas', 'cream'], ['background', 'canvas', 'surface', 'cream'])
+  tryExtract('text', ['text', 'foreground', 'fg', '글씨', '텍스트', 'ink', 'deep charcoal'], ['text', 'ink', 'foreground', 'charcoal'])
+  tryExtract('accent', ['accent', '강조', 'mute', 'taupe'], ['accent', 'taupe'])
+  tryExtract('soft', ['soft', 'soft-cloud', 'cloud', 'dusty rose'], ['soft', 'cloud', 'rose'])
+  tryExtract('highlight', ['highlight', '하이라이트', '강조색', 'emphasis'], ['highlight', 'emphasis'])
   tryExtract('sale', ['sale', 'warning', 'error', '경고'], ['warning', 'error', 'critical', 'sale'])
 
-  // 폰트 추출 — 한국어 글리프를 가진 폰트만 매칭.
-  //   영문 전용 폰트(Inter, Roboto, Poppins, Montserrat 등)는 한글 글리프가 없어
-  //   PowerPoint가 한국어 부분을 시스템 fallback(맑은 고딕/궁서체 등)으로 대체함.
-  //   시스템마다 fallback이 달라 다른 PC에서 깨져 보이는 원인이라 의도적으로 제외.
-  //   디자인 톤 마크다운에 "Inter"라 적혀있어도 무시하고 Pretendard 유지.
-  const knownFonts = ['Pretendard', 'Noto Sans KR', 'Noto Sans', 'Malgun Gothic', 'Spoqa Han Sans', 'Nanum Gothic']
-  for (const f of knownFonts) {
+  // 폰트 추출 — 한국어 글리프 보유 폰트(본문용 fontMain)와 영문/숫자 강조용 fontDisplay 분리.
+  //   영문 전용 폰트(Inter, Roboto, Poppins, Montserrat 등)는 한글 글리프 없어
+  //   PowerPoint가 한국어 부분을 시스템 fallback으로 대체 → fontMain에서 제외.
+  //   대신 영문·숫자만 표시하는 영역(통계, 페이지 번호 등)은 fontDisplay 활용.
+  const knownKoreanFonts = ['Pretendard', 'Noto Sans KR', 'Noto Sans', 'Malgun Gothic', 'Spoqa Han Sans', 'Nanum Gothic']
+  for (const f of knownKoreanFonts) {
     if (lower.includes(f.toLowerCase())) { result.fontMain = f; detected.fontMain = 'matched'; break }
+  }
+  const knownDisplayFonts = ['Georgia', 'Playfair Display', 'Cormorant', 'Inter', 'Roboto', 'Montserrat', 'Poppins', 'Helvetica']
+  for (const f of knownDisplayFonts) {
+    if (lower.includes(f.toLowerCase())) { result.fontDisplay = f; detected.fontDisplay = 'matched'; break }
   }
 
   result._detected = detected
@@ -332,7 +336,7 @@ function applyToneOverrides(parsed, overrides) {
   if (!parsed) return parsed
   if (!overrides || typeof overrides !== 'object') return parsed
   const out = { ...parsed }
-  for (const key of ['primary', 'secondary', 'background', 'text', 'accent', 'soft', 'sale']) {
+  for (const key of ['primary', 'secondary', 'background', 'text', 'accent', 'soft', 'highlight', 'sale']) {
     const v = overrides[key]
     if (typeof v === 'string' && /^[0-9A-Fa-f]{6}$/.test(v)) {
       out[key] = v.toUpperCase()
@@ -340,6 +344,9 @@ function applyToneOverrides(parsed, overrides) {
   }
   if (typeof overrides.fontMain === 'string' && overrides.fontMain.trim()) {
     out.fontMain = overrides.fontMain.trim()
+  }
+  if (typeof overrides.fontDisplay === 'string' && overrides.fontDisplay.trim()) {
+    out.fontDisplay = overrides.fontDisplay.trim()
   }
   return out
 }
@@ -422,6 +429,13 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
   const onBgMute = dark ? 'BBBBBB' : T.accent   // 보조 텍스트
   const onBgSubtle = dark ? '888888' : '9E9EA0' // 더 약함
 
+  // SECTION 라벨용 kind 영문명 매핑 (Nlab_test 디자인 참고)
+  const KIND_SECTION_NAME = {
+    hook: 'HOOK', intro: 'INTRO', proof: 'PROOF', journey: 'JOURNEY',
+    myth: 'MYTH', info: 'CHAPTER', empty: 'VISUAL', qna: 'Q&A',
+    testimonial: 'TESTIMONIAL', cta: 'CTA', outro: 'OUTRO', breath: 'BREATH',
+  }
+
   // 공통 헬퍼: 모든 슬라이드 시작 시 호출
   const drawBackground = (slide) => {
     // 풀스크린 배경 박스 (slide.background보다 안정적)
@@ -471,65 +485,152 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
   const drawTopHairline = (slide) => {
     slide.addShape(pptx.ShapeType.line, {
       x: MARGIN_X, y: 0.95, w: CONTENT_W, h: 0,
-      line: { color: 'E5E5E5', width: 0.5 },
+      line: { color: dark ? '333333' : 'E5E5E5', width: 0.5 },
     })
   }
   const drawLeftSidebar = (slide) => {
     slide.addShape(pptx.ShapeType.rect, {
       x: 0, y: 0, w: 0.04, h: SLIDE_H,
-      fill: { color: T.text }, line: { color: T.text, width: 0 },
+      fill: { color: T.primary || T.text }, line: { color: T.primary || T.text, width: 0 },
     })
   }
+
+  // === 새 보조 요소 (Nlab_test 디자인 참고) ===
+  // 좌상단 SECTION 라벨 — "SECTION X — KIND" 형태로 위계와 위치 표시
+  const drawSectionLabel = (slide, kind, sectionNum) => {
+    const label = `SECTION ${String(sectionNum).padStart(2, '0')}  ·  ${KIND_SECTION_NAME[kind] || 'CONTENT'}`
+    slide.addText(label, {
+      x: MARGIN_X, y: 0.40, w: 5.5, h: 0.30,
+      fontSize: 10, bold: true, color: T.primary || onBgMute,
+      fontFace: T.fontDisplay || T.fontMain,
+      charSpacing: 2,
+    })
+  }
+  // 우상단 페이지 번호 — "NN / TOTAL" 큰 인라인 형태 (Georgia 같은 display 폰트)
+  const drawPageNumber = (slide, slideNum, totalSlides) => {
+    if (!slideNum) return
+    slide.addText([
+      { text: String(slideNum).padStart(2, '0'), options: { fontSize: 14, bold: true, color: T.text, fontFace: T.fontDisplay || T.fontMain } },
+      { text: ` / ${totalSlides || '?'}`, options: { fontSize: 12, color: T.accent || onBgMute, fontFace: T.fontDisplay || T.fontMain } },
+    ], {
+      x: SLIDE_W - 1.8, y: 0.40, w: 1.6, h: 0.30,
+      align: 'right',
+    })
+  }
+  // 슬라이드 우하단 작은 brand 라벨 (Nlab_test 참고)
+  const drawBrandFooter = (slide) => {
+    slide.addText('N·LAB', {
+      x: MARGIN_X, y: 6.85, w: 2.0, h: 0.25,
+      fontSize: 9, color: onBgSubtle, fontFace: T.fontDisplay || T.fontMain,
+      bold: true, charSpacing: 3,
+    })
+  }
+
+  // emphasis 인라인 렌더링 — title/bullets 텍스트에서 emphasis 배열의 단어를
+  // 큰 폰트(1.4배) + primary 색상으로 강조해 텍스트 묶음으로 분할.
+  // 호출: renderWithEmphasis("초기 재료비 100만 원으로 시작", ["100만 원"], { fontSize: 40, ... })
+  // → pptxgenjs text 배열 [{text:"초기 재료비 ", options:{...}}, {text:"100만 원", options:{ fontSize:56, color: primary, bold:true }}, {text:"으로 시작", options:{...}}]
+  const renderWithEmphasis = (text, emphasisList, baseOptions) => {
+    const str = String(text || '')
+    const list = Array.isArray(emphasisList) ? emphasisList.filter(e => e && typeof e === 'string' && str.includes(e)) : []
+    if (list.length === 0) {
+      return [{ text: str, options: baseOptions }]
+    }
+    // 가장 긴 emphasis부터 매칭(부분 문자열 중복 방지)
+    const sorted = [...list].sort((a, b) => b.length - a.length)
+    // 토큰화: emphasis 단어를 기준으로 split
+    let parts = [{ text: str, em: false }]
+    for (const em of sorted) {
+      const newParts = []
+      for (const p of parts) {
+        if (p.em) { newParts.push(p); continue }
+        const idx = p.text.indexOf(em)
+        if (idx === -1) { newParts.push(p); continue }
+        const before = p.text.slice(0, idx)
+        const after = p.text.slice(idx + em.length)
+        if (before) newParts.push({ text: before, em: false })
+        newParts.push({ text: em, em: true })
+        if (after) newParts.push({ text: after, em: false })
+      }
+      parts = newParts
+    }
+    const baseFontSize = baseOptions.fontSize || 16
+    const emFontSize = Math.round(baseFontSize * 1.4)
+    return parts.map(p => p.em
+      ? { text: p.text, options: { ...baseOptions, fontSize: emFontSize, color: T.primary || T.text, bold: true } }
+      : { text: p.text, options: baseOptions }
+    )
+  }
+
+  const totalSlides = (plan.slides || []).length
+
+  // 슬라이드별로 SECTION 번호를 누적 (kind 변경 시 증가) — Nlab_test 패턴
+  let sectionCounter = 0
+  let lastKindForSection = null
 
   for (const s of (plan.slides || [])) {
     const slide = pptx.addSlide()
     const kind = s.kind || 'info'
     const slideNum = s.slideNumber
 
-    drawBackground(slide)
-    drawLeftSidebar(slide)
+    // SECTION 번호 부여 — breath/empty 같은 전환 슬라이드는 카운터 증가시키지 않음
+    if (kind !== 'breath' && kind !== 'empty' && kind !== lastKindForSection) {
+      sectionCounter++
+      lastKindForSection = kind
+    }
+
+    // 공통 헤더 — 배경 + 사이드바 + 상단 hairline + SECTION 라벨 + 페이지 번호
+    const drawCommonHeader = () => {
+      drawBackground(slide)
+      drawLeftSidebar(slide)
+      drawTopHairline(slide)
+      drawSectionLabel(slide, kind, sectionCounter)
+      drawPageNumber(slide, slideNum, totalSlides)
+    }
+    // 공통 푸터 — N·LAB 브랜드 + 슬라이드 번호 + 디바이더
+    const drawCommonFooter = (numColor) => {
+      drawBrandFooter(slide)
+      // 슬라이드 번호는 푸터 우하단 (기존 drawFooter와 호환)
+      slide.addShape(pptx.ShapeType.line, {
+        x: MARGIN_X, y: 6.55, w: CONTENT_W, h: 0,
+        line: { color: dark ? '333333' : 'E5E5E5', width: 0.5 },
+      })
+      slide.addText(String(slideNum || '?'), {
+        x: SLIDE_W - 0.8, y: 6.85, w: 0.6, h: 0.25,
+        fontSize: 9, color: numColor || onBgSubtle, fontFace: T.fontDisplay || T.fontMain, align: 'right',
+      })
+    }
 
     switch (kind) {
       case 'hook': {
-        // 후크 — 흰 캔버스 + 검정 hero 타이포 (이전 다크 모드 제거, 톤 일관성 위해).
-        // 좌측 큰 챕터 번호(작게) + 메인 타이틀 + 좌측 mute 라벨.
-        drawChapterMarker(slide, 'Hook')
-        drawTopHairline(slide)
-        // 챕터 번호 (작게)
-        slide.addText(String(slideNum).padStart(2, '0'), {
-          x: MARGIN_X, y: 1.2, w: 2.5, h: 0.6,
-          fontSize: 32, bold: true, color: T.accent, fontFace: T.fontMain,
-        })
-        // 메인 타이틀 — 큰 폰트지만 256pt 같이 과하지 않게
-        slide.addText(s.title || '', {
+        // 메인 타이틀 — emphasis 인라인 강조
+        const hookTitleOpts = { fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain }
+        slide.addText(renderWithEmphasis(s.title || '', s.emphasis, hookTitleOpts), {
           x: MARGIN_X, y: 2.0, w: CONTENT_W, h: 3.0,
-          fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain,
           valign: 'top',
         })
-        // 불릿 (한 줄 X — 별도 리스트로)
+        // 강조 라인 (타이틀 아래)
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 5.05, w: 0.8, h: 0.05,
+          fill: { color: T.primary || T.text }, line: { color: T.primary || T.text, width: 0 },
+        })
+        // 불릿 (있으면)
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
             x: MARGIN_X, y: 5.2, w: CONTENT_W, h: 1.3,
             fontSize: 16, color: T.secondary, fontFace: T.fontMain,
             paraSpaceAfter: 4,
           })
-        } else {
-          // 불릿 없으면 강조 라인으로 비주얼 채움
-          slide.addShape(pptx.ShapeType.rect, {
-            x: MARGIN_X, y: 5.5, w: 1.2, h: 0.05,
-            fill: { color: T.text }, line: { color: T.text, width: 0 },
-          })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'intro': {
-        drawChapterMarker(slide, 'Intro')
-        drawTopHairline(slide)
-        // 제목
-        slide.addText(s.title || '', {
+        drawCommonHeader()
+        // 제목 — emphasis 인라인
+        const introTitleOpts = { fontSize: 40, bold: true, color: onBg, fontFace: T.fontMain }
+        slide.addText(renderWithEmphasis(s.title || '', s.emphasis, introTitleOpts), {
           x: MARGIN_X, y: 1.4, w: 7.3, h: 1.0,
-          fontSize: 40, bold: true, color: onBg, fontFace: T.fontMain,
         })
         // 짧은 강조선
         slide.addShape(pptx.ShapeType.rect, {
@@ -557,56 +658,60 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
           x: 8.5, y: 4.2, w: 4.3, h: 0.4,
           fontSize: 12, color: onBgMute, fontFace: T.fontMain, align: 'center',
         })
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'proof': {
-        drawChapterMarker(slide, 'Proof')
-        drawTopHairline(slide)
-        // 큰 숫자/메시지 — 텍스트 길이에 따라 fontSize 동적 적용.
-        //   짧은 숫자(예: "116억"): 64pt 유지.
-        //   중간 길이(예: "월 80만원"): 56pt.
-        //   긴 한글(예: "숏폼+구매대행 월 매출 4,400만원"): 44pt.
-        //   fit:'shrink' 옵션이 박스 초과 시 자동 축소 처리 (normAutofit 1개 박힘).
-        //   ※ shrinkText:true + fit:'shrink' 동시 지정 금지 — pptxgenjs가
-        //     <a:normAutofit/>를 두 번 박아 OOXML 스키마 위반 → PowerPoint
-        //     "프레젠테이션 복구" 다이얼로그 발생. 둘 중 하나만 사용.
+        // 임팩트 슬라이드 — 큰 숫자(Hero number)와 캡션. Georgia(fontDisplay) 사용해 통계 임팩트 ↑
+        drawCommonHeader()
+        // 큰 숫자/메시지 — 텍스트 길이에 따라 fontSize 동적 적용 (165pt까지 가능)
+        //   짧은 숫자(예: "116억"): 130pt
+        //   중간 길이(예: "월 80만원"): 90pt
+        //   긴 한글(예: "숏폼+구매대행 월 매출 4,400만원"): 50pt
+        //   fit:'shrink'가 박스 초과 시 자동 축소.
         const titleLen = String(s.title || '').length
-        const titleFontSize = titleLen > 14 ? 44 : titleLen > 10 ? 52 : 64
-        slide.addText(s.title || '', {
-          x: MARGIN_X, y: 2.0, w: CONTENT_W, h: 2.3,
-          fontSize: titleFontSize, bold: true, color: onBg, fontFace: T.fontMain,
-          align: 'left', charSpacing: -1, valign: 'middle',
+        const titleFontSize = titleLen <= 6 ? 130 : titleLen <= 10 ? 90 : titleLen <= 16 ? 64 : 48
+        // proof는 emphasis가 있으면 그것만 hero로, 없으면 title 전체를 hero로
+        const heroBaseOpts = { fontSize: titleFontSize, bold: true, color: T.text, fontFace: T.fontDisplay || T.fontMain }
+        const proofRenderText = renderWithEmphasis(s.title || '', s.emphasis, heroBaseOpts)
+        // emphasis 강조 시 색을 primary로
+        for (const p of proofRenderText) {
+          if (p.options && p.options.fontSize > titleFontSize) {
+            p.options.color = T.primary || T.text
+            p.options.fontFace = T.fontDisplay || T.fontMain
+          }
+        }
+        slide.addText(proofRenderText, {
+          x: MARGIN_X, y: 1.7, w: CONTENT_W, h: 2.8,
+          align: 'left', charSpacing: -2, valign: 'middle',
           fit: 'shrink', wrap: true,
         })
         // 강조 라인 (제목 아래)
         slide.addShape(pptx.ShapeType.rect, {
-          x: MARGIN_X, y: 4.3, w: 1.5, h: 0.06,
-          fill: { color: T.text }, line: { color: T.text, width: 0 },
+          x: MARGIN_X, y: 4.7, w: 1.5, h: 0.06,
+          fill: { color: T.primary || T.text }, line: { color: T.primary || T.text, width: 0 },
         })
         // 캡션
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
-            x: MARGIN_X, y: 4.6, w: CONTENT_W, h: 1.7,
-            fontSize: 16, color: onBgMute, fontFace: T.fontMain, paraSpaceAfter: 4,
+            x: MARGIN_X, y: 5.0, w: CONTENT_W, h: 1.3,
+            fontSize: 18, color: T.secondary || onBgMute, fontFace: T.fontMain, paraSpaceAfter: 4,
           })
         } else {
-          // 캡션 없으면 sub-text 자리 비워두지 않고 디자인 채움
           slide.addText('— 강사 누적 성과', {
-            x: MARGIN_X, y: 4.6, w: CONTENT_W, h: 0.5,
-            fontSize: 16, color: onBgMute, fontFace: T.fontMain, italic: true,
+            x: MARGIN_X, y: 5.0, w: CONTENT_W, h: 0.5,
+            fontSize: 16, color: T.accent || onBgMute, fontFace: T.fontMain, italic: true,
           })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'journey': {
-        drawChapterMarker(slide, 'Journey')
-        drawTopHairline(slide)
+        drawCommonHeader()
         // 좌측 마커 — 박스 폭 늘리고 폰트 줄임 (긴 한글 제목도 안 넘침)
-        slide.addText(s.title || '', {
+        const journeyTitleOpts = { fontSize: 26, bold: true, color: onBg, fontFace: T.fontMain }
+        slide.addText(renderWithEmphasis(s.title || '', s.emphasis, journeyTitleOpts), {
           x: MARGIN_X, y: 1.4, w: 4.5, h: 5.0,
-          fontSize: 26, bold: true, color: onBg, fontFace: T.fontMain,
           valign: 'top',
         })
         // 디바이더 라인
@@ -622,20 +727,19 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
             paraSpaceAfter: 6, lineSpacing: 24,
           })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'myth': {
-        drawChapterMarker(slide, 'Myth')
-        drawTopHairline(slide)
-        slide.addText(s.title || '', {
+        drawCommonHeader()
+        const mythTitleOpts = { fontSize: 40, bold: true, color: onBg, fontFace: T.fontMain }
+        slide.addText(renderWithEmphasis(s.title || '', s.emphasis, mythTitleOpts), {
           x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.5,
-          fontSize: 40, bold: true, color: onBg, fontFace: T.fontMain,
         })
         // 강조선
         slide.addShape(pptx.ShapeType.rect, {
           x: MARGIN_X, y: 2.9, w: 0.6, h: 0.04,
-          fill: { color: T.text }, line: { color: T.text, width: 0 },
+          fill: { color: T.primary || T.text }, line: { color: T.primary || T.text, width: 0 },
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
@@ -644,36 +748,43 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
             paraSpaceAfter: 8, lineSpacing: 28,
           })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'info': {
-        // 본론 — 표준 콘텐츠 슬라이드
-        drawChapterMarker(slide, 'Content')
-        drawTopHairline(slide)
-        slide.addText(s.title || '', {
+        // 본론 — 표준 콘텐츠 슬라이드, emphasis 인라인 강조 활용
+        drawCommonHeader()
+        const infoTitleOpts = { fontSize: 36, bold: true, color: onBg, fontFace: T.fontMain }
+        slide.addText(renderWithEmphasis(s.title || '', s.emphasis, infoTitleOpts), {
           x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.0,
-          fontSize: 36, bold: true, color: onBg, fontFace: T.fontMain,
         })
         // 제목 아래 짧은 강조선
         slide.addShape(pptx.ShapeType.rect, {
           x: MARGIN_X, y: 2.4, w: 0.6, h: 0.04,
-          fill: { color: T.text }, line: { color: T.text, width: 0 },
+          fill: { color: T.primary || T.text }, line: { color: T.primary || T.text, width: 0 },
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
-          slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
+          // bullets에도 emphasis 적용 — 각 bullet을 individual paragraph로 emphasis 처리
+          const bulletParas = []
+          for (const b of s.bullets) {
+            const parts = renderWithEmphasis(String(b), s.emphasis, { fontSize: 16, color: onBg, fontFace: T.fontMain })
+            // 첫 part에 bullet 마커, 마지막 part에 줄바꿈 표시
+            if (parts.length) {
+              parts[0].options = { ...parts[0].options, bullet: { code: '25CF' } }
+            }
+            bulletParas.push(...parts, { text: '\n', options: { fontSize: 16 } })
+          }
+          slide.addText(bulletParas, {
             x: MARGIN_X, y: 2.7, w: CONTENT_W, h: 3.8,
-            fontSize: 16, color: onBg, fontFace: T.fontMain,
             paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'empty': {
         // 빈/이미지 슬라이드 — soft-cloud 큰 placeholder + 캡션
-        drawChapterMarker(slide, 'Visual')
-        drawTopHairline(slide)
+        drawCommonHeader()
         slide.addShape(pptx.ShapeType.rect, {
           x: MARGIN_X, y: 1.3, w: CONTENT_W, h: 4.5,
           fill: { color: T.soft }, line: { color: T.soft, width: 0 },
@@ -692,16 +803,15 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
             fontSize: 16, color: onBgMute, fontFace: T.fontMain, italic: true,
           })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'qna': {
-        drawChapterMarker(slide, 'Q&A')
-        drawTopHairline(slide)
-        // 큰 Q.
+        drawCommonHeader()
+        // 큰 Q. — Georgia(fontDisplay) 사용
         slide.addText('Q.', {
           x: MARGIN_X, y: 1.3, w: 1.0, h: 1.0,
-          fontSize: 56, bold: true, color: onBg, fontFace: T.fontMain,
+          fontSize: 56, bold: true, color: T.primary || onBg, fontFace: T.fontDisplay || T.fontMain,
         })
         // 질문 텍스트
         slide.addText(s.title || '', {
@@ -711,7 +821,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         // 디바이더
         slide.addShape(pptx.ShapeType.line, {
           x: MARGIN_X, y: 2.8, w: CONTENT_W, h: 0,
-          line: { color: 'E5E5E5', width: 0.5 },
+          line: { color: dark ? '333333' : 'E5E5E5', width: 0.5 },
         })
         // 답변
         if (Array.isArray(s.bullets) && s.bullets.length) {
@@ -721,12 +831,11 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
             paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'testimonial': {
-        drawChapterMarker(slide, 'Testimonial')
-        drawTopHairline(slide)
+        drawCommonHeader()
         // soft-cloud 콘텐츠 박스 (인용 느낌)
         slide.addShape(pptx.ShapeType.rect, {
           x: MARGIN_X, y: 1.3, w: CONTENT_W, h: 5.1,
@@ -750,42 +859,66 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
             paraSpaceAfter: 8, lineSpacing: 24,
           })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'cta': {
-        drawChapterMarker(slide, 'CTA')
-        drawTopHairline(slide)
-        // 강조 박스 — 검정 풀 너비 (모집은 가장 강한 강조)
-        slide.addShape(pptx.ShapeType.rect, {
-          x: MARGIN_X, y: 1.3, w: CONTENT_W, h: 5.1,
-          fill: { color: T.text }, line: { color: T.text, width: 0 },
+        // 모집 슬라이드 — primary 색(테라코타) 풀 너비 박스로 가장 강한 강조
+        drawBackground(slide)
+        drawLeftSidebar(slide)
+        // SECTION/페이지번호는 어두운 박스 위라 흰색으로
+        slide.addText(`SECTION ${String(sectionCounter).padStart(2, '0')}  ·  CTA`, {
+          x: MARGIN_X, y: 0.40, w: 5.5, h: 0.30,
+          fontSize: 10, bold: true, color: T.background,
+          fontFace: T.fontDisplay || T.fontMain, charSpacing: 2,
         })
-        slide.addText(s.title || '', {
-          x: MARGIN_X + 0.4, y: 1.7, w: CONTENT_W - 0.8, h: 1.2,
-          fontSize: 36, bold: true, color: T.background, fontFace: T.fontMain,
+        slide.addText([
+          { text: String(slideNum).padStart(2, '0'), options: { fontSize: 14, bold: true, color: T.background, fontFace: T.fontDisplay || T.fontMain } },
+          { text: ` / ${totalSlides || '?'}`, options: { fontSize: 12, color: T.background, fontFace: T.fontDisplay || T.fontMain } },
+        ], { x: SLIDE_W - 1.8, y: 0.40, w: 1.6, h: 0.30, align: 'right' })
+        // 강조 박스 — primary 색
+        slide.addShape(pptx.ShapeType.rect, {
+          x: MARGIN_X, y: 1.0, w: CONTENT_W, h: 5.4,
+          fill: { color: T.primary || T.text }, line: { color: T.primary || T.text, width: 0 },
+        })
+        const ctaTitleOpts = { fontSize: 36, bold: true, color: T.background, fontFace: T.fontMain }
+        const ctaRender = renderWithEmphasis(s.title || '', s.emphasis, ctaTitleOpts)
+        // emphasis는 background 같은 흰색을 살짝 다른 톤으로 (soft) 강조
+        for (const p of ctaRender) {
+          if (p.options && p.options.fontSize > 36) {
+            p.options.color = T.soft || T.background
+            p.options.fontFace = T.fontDisplay || T.fontMain
+          }
+        }
+        slide.addText(ctaRender, {
+          x: MARGIN_X + 0.4, y: 1.5, w: CONTENT_W - 0.8, h: 1.5,
         })
         // 흰 라인 강조
         slide.addShape(pptx.ShapeType.rect, {
-          x: MARGIN_X + 0.4, y: 3.0, w: 0.8, h: 0.04,
+          x: MARGIN_X + 0.4, y: 3.1, w: 0.8, h: 0.04,
           fill: { color: T.background }, line: { color: T.background, width: 0 },
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CB' } } })), {
-            x: MARGIN_X + 0.4, y: 3.2, w: CONTENT_W - 0.8, h: 3.0,
+            x: MARGIN_X + 0.4, y: 3.3, w: CONTENT_W - 0.8, h: 2.9,
             fontSize: 16, color: T.background, fontFace: T.fontMain,
             paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
-        // 우하단 슬라이드 번호 — 검정 박스 안이라 흰색으로
+        // 우하단 슬라이드 번호 (어두운 박스 위라 흰색)
+        slide.addText('N·LAB', {
+          x: MARGIN_X, y: 6.85, w: 2.0, h: 0.25,
+          fontSize: 9, color: T.background, fontFace: T.fontDisplay || T.fontMain,
+          bold: true, charSpacing: 3,
+        })
         slide.addText(String(slideNum || '?'), {
-          x: SLIDE_W - 0.8, y: 6.7, w: 0.6, h: 0.3,
-          fontSize: 10, color: T.background, fontFace: T.fontMain, align: 'right',
+          x: SLIDE_W - 0.8, y: 6.85, w: 0.6, h: 0.25,
+          fontSize: 9, color: T.background, fontFace: T.fontDisplay || T.fontMain, align: 'right',
         })
         break
       }
       case 'outro': {
-        drawTopHairline(slide)
+        drawCommonHeader()
         slide.addText(s.title || '감사합니다', {
           x: MARGIN_X, y: 2.5, w: CONTENT_W, h: 1.5,
           fontSize: 48, bold: true, color: onBg, fontFace: T.fontMain,
@@ -793,37 +926,37 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
         })
         slide.addShape(pptx.ShapeType.line, {
           x: SLIDE_W / 2 - 1, y: 4.3, w: 2, h: 0,
-          line: { color: T.text, width: 0.5 },
+          line: { color: T.primary || T.text, width: 0.5 },
         })
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
         break
       }
       case 'breath': {
-        // 숨고르기/아이스브레이킹 — 부드러운 배경 + 짧은 한 줄 중앙 배치.
-        // 본론 흐름을 잠깐 끊고 호흡을 가져가는 용도라 어떤 정보도 강조하지 않음.
+        // 숨고르기/아이스브레이킹 — soft 배경 + 짧은 한 줄 중앙.
         slide.addShape(pptx.ShapeType.rect, {
           x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
           fill: { color: T.soft }, line: { color: T.soft, width: 0 },
         })
         slide.addText(s.title || '💧', {
           x: MARGIN_X, y: 2.8, w: CONTENT_W, h: 1.4,
-          fontSize: 44, bold: false, color: onBg, fontFace: T.fontMain,
+          fontSize: 44, bold: false, color: T.text, fontFace: T.fontMain,
           align: 'center', valign: 'middle',
         })
-        // 아래쪽 가는 디바이더 — '잠깐 멈춤' 신호
         slide.addShape(pptx.ShapeType.line, {
           x: SLIDE_W / 2 - 0.6, y: 4.5, w: 1.2, h: 0,
-          line: { color: T.text, width: 0.5 },
+          line: { color: T.primary || T.text, width: 0.5 },
         })
-        drawFooter(slide, slideNum)
+        slide.addText(String(slideNum || '?'), {
+          x: SLIDE_W - 0.8, y: 6.85, w: 0.6, h: 0.25,
+          fontSize: 9, color: T.accent || onBgMute, fontFace: T.fontDisplay || T.fontMain, align: 'right',
+        })
         break
       }
       default: {
-        drawChapterMarker(slide, 'Content')
-        drawTopHairline(slide)
-        slide.addText(s.title || '', {
+        drawCommonHeader()
+        const defTitleOpts = { fontSize: 36, bold: true, color: onBg, fontFace: T.fontMain }
+        slide.addText(renderWithEmphasis(s.title || '', s.emphasis, defTitleOpts), {
           x: MARGIN_X, y: 1.4, w: CONTENT_W, h: 1.0,
-          fontSize: 36, bold: true, color: onBg, fontFace: T.fontMain,
         })
         if (Array.isArray(s.bullets) && s.bullets.length) {
           slide.addText(s.bullets.map(b => ({ text: String(b), options: { bullet: { code: '25CF' } } })), {
@@ -832,7 +965,7 @@ async function buildDesignedPptx(plan, parsedTone, safeFileName) {
             paraSpaceAfter: 6, lineSpacing: 26,
           })
         }
-        drawFooter(slide, slideNum)
+        drawCommonFooter()
       }
     }
 
@@ -11580,7 +11713,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   // 추출 결과가 모두 기본값과 동일하면 = 추출 실패 (hex 없는 MD)
                   const detected = parsed._detected || {}
                   const overrideKeys = Object.keys(pp_designToneOverrides || {}).filter(k => /^[0-9A-Fa-f]{6}$/.test(pp_designToneOverrides[k] || ''))
-                  const colorKeys = ['primary', 'secondary', 'background', 'text', 'accent']
+                  const colorKeys = ['primary', 'secondary', 'background', 'text', 'accent', 'soft', 'highlight']
                   const detectedCount = colorKeys.filter(k => detected[k]).length
                   const extractionFailed = detectedCount === 0 && overrideKeys.length === 0
                   // 칩에서 hex 직접 수정
@@ -11647,6 +11780,8 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               { key: 'background', label: 'Background' },
                               { key: 'text', label: 'Text' },
                               { key: 'accent', label: 'Accent' },
+                              { key: 'soft', label: 'Soft' },
+                              { key: 'highlight', label: 'Highlight' },
                             ].map(c => {
                               const isOverride = /^[0-9A-Fa-f]{6}$/.test(pp_designToneOverrides[c.key] || '')
                               const source = isOverride ? '✏️' : (detected[c.key] === 'hex' ? '🔍' : detected[c.key] === 'named' ? '🧠' : '⚙️')
@@ -11668,9 +11803,15 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               )
                             })}
                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(99,102,241,0.10)', borderRadius: '7px', border: '1px solid rgba(99,102,241,0.30)' }}>
-                              <span style={{ fontSize: '11px', color: '#a5b4fc' }}>🔤 폰트</span>
+                              <span style={{ fontSize: '11px', color: '#a5b4fc' }}>🔤 본문</span>
                               <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>{T.fontMain}</span>
                             </div>
+                            {T.fontDisplay && (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(244,114,182,0.10)', borderRadius: '7px', border: '1px solid rgba(244,114,182,0.30)' }}>
+                                <span style={{ fontSize: '11px', color: '#f0abfc' }}>🔢 강조</span>
+                                <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>{T.fontDisplay}</span>
+                              </div>
+                            )}
                           </div>
                           <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '8px' }}>
                             🔍 MD에서 hex 추출 · 🧠 색상 이름으로 추론 · ⚙️ 기본값 · ✏️ 직접 입력
