@@ -10470,51 +10470,186 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               }
 
               if (taskKey === 'salesPage') {
+                // 7섹션 구조 — N잡연구소 표준 무료강의 상페.
+                // 봇이 일부 섹션을 누락해도 안전하게 렌더 (각 섹션 옵셔널 체크).
+                const hook = plan.hook || {}
+                const sr = plan.studentResults || {}
+                const ti = plan.topicIntro || {}
+                const ii = plan.instructorIntro || {}
+                const ps = plan.problemSolution || {}
+                const rf = plan.recommendedFor || {}
+                const cta = plan.cta || {}
+                const cmp = ti.comparisonTable || {}
+
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <div style={_boxAccent}>
-                      <div style={_accent}>히어로 카피</div>
-                      <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>{plan.headline}</div>
-                      <div style={{ fontSize: '14px', color: '#cbd5e1', fontStyle: 'italic' }}>{plan.subheadline}</div>
-                    </div>
-                    {Array.isArray(plan.painPoints) && plan.painPoints.length > 0 && (
-                      <div style={_box}>
-                        <div style={_accent}>Pain — 수강생이 겪는 문제</div>
-                        <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.7 }}>
-                          {plan.painPoints.map((p, i) => <li key={i}>{p}</li>)}
-                        </ul>
+                    {/* 1. 초반 후킹 */}
+                    {(hook.headline || hook.scarcity || hook.schedule) && (
+                      <div style={_boxAccent}>
+                        <div style={_accent}>① 초반 후킹</div>
+                        {hook.headline && (
+                          <div style={{ fontSize: '20px', fontWeight: 800, color: '#fff', marginBottom: '6px' }}>{hook.headline}</div>
+                        )}
+                        {hook.scarcity && (
+                          <div style={{ fontSize: '13px', color: '#fca5a5', fontStyle: 'italic', marginBottom: '6px' }}>* {hook.scarcity}</div>
+                        )}
+                        {hook.schedule && (
+                          <div style={{ fontSize: '13.5px', color: '#a5b4fc', fontWeight: 600 }}>📅 {hook.schedule}</div>
+                        )}
                       </div>
                     )}
-                    {plan.promise && (
+
+                    {/* 2. 수강생 성과 / 후기 */}
+                    {(sr.doubtHook || sr.instructorTitle || (Array.isArray(sr.cases) && sr.cases.length > 0) || sr.closingLine) && (
                       <div style={_box}>
-                        <div style={_accent}>Promise — 약속</div>
-                        <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{plan.promise}</div>
+                        <div style={_accent}>② 수강생 성과 / 후기</div>
+                        {sr.doubtHook && (
+                          <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, marginBottom: '6px' }}>{sr.doubtHook}</div>
+                        )}
+                        {sr.instructorTitle && (
+                          <div style={{ fontSize: '13px', color: '#cbd5e1', marginBottom: '10px' }}>{sr.instructorTitle}</div>
+                        )}
+                        {Array.isArray(sr.cases) && sr.cases.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: sr.closingLine ? '10px' : 0 }}>
+                            {sr.cases.map((c, i) => (
+                              <div key={i} style={{ padding: '10px 12px', background: 'rgba(0,0,0,0.25)', borderRadius: '8px', borderLeft: '3px solid rgba(99,102,241,0.5)' }}>
+                                {c.persona && (
+                                  <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600, marginBottom: '3px' }}>{c.persona}</div>
+                                )}
+                                {c.result && (
+                                  <div style={{ fontSize: '14.5px', color: '#34d399', fontWeight: 700, marginBottom: '3px' }}>{c.result}</div>
+                                )}
+                                {c.detail && (
+                                  <div style={{ fontSize: '12.5px', color: '#cbd5e1', lineHeight: 1.55 }}>{c.detail}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {sr.closingLine && (
+                          <div style={{ fontSize: '13.5px', color: '#fff', fontStyle: 'italic', padding: '8px 10px', background: 'rgba(99,102,241,0.10)', borderRadius: '6px' }}>{sr.closingLine}</div>
+                        )}
                       </div>
                     )}
-                    {plan.proof && (
+
+                    {/* 3. 주제 소개 */}
+                    {(Array.isArray(ti.stats) || ti.impactLine || ti.coreInsight || (Array.isArray(cmp.rows) && cmp.rows.length > 0)) && (
                       <div style={_box}>
-                        <div style={_accent}>Proof — 신뢰 근거</div>
-                        <div style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{plan.proof}</div>
+                        <div style={_accent}>③ 주제 소개</div>
+                        {Array.isArray(ti.stats) && ti.stats.length > 0 && (
+                          <ul style={{ margin: '4px 0 10px 18px', padding: 0, fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.7 }}>
+                            {ti.stats.map((s, i) => <li key={i}>{s}</li>)}
+                          </ul>
+                        )}
+                        {ti.impactLine && (
+                          <div style={{ fontSize: '14px', color: '#fff', marginBottom: '6px' }}>{ti.impactLine}</div>
+                        )}
+                        {ti.coreInsight && (
+                          <div style={{ fontSize: '14px', color: '#a78bfa', fontWeight: 700, marginBottom: '10px', whiteSpace: 'pre-wrap' }}>{ti.coreInsight}</div>
+                        )}
+                        {Array.isArray(cmp.rows) && cmp.rows.length > 0 && (
+                          <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                              <thead>
+                                <tr style={{ background: 'rgba(0,0,0,0.30)' }}>
+                                  <th style={{ padding: '8px 10px', textAlign: 'left', color: '#fca5a5', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>{cmp.leftHeader || '타 강의'}</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'left', color: '#34d399', fontWeight: 600, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>{cmp.rightHeader || '본 강의'}</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {cmp.rows.map((r, i) => (
+                                  <tr key={i} style={{ borderBottom: i === cmp.rows.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.04)' }}>
+                                    <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{r.left}</td>
+                                    <td style={{ padding: '8px 10px', color: '#e2e8f0', fontWeight: 500 }}>{r.right}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     )}
-                    {Array.isArray(plan.curriculumPreview) && plan.curriculumPreview.length > 0 && (
+
+                    {/* 4. 강사 소개 */}
+                    {(ii.greeting || ii.confession || Array.isArray(ii.metrics) || ii.closing) && (
                       <div style={_box}>
-                        <div style={_accent}>커리큘럼 미리보기</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
-                          {plan.curriculumPreview.map((c, i) => (
-                            <div key={i} style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: 1.6 }}>
-                              <b style={{ color: '#a5b4fc', marginRight: '6px' }}>{c.session}</b>
-                              <span style={{ color: '#fff', fontWeight: 600 }}>{c.title}</span>
-                              {c.preview && <div style={{ fontSize: '12.5px', color: '#94a3b8', marginTop: '2px' }}>{c.preview}</div>}
-                            </div>
-                          ))}
-                        </div>
+                        <div style={_accent}>④ 강사 소개</div>
+                        {ii.greeting && (
+                          <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, marginBottom: '8px', whiteSpace: 'pre-wrap' }}>{ii.greeting}</div>
+                        )}
+                        {ii.confession && (
+                          <div style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginBottom: '8px' }}>{ii.confession}</div>
+                        )}
+                        {Array.isArray(ii.metrics) && ii.metrics.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+                            {ii.metrics.map((m, i) => (
+                              <div key={i} style={{ fontSize: '14px', color: '#34d399', fontWeight: 700 }}>· {m}</div>
+                            ))}
+                          </div>
+                        )}
+                        {ii.closing && (
+                          <div style={{ fontSize: '13.5px', color: '#a78bfa', fontWeight: 600, fontStyle: 'italic' }}>{ii.closing}</div>
+                        )}
                       </div>
                     )}
-                    {plan.cta && (
-                      <div style={{ padding: '12px 14px', background: 'rgba(168,85,247,0.10)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: '10px' }}>
-                        <div style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: 600, marginBottom: '4px' }}>CTA</div>
-                        <div style={{ fontSize: '14px', color: '#fff', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{plan.cta}</div>
+
+                    {/* 5. 문제 제기 & 해결 */}
+                    {(Array.isArray(ps.qa) || Array.isArray(ps.differentiators) || ps.closingLine) && (
+                      <div style={_box}>
+                        <div style={_accent}>⑤ 문제 제기 & 해결</div>
+                        {Array.isArray(ps.qa) && ps.qa.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+                            {ps.qa.map((q, i) => (
+                              <div key={i} style={{ padding: '10px 12px', background: 'rgba(0,0,0,0.25)', borderRadius: '8px' }}>
+                                <div style={{ fontSize: '13px', color: '#fbbf24', marginBottom: '4px' }}>🤔 {q.question}</div>
+                                <div style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: 1.6 }}>{q.answer}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {Array.isArray(ps.differentiators) && ps.differentiators.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: ps.closingLine ? '10px' : 0 }}>
+                            {ps.differentiators.map((d, i) => (
+                              <div key={i} style={{ fontSize: '13.5px', color: '#e2e8f0', lineHeight: 1.6 }}>{d}</div>
+                            ))}
+                          </div>
+                        )}
+                        {ps.closingLine && (
+                          <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, padding: '8px 10px', background: 'rgba(99,102,241,0.10)', borderRadius: '6px' }}>{ps.closingLine}</div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 6. 강의 추천 */}
+                    {(rf.intro || (Array.isArray(rf.items) && rf.items.length > 0)) && (
+                      <div style={_box}>
+                        <div style={_accent}>⑥ 강의 추천</div>
+                        {rf.intro && (
+                          <div style={{ fontSize: '14px', color: '#fff', fontWeight: 600, marginBottom: '8px' }}>{rf.intro}</div>
+                        )}
+                        {Array.isArray(rf.items) && rf.items.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            {rf.items.map((it, i) => (
+                              <div key={i} style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.6 }}>{it}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 7. 콜 투 액션 */}
+                    {(cta.restatement || cta.validation || cta.scheduleReminder) && (
+                      <div style={{ padding: '14px 16px', background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.30)', borderRadius: '10px' }}>
+                        <div style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: 600, marginBottom: '8px' }}>⑦ 콜 투 액션</div>
+                        {cta.restatement && (
+                          <div style={{ fontSize: '14.5px', color: '#fff', fontWeight: 600, marginBottom: '6px', whiteSpace: 'pre-wrap' }}>{cta.restatement}</div>
+                        )}
+                        {cta.validation && (
+                          <div style={{ fontSize: '13.5px', color: '#cbd5e1', marginBottom: '8px' }}>{cta.validation}</div>
+                        )}
+                        {cta.scheduleReminder && (
+                          <div style={{ fontSize: '15px', color: '#fbbf24', fontWeight: 700 }}>📅 {cta.scheduleReminder}</div>
+                        )}
                       </div>
                     )}
                   </div>
