@@ -1675,6 +1675,9 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [shoongManualParseError, setShoongManualParseError] = useState('')
   const [shoongManualSending, setShoongManualSending] = useState(false)
   const [shoongManualResult, setShoongManualResult] = useState(null)
+  // 대용량 명단(>30K)일 때 클라이언트 자동 청크 진행률.
+  // Vercel 요청 본문 한도 4.5MB → 약 3만명/청크 (이름 한글 9B + 전화번호 13B + JSON 래퍼 = ~35B × 30K ≈ 1MB 안전).
+  const [shoongManualProgress, setShoongManualProgress] = useState(null) // { currentChunk, totalChunks, ... }
 
   // 🪄 프로젝트 기획 (멀티 봇 오케스트레이터) 상태
   // 강사/기수는 selectedInstructor + selectedSessionId(global)와 공유. 자료도 attachments(global) 재사용.
@@ -8078,33 +8081,116 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                     }
                                     setShoongManualSending(true)
                                     setShoongManualResult(null)
+                                    setShoongManualProgress(null)
                                     try {
                                       const token = getAuthToken() || ''
                                       const tplVarsForSend = BULK_TPL[shoongBulkTplCode] || []
                                       const variables = {}
                                       for (const v of tplVarsForSend) variables[v] = (shoongBulkVars[v] || '').trim()
-                                      const body = {
-                                        recipients: shoongManualRows,
+                                      const baseBody = {
                                         templatecode: shoongBulkTplCode,
-                                        variables
+                                        variables,
                                       }
                                       if (shoongBulkSendMode === 'reserved' && shoongBulkReservedAt) {
-                                        body.reservedTime = new Date(shoongBulkReservedAt).toISOString()
+                                        baseBody.reservedTime = new Date(shoongBulkReservedAt).toISOString()
                                       }
                                       if (shoongBulkTestMode) {
-                                        body.testPhone = shoongBulkTestPhone.trim()
-                                        body.testLimit = shoongBulkTestLimit
+                                        baseBody.testPhone = shoongBulkTestPhone.trim()
+                                        baseBody.testLimit = shoongBulkTestLimit
                                       }
-                                      // 슝 공식 대량 API 사용 (토글 ON 시)
                                       if (shoongUseBulkApi && !shoongBulkTestMode) {
-                                        body.useBulkApi = true
+                                        baseBody.useBulkApi = true
                                       }
-                                      const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                        body: JSON.stringify(body)
+
+                                      // === 클라이언트 자동 청크 ===
+                                      //   Vercel serverless 요청 본문 한도 4.5MB. 16만명 명단 = ~5MB+ → 413.
+                                      //   30K씩 잘라서 순차 POST. 각 청크가 슝 bulk 그룹 1개로 생성됨
+                                      //   (useBulkApi ON일 때) 또는 단건 발송 N건 (OFF일 때).
+                                      //   테스트 모드는 어차피 1~5건만 발송하므로 청크 불필요 — 첫 청크만 전송.
+                                      const CHUNK_SIZE = 30000
+                                      const totalRows = shoongManualRows.length
+                                      const totalChunks = shoongBulkTestMode ? 1 : Math.max(1, Math.ceil(totalRows / CHUNK_SIZE))
+
+                                      const aggregated = {
+                                        via: totalChunks > 1 ? 'client-chunked' : null,
+                                        mode: 'manual',
+                                        totalApplies: totalRows,
+                                        recipientCount: 0,
+                                        sent: 0,
+                                        failed: 0,
+                                        pending: 0,
+                                        skipped: { noUser: 0, invalidPhone: 0, duplicate: 0 },
+                                        errors: [],
+                                        groupIds: [],
+                                        chunkInfo: totalChunks > 1 ? { totalChunks, chunkSize: CHUNK_SIZE } : null,
+                                      }
+
+                                      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                                        const start = chunkIndex * CHUNK_SIZE
+                                        const end = Math.min(start + CHUNK_SIZE, totalRows)
+                                        const chunk = shoongBulkTestMode ? shoongManualRows.slice(0, Math.min(totalRows, 5)) : shoongManualRows.slice(start, end)
+
+                                        setShoongManualProgress({
+                                          currentChunk: chunkIndex + 1,
+                                          totalChunks,
+                                          chunkRecipients: chunk.length,
+                                          completedRecipients: aggregated.recipientCount,
+                                          totalRecipients: totalRows,
+                                          sent: aggregated.sent,
+                                          failed: aggregated.failed,
+                                        })
+
+                                        const { data, status } = await safeFetchJson('/api/tools/shoong-bulk/send', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                          body: JSON.stringify({ ...baseBody, recipients: chunk }),
+                                        })
+
+                                        if (status >= 400 || data.error) {
+                                          setShoongManualResult({
+                                            error: data.error || `청크 ${chunkIndex + 1}/${totalChunks} 실패 (HTTP ${status})`,
+                                            partialResult: totalChunks > 1 ? {
+                                              completedChunks: chunkIndex,
+                                              totalChunks,
+                                              sent: aggregated.sent,
+                                              failed: aggregated.failed,
+                                              groupIds: aggregated.groupIds,
+                                            } : null,
+                                            response: data,
+                                            _httpStatus: status,
+                                          })
+                                          return
+                                        }
+
+                                        aggregated.recipientCount += (data.recipientCount || 0)
+                                        aggregated.sent += (data.sent || 0)
+                                        aggregated.failed += (data.failed || 0)
+                                        aggregated.pending += (data.pending || 0)
+                                        if (data.skipped) {
+                                          aggregated.skipped.noUser += (data.skipped.noUser || 0)
+                                          aggregated.skipped.invalidPhone += (data.skipped.invalidPhone || 0)
+                                          aggregated.skipped.duplicate += (data.skipped.duplicate || 0)
+                                        }
+                                        if (Array.isArray(data.errors)) aggregated.errors.push(...data.errors)
+                                        if (data.groupId) aggregated.groupIds.push(data.groupId)
+                                        if (data.testMode) aggregated.testMode = data.testMode
+                                        if (data.reservedTime) aggregated.reservedTime = data.reservedTime
+                                      }
+
+                                      setShoongManualProgress({
+                                        currentChunk: totalChunks,
+                                        totalChunks,
+                                        completedRecipients: aggregated.recipientCount,
+                                        totalRecipients: totalRows,
+                                        sent: aggregated.sent,
+                                        failed: aggregated.failed,
+                                        done: true,
                                       })
-                                      setShoongManualResult({ ...data, _httpStatus: status })
+                                      setShoongManualResult({
+                                        ...aggregated,
+                                        errors: aggregated.errors.slice(0, 50),
+                                        _httpStatus: 200,
+                                      })
                                     } catch (err) {
                                       setShoongManualResult({ error: err.message })
                                     } finally {
@@ -8132,6 +8218,27 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             </>
                           )}
 
+                          {shoongManualProgress && shoongManualProgress.totalChunks > 1 && !shoongManualProgress.done && (
+                            <div style={{
+                              marginTop: '12px', padding: '12px 14px',
+                              background: 'rgba(99,102,241,0.10)',
+                              border: '1px solid rgba(99,102,241,0.3)',
+                              borderRadius: '10px',
+                              fontSize: '12.5px', color: '#c7d2fe', lineHeight: 1.6,
+                            }}>
+                              ⏳ <b>청크 {shoongManualProgress.currentChunk} / {shoongManualProgress.totalChunks}</b> 발송 중...
+                              <div style={{ marginTop: '6px', height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+                                <div style={{
+                                  width: `${Math.round((shoongManualProgress.completedRecipients / Math.max(1, shoongManualProgress.totalRecipients)) * 100)}%`,
+                                  height: '100%', background: 'linear-gradient(90deg, #6366f1, #a78bfa)', transition: 'width 0.4s',
+                                }} />
+                              </div>
+                              <div style={{ marginTop: '6px', fontSize: '11.5px', color: '#94a3b8' }}>
+                                완료: {shoongManualProgress.completedRecipients.toLocaleString()} / {shoongManualProgress.totalRecipients.toLocaleString()}명
+                                · 성공 {shoongManualProgress.sent.toLocaleString()} · 실패 {shoongManualProgress.failed.toLocaleString()}
+                              </div>
+                            </div>
+                          )}
                           {shoongManualResult && (
                             <div style={{
                               marginTop: '16px', padding: '14px',
@@ -8157,7 +8264,14 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                                   • 대상: <b style={{ color: '#fff' }}>{shoongManualResult.recipientCount?.toLocaleString()}명</b> ·
                                   성공 <b style={{ color: '#34d399' }}>{shoongManualResult.sent}</b> ·
                                   실패 <b style={{ color: '#f87171' }}>{shoongManualResult.failed}</b>
+                                  {shoongManualResult.pending > 0 && <> · 대기 <b style={{ color: '#fbbf24' }}>{shoongManualResult.pending.toLocaleString()}</b> (슝 비동기 처리)</>}
                                   {shoongManualResult.reservedTime && <><br/>• 예약 시간: <b>{shoongManualResult.reservedTime}</b></>}
+                                  {shoongManualResult.chunkInfo && (
+                                    <><br/>• 청크 분할: <b>{shoongManualResult.chunkInfo.totalChunks}개</b> ({shoongManualResult.chunkInfo.chunkSize.toLocaleString()}명씩) — 슝 어드민 → 발송이력 → 대량 탭에 {shoongManualResult.chunkInfo.totalChunks}개 그룹으로 분류됨</>
+                                  )}
+                                  {shoongManualResult.groupIds?.length > 0 && (
+                                    <><br/>• 슝 groupId: <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#a78bfa' }}>{shoongManualResult.groupIds.join(', ')}</span></>
+                                  )}
                                   {shoongManualResult.errors?.length > 0 && (
                                     <details style={{ marginTop: '8px' }}>
                                       <summary style={{ cursor: 'pointer', color: '#fbbf24' }}>실패 샘플 ({shoongManualResult.errors.length}건)</summary>
