@@ -6552,8 +6552,18 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   setShoongManualFileName(file.name)
                   try {
                     const XLSX = await import('xlsx')
-                    const buffer = await file.arrayBuffer()
-                    const wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
+                    // DB카트는 .xls 확장자지만 실제 내용은 HTML 테이블.
+                    // 파일명에 "디비카트/디비 카트/dbcart" 들어있을 때만 HTML 파싱으로 분기,
+                    // 그 외엔 기존 binary xlsx/csv 파싱 그대로 유지.
+                    const isDbCart = /디비\s*카트|dbcart|db카트/i.test(file.name)
+                    let wb
+                    if (isDbCart) {
+                      const text = await file.text()
+                      wb = XLSX.read(text, { type: 'string' })
+                    } else {
+                      const buffer = await file.arrayBuffer()
+                      wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
+                    }
                     const sheet = wb.Sheets[wb.SheetNames[0]]
                     if (!sheet) throw new Error('시트가 비어있습니다.')
                     const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
@@ -12755,8 +12765,17 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                             for (const f of files) {
                               const baseLabel = f.name.replace(/\.(csv|tsv|xlsx|xls)$/i, '').trim() || f.name
                               try {
-                                const buffer = await f.arrayBuffer()
-                                const wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
+                                // DB카트는 .xls 확장자지만 실제는 HTML 테이블.
+                                // 파일명에 "디비카트" 들어있을 때만 HTML 파싱, 그 외엔 기존 방식.
+                                const isDbCart = /디비\s*카트|dbcart|db카트/i.test(f.name)
+                                let wb
+                                if (isDbCart) {
+                                  const text = await f.text()
+                                  wb = XLSX.read(text, { type: 'string' })
+                                } else {
+                                  const buffer = await f.arrayBuffer()
+                                  wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
+                                }
                                 const sheet = wb.Sheets[wb.SheetNames[0]]
                                 if (!sheet) throw new Error('시트가 비어있습니다.')
                                 const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
