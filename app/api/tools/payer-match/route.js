@@ -41,8 +41,12 @@ function toAmountNumber(raw) {
 }
 
 // POST /api/tools/payer-match
-// body: { freeCourseIds: number[], year: '25'|'26', tabName: string }
-// nlab DB(ApplyCourse → User)에서 신청자 명단을 직접 가져와 결제자 시트와 매칭.
+// body: { year: '25'|'26', tabName: string,
+//         freeCourseIds?: number[],                                            // DB 모드
+//         manualApplicants?: [{ name?, phone, label?, appliedAt? }, ...] }     // 엑셀 업로드 모드
+// 신청자 명단을 두 가지 방법 중 하나로 가져와 결제자 시트와 전화번호로 매칭.
+//   - DB 모드: nlab DB의 ApplyCourse → User
+//   - 엑셀 업로드 모드: 클라이언트에서 파싱한 명단을 그대로 받음 (DB 외부 유입경로용)
 // 매칭 결과는 결제금액을 number 셀로 export하여 시트에서 SUM이 동작하도록 함.
 export async function POST(request) {
   const auth = await verifyApiAuth(request)
@@ -55,59 +59,89 @@ export async function POST(request) {
   let freeCourseIdsForCtx = null
   try {
     const body = await request.json().catch(() => ({}))
-    const { freeCourseIds, year, tabName } = body || {}
+    const { freeCourseIds, manualApplicants, year, tabName } = body || {}
     yearForCtx = year
     tabNameForCtx = tabName
     freeCourseIdsForCtx = Array.isArray(freeCourseIds) ? freeCourseIds.slice(0, 20) : freeCourseIds
 
-    if (!Array.isArray(freeCourseIds) || freeCourseIds.length === 0) {
-      return NextResponse.json({ success: false, error: '강의를 1개 이상 선택해주세요.' })
+    const hasCourseIds = Array.isArray(freeCourseIds) && freeCourseIds.length > 0
+    const hasManualApplicants = Array.isArray(manualApplicants) && manualApplicants.length > 0
+    if (!hasCourseIds && !hasManualApplicants) {
+      return NextResponse.json({ success: false, error: '강의를 1개 이상 선택하거나 엑셀 파일을 업로드해주세요.' })
     }
     if (!year || !tabName) {
       return NextResponse.json({ success: false, error: '결제자 시트 탭을 선택해주세요.' })
     }
 
     const logs = []
-    const supabase = getNlabSupabase()
 
-    // 1. FreeCourse title 매핑 (유입경로 라벨용)
-    const { data: courseRows, error: courseErr } = await supabase
-      .from('FreeCourse')
-      .select('id, title')
-      .in('id', freeCourseIds)
-    if (courseErr) {
-      return NextResponse.json({ success: false, error: 'FreeCourse 조회 실패: ' + courseErr.message })
-    }
-    const courseTitleMap = new Map()
-    for (const c of courseRows || []) courseTitleMap.set(c.id, c.title || `강의#${c.id}`)
-    logs.push(`선택 강의 ${courseRows?.length || 0}개`)
-
-    // 2. ApplyCourse → User.phone, createdAt
-    const applies = await fetchAllPaginated(() =>
-      supabase
-        .from('ApplyCourse')
-        .select('id, freeCourseId, createdAt, User:userId(phone)')
-        .in('freeCourseId', freeCourseIds)
-    )
-    logs.push(`신청자 행 ${applies.length}건 (DB)`)
-
+    // 1·2. 신청자 맵 구성 — DB 모드 / 엑셀 업로드 모드
     const applicantMap = new Map()
     let invalidPhoneCount = 0
-    for (const a of applies) {
-      const phone = normalizePhone(a.User?.phone)
-      if (!phone) { invalidPhoneCount++; continue }
-      const ts = a.createdAt ? Date.parse(a.createdAt) : null
-      const courseTitle = courseTitleMap.get(a.freeCourseId) || `강의#${a.freeCourseId}`
-      const existing = applicantMap.get(phone)
-      if (!existing || (ts && existing._timestamp && ts < existing._timestamp)) {
-        applicantMap.set(phone, {
-          신청일: a.createdAt || '',
-          유입경로: courseTitle,
-          _timestamp: ts
-        })
+
+    if (hasCourseIds) {
+      const supabase = getNlabSupabase()
+
+      // FreeCourse title 매핑 (유입경로 라벨용)
+      const { data: courseRows, error: courseErr } = await supabase
+        .from('FreeCourse')
+        .select('id, title')
+        .in('id', freeCourseIds)
+      if (courseErr) {
+        return NextResponse.json({ success: false, error: 'FreeCourse 조회 실패: ' + courseErr.message })
       }
+      const courseTitleMap = new Map()
+      for (const c of courseRows || []) courseTitleMap.set(c.id, c.title || `강의#${c.id}`)
+      logs.push(`선택 강의 ${courseRows?.length || 0}개`)
+
+      // ApplyCourse → User.phone, createdAt
+      const applies = await fetchAllPaginated(() =>
+        supabase
+          .from('ApplyCourse')
+          .select('id, freeCourseId, createdAt, User:userId(phone)')
+          .in('freeCourseId', freeCourseIds)
+      )
+      logs.push(`신청자 행 ${applies.length}건 (DB)`)
+
+      for (const a of applies) {
+        const phone = normalizePhone(a.User?.phone)
+        if (!phone) { invalidPhoneCount++; continue }
+        const ts = a.createdAt ? Date.parse(a.createdAt) : null
+        const courseTitle = courseTitleMap.get(a.freeCourseId) || `강의#${a.freeCourseId}`
+        const existing = applicantMap.get(phone)
+        if (!existing || (ts && existing._timestamp && ts < existing._timestamp)) {
+          applicantMap.set(phone, {
+            신청일: a.createdAt || '',
+            유입경로: courseTitle,
+            _timestamp: ts
+          })
+        }
+      }
+      logs.push(`신청자 맵: ${applicantMap.size}명 (중복 제거, 전화번호 없음 ${invalidPhoneCount}건 제외)`)
+    } else {
+      // 엑셀 업로드 모드 — 행마다 label(유입경로)을 따로 둘 수 있게 허용.
+      // 클라이언트가 파일별로 label을 다르게 보낸 경우 (예: 'GDN.xlsx', '돈깨비.xlsx') 그 라벨 그대로 사용.
+      let labeled = 0
+      for (const item of manualApplicants) {
+        if (!item || typeof item !== 'object') continue
+        const phone = normalizePhone(item.phone)
+        if (!phone) { invalidPhoneCount++; continue }
+        const rawTs = item.appliedAt ? Date.parse(item.appliedAt) : null
+        const ts = Number.isFinite(rawTs) ? rawTs : null
+        const label = (typeof item.label === 'string' && item.label.trim()) || '(엑셀 업로드)'
+        const existing = applicantMap.get(phone)
+        if (!existing || (ts && existing._timestamp && ts < existing._timestamp)) {
+          applicantMap.set(phone, {
+            신청일: item.appliedAt || '',
+            유입경로: label,
+            _timestamp: ts
+          })
+          if (item.label) labeled++
+        }
+      }
+      logs.push(`엑셀 업로드 명단 ${manualApplicants.length}건 (전화번호 없음 ${invalidPhoneCount}건 제외, 라벨 부여 ${labeled}건)`)
+      logs.push(`신청자 맵: ${applicantMap.size}명 (중복 제거)`)
     }
-    logs.push(`신청자 맵: ${applicantMap.size}명 (중복 제거, 전화번호 없음 ${invalidPhoneCount}건 제외)`)
 
     // 3. 결제자 시트 데이터
     const spreadsheetId = PAYER_SHEETS[year]

@@ -115,18 +115,21 @@ export async function POST(request) {
     }
 
     // 고객명/phone은 DB(또는 명단)에서 채우므로 그 외 변수만 검증
+    // 미리보기(dryRun)는 변수 검증 생략 — 어차피 실제 발송 안 하고 수신자 수만 확인하기 위함.
     const requiredManualVars = tplVars.filter(v => v !== '고객명')
     const trimmedVars = {}
     for (const v of tplVars) {
       const val = variables[v]
       trimmedVars[v] = typeof val === 'string' ? val.trim() : ''
     }
-    const missingVars = requiredManualVars.filter(v => !trimmedVars[v])
-    if (missingVars.length > 0) {
-      return NextResponse.json({
-        error: `필수 변수 누락: ${missingVars.join(', ')}`,
-        missingVars
-      }, { status: 400 })
+    if (!dryRun) {
+      const missingVars = requiredManualVars.filter(v => !trimmedVars[v])
+      if (missingVars.length > 0) {
+        return NextResponse.json({
+          error: `필수 변수 누락: ${missingVars.join(', ')}`,
+          missingVars
+        }, { status: 400 })
+      }
     }
 
     const apiKey = (process.env.SHOONG_API_KEY || '').trim()
