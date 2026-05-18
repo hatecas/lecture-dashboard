@@ -21,6 +21,7 @@ import { generateSummary, reviseSummary } from '@/lib/planners/summarize'
 import { extractTextFromUrl } from '@/lib/planners/_text'
 import { isNotionUrl, fetchNotionPageAsMarkdown } from '@/lib/integrations/notion'
 import { transcribeAudioFromUrl } from '@/lib/integrations/transcribe'
+import { logError, classifyAnthropicError } from '@/lib/errorLog'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300 // 5분 (Vercel hobby 한도). 진행상황 SSE 표시되므로 여유롭게.
@@ -165,6 +166,29 @@ export async function POST(request) {
         } catch {}
       }
 
+      // 첨부 추출/AI 호출 실패를 error_logs DB에 기록 (UI엔 이미 SSE item_error로 표시됨).
+      // 에러 로그 조회 페이지에서 발생 원인을 확인할 수 있게.
+      const logItemFailure = async (kind, name, err) => {
+        try {
+          await logError({
+            request,
+            error: err,
+            route: '/api/tools/project-planner/summary',
+            method: 'POST',
+            username: auth.user?.username,
+            errorCode: classifyAnthropicError(err),
+            context: {
+              phase: 'item_extract',
+              itemKind: kind,
+              itemName: name,
+              instructor,
+              sessionId,
+              action,
+            },
+          })
+        } catch {/* 로깅 실패는 본 흐름에 영향 X */}
+      }
+
       try {
         send('start', { action })
 
@@ -212,6 +236,7 @@ export async function POST(request) {
                 const msg = e?.message || String(e)
                 bucket.push({ name, text: '', error: msg })
                 send('item_error', { kind: itemKind, name, error: msg })
+                await logItemFailure(itemKind, name, e)
               }
             }
 
@@ -253,6 +278,7 @@ export async function POST(request) {
                 const msg = e?.message || String(e)
                 bucket.push({ name, text: '', error: msg })
                 send('item_error', { kind: 'audio', name, error: msg })
+                await logItemFailure('audio', name, e)
               }
             }
 
@@ -298,6 +324,7 @@ export async function POST(request) {
                 const msg = e?.message || String(e)
                 bucket.push({ name, text: '', error: msg })
                 send('item_error', { kind: itemKind, name, error: msg })
+                await logItemFailure(itemKind, name, e)
               }
             }
           }
@@ -357,7 +384,16 @@ export async function POST(request) {
         send('result', { summary: upserted })
       } catch (e) {
         console.error('[summary] 스트림 실패:', e)
-        send('fatal', { message: e?.message || String(e) })
+        const logged = await logError({
+          request,
+          error: e,
+          route: '/api/tools/project-planner/summary',
+          method: 'POST',
+          username: auth.user?.username,
+          errorCode: classifyAnthropicError(e),
+          context: { phase: 'stream', action, instructor, sessionId },
+        })
+        send('fatal', { message: logged.userMessage, errorId: logged.id, rawMessage: e?.message || String(e) })
       } finally {
         closed = true
         try { controller.close() } catch {}
