@@ -6552,21 +6552,49 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                   setShoongManualFileName(file.name)
                   try {
                     const XLSX = await import('xlsx')
-                    // DB카트는 .xls 확장자지만 실제 내용은 HTML 테이블.
-                    // 파일명에 "디비카트/디비 카트/dbcart" 들어있을 때만 HTML 파싱으로 분기,
-                    // 그 외엔 기존 binary xlsx/csv 파싱 그대로 유지.
+                    // DB카트는 .xls 확장자지만 실제는 HTML 테이블. XLSX 라이브러리의 string 모드로는
+                    // 정상 인식이 안 돼서 DOMParser로 직접 파싱. 파일명에 "디비카트" 들어있을 때만.
                     const isDbCart = /디비\s*카트|dbcart|db카트/i.test(file.name)
-                    let wb
+                    let rows
                     if (isDbCart) {
                       const text = await file.text()
-                      wb = XLSX.read(text, { type: 'string' })
+                      const doc = new DOMParser().parseFromString(text, 'text/html')
+                      const tables = Array.from(doc.querySelectorAll('table'))
+                      if (tables.length === 0) throw new Error('HTML에서 <table>을 찾을 수 없습니다.')
+                      // 가장 행이 많은 테이블 선택 (보통 1개지만 안전망)
+                      const table = tables.reduce((a, b) =>
+                        b.querySelectorAll('tr').length > a.querySelectorAll('tr').length ? b : a
+                      )
+                      const grid = Array.from(table.querySelectorAll('tr')).map(tr =>
+                        Array.from(tr.querySelectorAll('th, td')).map(td => (td.textContent || '').trim())
+                      )
+                      if (grid.length < 2) throw new Error('HTML 테이블에 데이터 행이 없습니다.')
+                      const header = grid[0]
+                      // DB카트 기본: B=이름(1), C=연락처(2). 헤더로도 자동 감지 시도.
+                      const findIdx = (hints) => {
+                        for (let i = 0; i < header.length; i++) {
+                          const h = String(header[i] || '').replace(/\s/g, '').toLowerCase()
+                          if (hints.some(hint => h.includes(hint.toLowerCase()))) return i
+                        }
+                        return -1
+                      }
+                      const detectedName = findIdx(NAME_HEADER_HINTS)
+                      const detectedPhone = findIdx(PHONE_HEADER_HINTS)
+                      const nameIdx = detectedName >= 0 ? detectedName : 1
+                      const phoneIdx = detectedPhone >= 0 ? detectedPhone : 2
+                      rows = grid.slice(1)
+                        .filter(r => r.some(c => c))
+                        .map(r => ({
+                          이름: (r[nameIdx] || '').trim(),
+                          연락처: (r[phoneIdx] || '').trim(),
+                        }))
                     } else {
                       const buffer = await file.arrayBuffer()
-                      wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
+                      const wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
+                      const sheet = wb.Sheets[wb.SheetNames[0]]
+                      if (!sheet) throw new Error('시트가 비어있습니다.')
+                      rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
                     }
-                    const sheet = wb.Sheets[wb.SheetNames[0]]
-                    if (!sheet) throw new Error('시트가 비어있습니다.')
-                    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
                     if (rows.length === 0) {
                       setShoongManualParseError('파일에 데이터가 없습니다.')
                       return
@@ -12766,38 +12794,74 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               const baseLabel = f.name.replace(/\.(csv|tsv|xlsx|xls)$/i, '').trim() || f.name
                               try {
                                 // DB카트는 .xls 확장자지만 실제는 HTML 테이블.
-                                // 파일명에 "디비카트" 들어있을 때만 HTML 파싱, 그 외엔 기존 방식.
+                                // XLSX의 string 모드로는 정상 인식 안 돼서 DOMParser로 직접 파싱.
                                 const isDbCart = /디비\s*카트|dbcart|db카트/i.test(f.name)
-                                let wb
+                                let parsed
                                 if (isDbCart) {
                                   const text = await f.text()
-                                  wb = XLSX.read(text, { type: 'string' })
+                                  const doc = new DOMParser().parseFromString(text, 'text/html')
+                                  const tables = Array.from(doc.querySelectorAll('table'))
+                                  if (tables.length === 0) throw new Error('HTML에서 <table>을 찾을 수 없습니다.')
+                                  const table = tables.reduce((a, b) =>
+                                    b.querySelectorAll('tr').length > a.querySelectorAll('tr').length ? b : a
+                                  )
+                                  const grid = Array.from(table.querySelectorAll('tr')).map(tr =>
+                                    Array.from(tr.querySelectorAll('th, td')).map(td => (td.textContent || '').trim())
+                                  )
+                                  if (grid.length < 2) throw new Error('HTML 테이블에 데이터 행이 없습니다.')
+                                  const header = grid[0]
+                                  const findIdx = (hints) => {
+                                    for (let i = 0; i < header.length; i++) {
+                                      const h = String(header[i] || '').replace(/\s/g, '').toLowerCase()
+                                      if (hints.some(hint => h.includes(hint.toLowerCase()))) return i
+                                    }
+                                    return -1
+                                  }
+                                  // DB카트 기본: B=이름(1), C=연락처(2). 헤더로도 자동 감지.
+                                  const detectedName = findIdx(NAME_HINTS)
+                                  const detectedPhone = findIdx(PHONE_HINTS)
+                                  const detectedDate = findIdx(DATE_HINTS)
+                                  const nameIdx = detectedName >= 0 ? detectedName : 1
+                                  const phoneIdx = detectedPhone >= 0 ? detectedPhone : 2
+                                  const dateIdx = detectedDate >= 0 ? detectedDate : 0
+                                  parsed = grid.slice(1)
+                                    .filter(r => r.some(c => c))
+                                    .map(r => ({
+                                      name: (r[nameIdx] || '').trim(),
+                                      phone: (r[phoneIdx] || '').trim(),
+                                      appliedAt: (r[dateIdx] || '').trim(),
+                                    }))
+                                    .filter(r => r.phone)
                                 } else {
                                   const buffer = await f.arrayBuffer()
-                                  wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
+                                  const wb = XLSX.read(buffer, { type: 'array', codepage: 949 })
+                                  const sheet = wb.Sheets[wb.SheetNames[0]]
+                                  if (!sheet) throw new Error('시트가 비어있습니다.')
+                                  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
+                                  if (rows.length === 0) {
+                                    parsedFiles.push({ fileName: f.name, label: baseLabel, rows: [], parseError: '데이터 없음' })
+                                    continue
+                                  }
+                                  const headers = Object.keys(rows[0])
+                                  const phoneKey = detectHeader(headers, PHONE_HINTS)
+                                  const nameKey = detectHeader(headers, NAME_HINTS)
+                                  const dateKey = detectHeader(headers, DATE_HINTS)
+                                  if (!phoneKey) {
+                                    parsedFiles.push({ fileName: f.name, label: baseLabel, rows: [], parseError: `전화번호 컬럼을 찾을 수 없습니다 (헤더: ${headers.join(', ')})` })
+                                    continue
+                                  }
+                                  parsed = rows
+                                    .map(row => ({
+                                      name: nameKey ? String(row[nameKey] || '').trim() : '',
+                                      phone: String(row[phoneKey] || '').trim(),
+                                      appliedAt: dateKey ? String(row[dateKey] || '').trim() : ''
+                                    }))
+                                    .filter(r => r.phone)
                                 }
-                                const sheet = wb.Sheets[wb.SheetNames[0]]
-                                if (!sheet) throw new Error('시트가 비어있습니다.')
-                                const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false })
-                                if (rows.length === 0) {
-                                  parsedFiles.push({ fileName: f.name, label: baseLabel, rows: [], parseError: '데이터 없음' })
+                                if (parsed.length === 0) {
+                                  parsedFiles.push({ fileName: f.name, label: baseLabel, rows: [], parseError: '파싱 후 유효한 행이 없습니다.' })
                                   continue
                                 }
-                                const headers = Object.keys(rows[0])
-                                const phoneKey = detectHeader(headers, PHONE_HINTS)
-                                const nameKey = detectHeader(headers, NAME_HINTS)
-                                const dateKey = detectHeader(headers, DATE_HINTS)
-                                if (!phoneKey) {
-                                  parsedFiles.push({ fileName: f.name, label: baseLabel, rows: [], parseError: `전화번호 컬럼을 찾을 수 없습니다 (헤더: ${headers.join(', ')})` })
-                                  continue
-                                }
-                                const parsed = rows
-                                  .map(row => ({
-                                    name: nameKey ? String(row[nameKey] || '').trim() : '',
-                                    phone: String(row[phoneKey] || '').trim(),
-                                    appliedAt: dateKey ? String(row[dateKey] || '').trim() : ''
-                                  }))
-                                  .filter(r => r.phone)
                                 parsedFiles.push({ fileName: f.name, label: baseLabel, rows: parsed })
                               } catch (err) {
                                 parsedFiles.push({ fileName: f.name, label: baseLabel, rows: [], parseError: err.message })
