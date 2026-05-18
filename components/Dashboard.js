@@ -70,6 +70,7 @@ const PLANNER_TASK_META = {
   ppt:               { label: '강의 PPT outline',   icon: '📋' },
   salesPage:         { label: '무료 상페 카피',       icon: '📄' },
   groupAnnouncement: { label: '단톡방 필독 공지',     icon: '📢' },
+  thumbnail:         { label: '썸네일 기획',           icon: '🖼️' },
 }
 
 // PPT plan → 마크다운 (노션/워드/메모장 호환).
@@ -9858,6 +9859,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               ppt:               { label: '강의 PPT outline',       icon: '📋', desc: '슬라이드별 outline + 발표 멘트 초안',             enabled: true },
               salesPage:         { label: '무료 상페 카피',          icon: '📄', desc: '무료강의 상세페이지 섹션별 카피',                  enabled: true },
               groupAnnouncement: { label: '단톡방 입장시 필독 공지',  icon: '📢', desc: '신규 입장자가 처음 보는 공지 (N잡 표준 양식)',     enabled: true },
+              thumbnail:         { label: '전자책/강의 썸네일 기획',  icon: '🖼️', desc: '4가지 디자인 타입별 합성용 명세 + HTML 미리보기',  enabled: true },
             }
 
             // 강사/기수는 전역 selectedInstructor + selectedSessionId 사용. 자료는 attachments 재사용.
@@ -10650,6 +10652,222 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                         {cta.scheduleReminder && (
                           <div style={{ fontSize: '15px', color: '#fbbf24', fontWeight: 700 }}>📅 {cta.scheduleReminder}</div>
                         )}
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+
+              if (taskKey === 'thumbnail') {
+                // 썸네일 기획안 — JSON 명세 + HTML 미리보기 (실제 PNG export는 Phase 2)
+                const dt = plan.designType || 'TEXT_HERO'
+                const palette = plan.colorPalette || {}
+                const bg = palette.background || '#0a0a0a'
+                const acc = palette.accent || '#facc15'
+                const txt = palette.text || '#ffffff'
+                const sub = palette.subtext || '#cbd5e1'
+                const headline = plan.headline || {}
+                const lines = Array.isArray(headline.lines) ? headline.lines : []
+                const accentText = headline.accent || ''
+                const badge = plan.instructorBadge || {}
+                const ts = plan.testimonial || null
+                const cta = plan.ctaBox || null
+                const creds = Array.isArray(plan.instructorCredentials) ? plan.instructorCredentials : []
+                const motifs = Array.isArray(plan.objectMotifs) ? plan.objectMotifs : []
+                const comp = plan.composition || {}
+
+                // 헤드라인에서 accent 부분을 색상 강조 ({pre}{accent}{post}로 분할)
+                const renderLine = (line) => {
+                  if (!accentText || !line.includes(accentText)) {
+                    return <span>{line}</span>
+                  }
+                  const idx = line.indexOf(accentText)
+                  return (
+                    <>
+                      <span>{line.slice(0, idx)}</span>
+                      <span style={{ color: acc }}>{accentText}</span>
+                      <span>{line.slice(idx + accentText.length)}</span>
+                    </>
+                  )
+                }
+
+                // 디자인 타입별 카드 분위기 (배경 그라데이션은 미리보기용 대략적 표현)
+                const designBgStyle = (() => {
+                  if (dt === 'BOOK_COVER') {
+                    return { background: '#efe7d7' }
+                  }
+                  if (dt === 'OBJECT_MOTIF') {
+                    return { background: `linear-gradient(135deg, ${bg}, ${acc}40)` }
+                  }
+                  if (dt === 'DARK_MONEY') {
+                    return { background: bg, backgroundImage: `radial-gradient(circle at 30% 70%, ${acc}22, transparent 60%)` }
+                  }
+                  // TEXT_HERO 기본
+                  return { background: bg }
+                })()
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {/* HTML 미리보기 (1080×1620 비율 = 9:13.5, 화면에선 축소) */}
+                    <div style={_box}>
+                      <div style={_accent}>🖼️ 썸네일 미리보기 ({dt})</div>
+                      <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>
+                        ※ 한글 텍스트 정확 렌더. 배경/강사 사진은 추후 합성 단계에서 Gemini + 누끼로 교체.
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0' }}>
+                        <div style={{
+                          width: '320px', aspectRatio: '1080/1620', position: 'relative',
+                          borderRadius: '12px', overflow: 'hidden',
+                          boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
+                          ...designBgStyle,
+                          padding: dt === 'BOOK_COVER' ? '28px 24px' : '24px 22px',
+                          display: 'flex', flexDirection: 'column',
+                          justifyContent: dt === 'BOOK_COVER' ? 'center' : 'flex-start',
+                          fontFamily: 'inherit'
+                        }}>
+                          {/* NLAB 로고 자리표시 */}
+                          {comp.logoPosition === 'TOP_RIGHT' && (
+                            <div style={{ position: 'absolute', top: '12px', right: '14px', fontSize: '10px', fontWeight: 800, color: txt, opacity: 0.85, letterSpacing: '0.05em' }}>NLAB</div>
+                          )}
+                          {plan.topTagline && (
+                            <div style={{ fontSize: '11px', color: sub, marginBottom: '10px', textAlign: dt === 'BOOK_COVER' ? 'left' : 'center', fontWeight: 500 }}>
+                              {plan.topTagline}
+                            </div>
+                          )}
+                          {/* 헤드라인 */}
+                          <div style={{
+                            fontSize: dt === 'BOOK_COVER' ? '22px' : '26px',
+                            fontWeight: 900,
+                            color: txt,
+                            lineHeight: 1.15,
+                            textAlign: dt === 'BOOK_COVER' ? 'left' : 'center',
+                            marginBottom: '10px',
+                            wordBreak: 'keep-all'
+                          }}>
+                            {lines.map((l, i) => (
+                              <div key={i} style={{ marginBottom: '2px' }}>{renderLine(l)}</div>
+                            ))}
+                          </div>
+                          {plan.subheadline && (
+                            <div style={{ fontSize: '12px', color: sub, marginBottom: '12px', textAlign: dt === 'BOOK_COVER' ? 'left' : 'center', lineHeight: 1.5 }}>
+                              {plan.subheadline}
+                            </div>
+                          )}
+                          {/* 강사 배지 */}
+                          {badge.name && (badge.style === 'OVAL' || badge.style === 'PILL') && (
+                            <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}>
+                              <span style={{
+                                padding: '5px 16px',
+                                border: `1.5px solid ${txt}`,
+                                borderRadius: badge.style === 'OVAL' ? '50%' : '999px',
+                                color: txt, fontSize: '12px', fontWeight: 700,
+                                background: 'transparent',
+                                minWidth: badge.style === 'OVAL' ? '80px' : 'auto',
+                                textAlign: 'center'
+                              }}>{badge.name}</span>
+                            </div>
+                          )}
+                          {/* 강사 사진 자리표시 */}
+                          {comp.instructorPhotoPosition && comp.instructorPhotoPosition !== 'NONE' && (
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '14px',
+                              left: comp.instructorPhotoPosition === 'BOTTOM_LEFT' ? '14px' : comp.instructorPhotoPosition === 'BOTTOM_CENTER' ? '50%' : 'auto',
+                              right: comp.instructorPhotoPosition === 'BOTTOM_RIGHT' ? '14px' : 'auto',
+                              transform: comp.instructorPhotoPosition === 'BOTTOM_CENTER' ? 'translateX(-50%)' : 'none',
+                              width: '70px', height: '90px',
+                              borderRadius: '8px',
+                              background: 'rgba(255,255,255,0.10)',
+                              border: `1px dashed ${sub}`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '10px', color: sub
+                            }}>👤 강사</div>
+                          )}
+                          {/* 인용 박스 */}
+                          {ts?.quote && (
+                            <div style={{ marginTop: 'auto', padding: '8px 10px', background: 'rgba(255,255,255,0.08)', borderRadius: '6px', borderLeft: `2px solid ${acc}` }}>
+                              <div style={{ fontSize: '10.5px', color: txt, fontStyle: 'italic', lineHeight: 1.4 }}>"{ts.quote}"</div>
+                              {ts.attribution && (
+                                <div style={{ fontSize: '9.5px', color: sub, marginTop: '3px' }}>— {ts.attribution}</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 디자인 명세 카드들 */}
+                    <div style={_box}>
+                      <div style={_accent}>디자인 명세</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 16px', fontSize: '12.5px', alignItems: 'center' }}>
+                        <span style={{ color: '#94a3b8' }}>타입</span>
+                        <span style={{ color: '#fff', fontWeight: 600 }}>{dt} <span style={{ color: '#94a3b8', fontWeight: 400, marginLeft: '6px' }}>· {plan.designRationale || '-'}</span></span>
+                        <span style={{ color: '#94a3b8' }}>팔레트</span>
+                        <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          {['background', 'accent', 'text', 'subtext'].map(k => (
+                            <span key={k} title={`${k}: ${palette[k]}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10.5px', color: '#cbd5e1' }}>
+                              <span style={{ width: '14px', height: '14px', borderRadius: '3px', background: palette[k] || '#444', border: '1px solid rgba(255,255,255,0.15)' }} />
+                              {palette[k]}
+                            </span>
+                          ))}
+                        </span>
+                        {motifs.length > 0 && (
+                          <>
+                            <span style={{ color: '#94a3b8' }}>오브제</span>
+                            <span style={{ color: '#cbd5e1' }}>{motifs.join(', ')}</span>
+                          </>
+                        )}
+                        <span style={{ color: '#94a3b8' }}>강사 사진</span>
+                        <span style={{ color: '#cbd5e1' }}>{comp.instructorPhotoPosition || 'NONE'}</span>
+                        <span style={{ color: '#94a3b8' }}>로고</span>
+                        <span style={{ color: '#cbd5e1' }}>{comp.logoPosition || '-'}</span>
+                      </div>
+                    </div>
+
+                    {/* 배경 프롬프트 — Phase 2에서 Gemini로 전달 */}
+                    {plan.backgroundPrompt && (
+                      <div style={_box}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <div style={_accent}>🎨 배경 생성 프롬프트 (Gemini용)</div>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard?.writeText(plan.backgroundPrompt).then(() => alert('복사 완료'))
+                            }}
+                            style={{ padding: '4px 10px', fontSize: '11px', background: 'rgba(99,102,241,0.20)', border: '1px solid rgba(99,102,241,0.40)', borderRadius: '6px', color: '#a5b4fc', cursor: 'pointer' }}
+                          >📋 복사</button>
+                        </div>
+                        <div style={{ padding: '10px 12px', background: 'rgba(0,0,0,0.30)', borderRadius: '6px', fontSize: '12.5px', color: '#cbd5e1', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                          {plan.backgroundPrompt}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 강사 약력 (DARK_MONEY 타입에 주로 사용) */}
+                    {creds.length > 0 && (
+                      <div style={_box}>
+                        <div style={_accent}>강사 약력 (하단 배치)</div>
+                        <ul style={{ margin: '4px 0 0 18px', padding: 0, fontSize: '12.5px', color: '#cbd5e1', lineHeight: 1.7 }}>
+                          {creds.map((c, i) => <li key={i}>{c}</li>)}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* CTA 박스 (인스타 캐러셀 스타일 등) */}
+                    {cta && Array.isArray(cta.lines) && cta.lines.length > 0 && (
+                      <div style={_box}>
+                        <div style={_accent}>CTA 박스</div>
+                        {cta.stars && <div style={{ fontSize: '13px', color: '#fbbf24', marginBottom: '4px' }}>{cta.stars}</div>}
+                        {cta.lines.map((l, i) => (
+                          <div key={i} style={{ fontSize: '13px', color: '#fff', lineHeight: 1.5 }}>{l}</div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 디자이너 메모 */}
+                    {plan.designerNotes && (
+                      <div style={{ padding: '10px 12px', background: 'rgba(168,85,247,0.10)', border: '1px solid rgba(168,85,247,0.25)', borderRadius: '8px' }}>
+                        <div style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: 600, marginBottom: '4px' }}>💡 디자이너 메모</div>
+                        <div style={{ fontSize: '12.5px', color: '#e2e8f0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{plan.designerNotes}</div>
                       </div>
                     )}
                   </div>
@@ -11662,6 +11880,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
                               viralQ:            '20~40초',
                               salesPage:         '1~2분',
                               groupAnnouncement: '20~40초',
+                              thumbnail:         '40~80초',
                               summarize:         '30~90초',
                             }
                             return (
@@ -13816,6 +14035,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
               ppt:               { label: '강의 PPT outline',       icon: '📋', enabled: true },
               salesPage:         { label: '무료 상페 카피',          icon: '📄', enabled: true },
               groupAnnouncement: { label: '단톡방 입장시 필독 공지',  icon: '📢', enabled: true },
+              thumbnail:         { label: '전자책/강의 썸네일 기획',  icon: '🖼️', enabled: true },
             }
 
             const pickFeature = (key) => {
