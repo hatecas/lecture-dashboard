@@ -1666,7 +1666,7 @@ export default function Dashboard({ onLogout, userName, loginId, permissions = {
   const [shoongUseBulkApi, setShoongUseBulkApi] = useState(true)
 
   // 슝 섹션 펼침 상태 (테스트/실전/수동 업로드)
-  const [shoongSectionOpen, setShoongSectionOpen] = useState({ test: true, bulk: false, manual: false })
+  const [shoongSectionOpen, setShoongSectionOpen] = useState({ test: false, bulk: false, manual: false })
 
   // 슝 수동 업로드(CSV) 상태
   const [shoongManualFileName, setShoongManualFileName] = useState('')
